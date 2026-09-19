@@ -53,10 +53,11 @@
   .agent .meta{font:10px/1.5 var(--mono);color:var(--overlay);margin-top:4px}
   main{padding:0;display:flex;flex-direction:column}
   #log{flex:1;overflow-y:auto;padding:10px 14px;font:12px/1.65 var(--mono)}
-  .zeile{display:grid;grid-template-columns:62px 92px 1fr;gap:10px;padding:2px 0;
+  .zeile{display:grid;grid-template-columns:62px 132px 1fr;gap:10px;padding:2px 0;
     border-bottom:1px solid color-mix(in srgb,var(--surface0) 45%,transparent)}
   .zeile .zeit{color:var(--overlay)}
   .zeile .wer{color:var(--subtext);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .zeile.protokoll .wer{color:var(--akzent)}
   .zeile .was{white-space:pre-wrap;word-break:break-word}
   .k-text .was{color:var(--text)}
   .k-thinking .was{color:var(--denkt)}
@@ -173,7 +174,9 @@ function verbinden() {
     else if (typ === 'freigabe') freigabeSetzen(daten)
     else if (typ === 'freigaben') daten.forEach((f) => freigabeSetzen(umbenennen(f)))
     else if (typ === 'limit') limitZeichnen(daten)
-    else if (typ === 'orchestrator') protokollAnhaengen(daten)
+    // 'orchestrator' wird bewusst ignoriert: dieselben Schritte kommen als
+    // persistiertes 'protocol'-Ereignis durch, und die ueberleben einen
+    // Neustart. Zwei Quellen fuer dieselbe Zeile hiesse sie doppelt zu zeigen.
     else if (typ === 'lauf_ende') endeAnhaengen(daten.ende)
   }
 }
@@ -195,10 +198,13 @@ function umbenennen(o) {
 
 function ereignisAnhaengen(e) {
   if (e.seq > letzteSeq) letzteSeq = e.seq
-  if (gewaehlterAgent && e.agentId !== gewaehlterAgent) return
+  // Protokollschritte gehoeren zum Lauf, nicht zu einem Agenten -- sie bleiben
+  // sichtbar, auch wenn nach einem einzelnen Agenten gefiltert wird.
+  if (gewaehlterAgent && e.agentId !== gewaehlterAgent && e.kind !== 'protocol') return
   const unten = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 60
   const div = document.createElement('div')
-  div.className = `zeile k-${e.kind} neu`
+  const fall = e.kind === 'protocol' ? fallKlasse(e.summary) : ''
+  div.className = `zeile k-${e.kind} neu` + (e.kind === 'protocol' ? ` protokoll ${fall}` : '')
   div.innerHTML =
     `<span class="zeit"></span><span class="wer"></span><span class="was"></span>`
   div.children[0].textContent = zeit(e.ts)
@@ -212,37 +218,12 @@ function ereignisAnhaengen(e) {
 // Ereignisse der Orchestrator-Engine -- keine Agentennachrichten, sondern
 // Schritte des Protokolls. Sie bekommen eine eigene, hervorgehobene Zeile,
 // weil sie den Lauf steuern.
-function protokollAnhaengen(e) {
-  const d = e.daten ?? {}
-  let text, klasse = 'protokoll'
-  if (e.art === 'runde_start') {
-    text = `── Runde ${d.runde}${d.auftraege > 1 ? ` · ${d.auftraege} Worker parallel` : ''} ──`
-  } else if (e.art === 'fall') {
-    const namen = { weiter: 'A weiter', entscheidung: 'B Entscheidung noetig',
-                    fertig: 'C fertig', lesen: 'D Leseanfrage' }
-    text = `Fall ${namen[d.fall] ?? d.fall}: ${d.statusKurz ?? ''}`
-    klasse += ` fall-${d.fall}`
-  } else if (e.art === 'leseanfrage') {
-    text = `Leseanfrage (kostet keine Runde): ${String(d.anfrage ?? '').replace(/\n/g, ' · ')}`
-    klasse += ' fall-lesen'
-  } else if (e.art === 'blocker') {
-    text = 'BLOCKER gemeldet: ' + (d ?? []).map((b) => `${b.agentId}: ${b.grund}`).join(' | ')
-    klasse += ' blocker'
-  } else if (e.art === 'report_ohne_typ') {
-    text = `${d.agentId}: Report ohne Report-Typ-Zeile`
-    klasse += ' blocker'
-  } else {
-    text = `${e.art}: ${JSON.stringify(d).slice(0, 120)}`
-  }
-  const div = document.createElement('div')
-  div.className = `zeile ${klasse} neu`
-  div.innerHTML = '<span class="zeit"></span><span class="wer"></span><span class="was"></span>'
-  div.children[0].textContent = zeit(e.ts)
-  div.children[1].textContent = 'protokoll'
-  div.children[2].textContent = text
-  const unten = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 60
-  logEl.appendChild(div)
-  if (unten) logEl.scrollTop = logEl.scrollHeight
+function fallKlasse(summary) {
+  if (/^Fall B/.test(summary)) return 'fall-entscheidung'
+  if (/^Fall C/.test(summary)) return 'fall-fertig'
+  if (/^Fall D/.test(summary) || /^Leseanfrage/.test(summary)) return 'fall-lesen'
+  if (/^BLOCKER|Report ohne/.test(summary)) return 'blocker'
+  return ''
 }
 
 function endeAnhaengen(ende) {

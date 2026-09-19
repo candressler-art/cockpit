@@ -117,6 +117,9 @@ export function einordnen(m: Record<string, unknown>): Zuordnung | null {
     }
 
     case 'system': {
+      // Reine Zaehlerereignisse. Sie kommen im Sekundentakt und sagen nichts,
+      // was man im Log sehen will -- der Verbrauch steht ohnehin am Agenten.
+      if (subtyp === 'thinking_tokens' || subtyp === 'commands_changed') return null
       switch (subtyp) {
         case 'init':
           return { ...basis, kind: 'agent_start', summary: `Session bereit (${m.model ?? '?'})` }

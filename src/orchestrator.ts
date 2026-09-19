@@ -132,6 +132,31 @@ von der CLI in einem zweiten Zug fortgesetzt; dann fehlt dem Leser der Kopf
 deiner Antwort und der Lauf stirbt an einem vermeintlichen Formatfehler.
 `
 
+/** Kurztext eines Protokollschritts fuer Listenansichten und Logzeilen. */
+function beschriften(art: string, d: unknown): string {
+  const o = (d ?? {}) as Record<string, unknown>
+  switch (art) {
+    case 'runde_start':
+      return `Runde ${o.runde}${Number(o.auftraege) > 1 ? ` · ${o.auftraege} Worker parallel` : ''}`
+    case 'fall': {
+      const namen: Record<string, string> = {
+        weiter: 'A weiter', entscheidung: 'B Entscheidung noetig',
+        fertig: 'C fertig', lesen: 'D Leseanfrage',
+      }
+      return `Fall ${namen[String(o.fall)] ?? o.fall}: ${o.statusKurz ?? ''}`
+    }
+    case 'leseanfrage':
+      return `Leseanfrage: ${String(o.anfrage ?? '').replace(/\n/g, ' · ')}`
+    case 'blocker':
+      return 'BLOCKER gemeldet: ' +
+        (Array.isArray(d) ? d.map((b) => `${b.agentId}: ${b.grund}`).join(' | ') : '')
+    case 'report_ohne_typ':
+      return `${o.agentId}: Report ohne Report-Typ-Zeile`
+    default:
+      return art
+  }
+}
+
 export class Orchestrator extends EventEmitter {
   private supervisor: Supervisor
   private db: CockpitDb
@@ -178,6 +203,9 @@ export class Orchestrator extends EventEmitter {
 
   private melden(runId: string, art: string, daten: unknown): void {
     this.emit('orchestrator', { runId, art, daten, ts: Date.now() })
+    // Zusaetzlich persistieren -- der WebSocket erreicht nur, wer gerade
+    // zusieht; die Datenbank erreicht auch den, der morgen nachliest.
+    this.supervisor.protokollSchritt(runId, 'protokoll', beschriften(art, daten), { art, daten })
   }
 
   /**

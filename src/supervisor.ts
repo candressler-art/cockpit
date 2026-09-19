@@ -75,6 +75,16 @@ export class Supervisor extends EventEmitter {
     return `${runId}::${agentId}`
   }
 
+  /**
+   * Schreibt ein Ereignis der Orchestrator-Engine. Oeffentlich, damit die
+   * Engine ihre Protokollschritte durch denselben Kanal schickt wie alles
+   * andere -- sonst stehen Runde, Fall und Blocker nur im WebSocket und fehlen
+   * nach einem Neustart genau dort, wo man den Lauf erklaeren will.
+   */
+  protokollSchritt(runId: string, agentId: string, summary: string, payload: unknown): void {
+    this.melden(runId, agentId, 'protocol', summary, payload)
+  }
+
   /** Schreibt ein Ereignis, persistiert es und gibt es an die Kanaele weiter. */
   private melden(
     runId: string,
