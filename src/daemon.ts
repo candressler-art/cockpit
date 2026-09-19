@@ -168,6 +168,12 @@ const server = createServer(async (req, res) => {
 
 const wss = new WebSocketServer({ server, path: '/ws' })
 
+// ws reicht Fehler des HTTP-Servers an sich selbst weiter. Ohne Listener hier
+// wirft Node ein unbehandeltes 'error'-Ereignis, bevor der Handler am
+// HTTP-Server ueberhaupt zum Zug kommt -- deshalb beide, und die eigentliche
+// Meldung steht in startFehlerMelden().
+wss.on('error', (e: NodeJS.ErrnoException) => startFehlerMelden(e))
+
 wss.on('connection', (sock) => {
   const klient: Klient = { sock, runId: null }
   klienten.add(klient)
@@ -201,6 +207,34 @@ wss.on('connection', (sock) => {
 })
 
 // --- Start / Ende ------------------------------------------------------------
+
+// Ein belegter Port ist der haeufigste Startfehler und fast immer ein zweiter,
+// vergessener Daemon -- das gehoert als Satz gesagt, nicht als Stacktrace.
+let fehlerGemeldet = false
+function startFehlerMelden(e: NodeJS.ErrnoException): void {
+  if (fehlerGemeldet) return
+  fehlerGemeldet = true
+  if (e.code === 'EADDRINUSE') {
+    console.error(
+      `[cockpit] Port ${PORT} ist belegt -- vermutlich laeuft schon ein Cockpit-Daemon.\n` +
+        `          Wer es ist:   ss -tlnp | grep ${PORT}\n` +
+        `          Beenden:      pkill -f 'dist/daemon\\.js'\n` +
+        `          Anderer Port: COCKPIT_PORT=8766 node dist/daemon.js`,
+    )
+  } else if (e.code === 'EACCES') {
+    console.error(`[cockpit] Port ${PORT} ist nicht erlaubt (Rechte). Nimm einen Port ueber 1024.`)
+  } else {
+    console.error(`[cockpit] Server konnte nicht starten: ${e.message}`)
+  }
+  try {
+    db.close()
+  } catch {
+    // DB war vielleicht nie offen -- der Startfehler ist die Nachricht, nicht das hier.
+  }
+  process.exit(1)
+}
+
+server.on('error', startFehlerMelden)
 
 server.listen(PORT, HOST, () => {
   console.log(`[cockpit] laeuft auf http://${HOST}:${PORT}  (DB: ${DB_PFAD})`)
