@@ -18,11 +18,14 @@
   *{box-sizing:border-box}
   body{margin:0;background:var(--base);color:var(--text);font:14px/1.5 var(--sans);height:100vh;overflow:hidden}
   #app{display:grid;grid-template-columns:260px 1fr 300px;grid-template-rows:44px 1fr;height:100vh}
-  header{grid-column:1/-1;display:flex;align-items:center;gap:12px;padding:0 14px;
+  header{grid-column:1/-1;display:flex;align-items:center;gap:10px;padding:0 14px;overflow:hidden;
     background:var(--mantle);border-bottom:1px solid var(--surface0)}
   header h1{font-size:13px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;
-    color:var(--subtext);margin:0}
-  .pill{font:11px/1 var(--mono);padding:4px 8px;border-radius:999px;background:var(--surface0);color:var(--subtext)}
+    color:var(--subtext);margin:0;flex:0 0 auto}
+  header select{max-width:230px;flex:0 1 auto}
+  header button{flex:0 0 auto;white-space:nowrap}
+  .pill{font:11px/1 var(--mono);padding:5px 9px;border-radius:999px;background:var(--surface0);
+    color:var(--subtext);white-space:nowrap;flex:0 0 auto}
   .pill.an{background:color-mix(in srgb,var(--lauf) 22%,transparent);color:var(--lauf)}
   .pill.ab{background:color-mix(in srgb,var(--fehler) 22%,transparent);color:var(--fehler)}
   .spacer{flex:1}
