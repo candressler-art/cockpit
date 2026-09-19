@@ -51,6 +51,42 @@ supervisor.on('limit', (l: unknown) => verteilen('limit', l, null))
 
 // --- HTTP --------------------------------------------------------------------
 
+/**
+ * Welche Herkunft auf die API zugreifen darf.
+ *
+ * Zwei Dinge auf einmal: die Tauri-App braucht CORS-Freigabe, weil ihr
+ * Ursprung nicht der Daemon ist. Und ohne Pruefung koennte JEDE Webseite, die
+ * im Browser offensteht, `fetch('http://127.0.0.1:8765/api/lauf', …)` rufen
+ * und einen Agenten starten -- der Browser wuerde nur die Antwort verbergen,
+ * die Anfrage liefe trotzdem. Deshalb hier eine Liste statt eines Sterns.
+ *
+ * Anfragen ohne Origin-Kopf (curl, Tauris eigene Anfragen in manchen
+ * Konstellationen, gleiche Herkunft) gelten als erlaubt: ein fremdes Dokument
+ * im Browser kann den Kopf nicht weglassen.
+ */
+const ERLAUBTE_HERKUNFT = new Set([
+  'tauri://localhost',
+  'http://tauri.localhost',
+  'https://tauri.localhost',
+])
+
+function herkunftErlaubt(origin: string | undefined, host: string | undefined): boolean {
+  if (!origin) return true
+  if (ERLAUBTE_HERKUNFT.has(origin)) return true
+  // Gleiche Herkunft wie der Daemon selbst (Browser auf localhost, oder hinter
+  // `tailscale serve` der Tailnet-Name).
+  try {
+    const u = new URL(origin)
+    if (host && u.host === host) return true
+    // Zusaetzlich freigegebene Herkunft, z.B. der Tailnet-Name.
+    const extra = process.env.COCKPIT_ORIGIN
+    if (extra && extra.split(',').some((e) => e.trim() === origin)) return true
+  } catch {
+    return false
+  }
+  return false
+}
+
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -72,10 +108,36 @@ async function koerperLesen(req: import('node:http').IncomingMessage): Promise<u
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`)
   const pfad = url.pathname
+  const origin = req.headers.origin
+  const erlaubt = herkunftErlaubt(origin, req.headers.host)
+
+  const corsKopf: Record<string, string> = erlaubt && origin
+    ? {
+        'access-control-allow-origin': origin,
+        'access-control-allow-methods': 'GET, POST, OPTIONS',
+        'access-control-allow-headers': 'content-type',
+        'access-control-max-age': '600',
+        vary: 'Origin',
+      }
+    : {}
 
   const json = (code: number, daten: unknown): void => {
-    res.writeHead(code, { 'content-type': 'application/json; charset=utf-8' })
+    res.writeHead(code, { 'content-type': 'application/json; charset=utf-8', ...corsKopf })
     res.end(JSON.stringify(daten))
+  }
+
+  // Vorabanfrage des Browsers.
+  if (req.method === 'OPTIONS') {
+    res.writeHead(erlaubt ? 204 : 403, corsKopf)
+    return res.end()
+  }
+
+  if (!erlaubt && pfad.startsWith('/api/')) {
+    console.warn(`[cockpit] API-Zugriff von fremder Herkunft abgewiesen: ${origin}`)
+    return json(403, {
+      fehler: 'Herkunft nicht erlaubt',
+      hinweis: 'Eigene Herkunft freigeben mit COCKPIT_ORIGIN=https://…',
+    })
   }
 
   try {
@@ -221,7 +283,19 @@ const server = createServer(async (req, res) => {
 
 // --- WebSocket ---------------------------------------------------------------
 
-const wss = new WebSocketServer({ server, path: '/ws' })
+const wss = new WebSocketServer({
+  server,
+  path: '/ws',
+  // WebSockets unterliegen nicht der Same-Origin-Policy: ohne diese Pruefung
+  // koennte eine beliebige offene Webseite eine Verbindung aufbauen und alles
+  // mitlesen, was die Agenten ausgeben -- Dateiinhalte eingeschlossen. Das ist
+  // Cross-Site WebSocket Hijacking, und der Browser verhindert es nicht.
+  verifyClient: ({ origin, req }, erlauben) => {
+    if (herkunftErlaubt(origin, req.headers.host)) return erlauben(true)
+    console.warn(`[cockpit] WebSocket von fremder Herkunft abgewiesen: ${origin}`)
+    erlauben(false, 403, 'Herkunft nicht erlaubt')
+  },
+})
 
 // ws reicht Fehler des HTTP-Servers an sich selbst weiter. Ohne Listener hier
 // wirft Node ein unbehandeltes 'error'-Ereignis, bevor der Handler am

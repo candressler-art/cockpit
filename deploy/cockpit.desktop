@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Cockpit
+GenericName=Agenten-Zentrale
+Comment=Orchestrator und Worker fuer Claude Code
+Exec=cockpit
+Icon=cockpit
+Terminal=false
+Categories=Development;
+StartupWMClass=cockpit
