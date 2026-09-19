@@ -270,11 +270,14 @@ function startFehlerMelden(e: NodeJS.ErrnoException): void {
   if (fehlerGemeldet) return
   fehlerGemeldet = true
   if (e.code === 'EADDRINUSE') {
+    // Bewusst kein `pkill -f dist/daemon.js` als Rat: das Muster steht dann
+    // auch in der Kommandozeile der aufrufenden Shell und kann sie mittreffen.
+    // Der Weg ueber den Port trifft genau den Prozess, der im Weg steht.
     console.error(
       `[cockpit] Port ${PORT} ist belegt -- vermutlich laeuft schon ein Cockpit-Daemon.\n` +
         `          Wer es ist:   ss -tlnp | grep ${PORT}\n` +
-        `          Beenden:      pkill -f 'dist/daemon\\.js'\n` +
-        `          Anderer Port: COCKPIT_PORT=8766 node dist/daemon.js`,
+        `          Beenden:      kill $(ss -tlnpH 'sport = :${PORT}' | grep -oE 'pid=[0-9]+' | cut -d= -f2 | head -1)\n` +
+        `          Anderer Port: COCKPIT_PORT=${PORT + 1} node dist/daemon.js`,
     )
   } else if (e.code === 'EACCES') {
     console.error(`[cockpit] Port ${PORT} ist nicht erlaubt (Rechte). Nimm einen Port ueber 1024.`)
