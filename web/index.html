@@ -138,6 +138,36 @@
 
 <script type="module">
 const $ = (s) => document.querySelector(s)
+
+// Wohin der Client spricht.
+//
+// Im Browser ist das der Host, von dem die Seite kam. Im Tauri-Fenster nicht:
+// dort ist location.host die App selbst. Die Huelle reicht die Adresse des
+// Daemons durch, damit dieselbe Oberflaeche lokal, im Tailnet und in der App
+// funktioniert, ohne neu gebaut zu werden.
+let BASIS = location.host
+let IN_TAURI = false
+
+async function basisErmitteln() {
+  const tauri = window.__TAURI__
+  if (!tauri?.core?.invoke) return
+  IN_TAURI = true
+  try {
+    const adresse = await tauri.core.invoke('daemon_basis')
+    if (adresse) BASIS = adresse
+  } catch (e) {
+    console.warn('Daemon-Adresse nicht ermittelbar, bleibe bei', BASIS, e)
+  }
+}
+
+const api = (pfad) => `http://${BASIS}${pfad}`
+const wsUrl = () => {
+  // Im Browser das Schema der Seite uebernehmen (hinter tailscale serve ist
+  // das https und damit wss); in der App immer ws, weil dort kein TLS-Kontext
+  // von der Seite kommt -- ausser die Adresse nennt ausdruecklich einen.
+  const sicher = !IN_TAURI && location.protocol === 'https:'
+  return `${sicher ? 'wss' : 'ws'}://${BASIS}/ws`
+}
 const logEl = $('#log'), agentenEl = $('#agenten'), freigabenEl = $('#freigaben')
 const verbindungEl = $('#verbindung'), budgetEl = $('#budget'), laufwahlEl = $('#laufwahl')
 const limitEl = $('#limit')
@@ -153,8 +183,7 @@ const zeit = (ts) => new Date(ts).toLocaleTimeString('de-DE', { hour12: false })
 const zahl = (n) => new Intl.NumberFormat('de-DE').format(Math.round(n))
 
 function verbinden() {
-  const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-  sock = new WebSocket(`${proto}://${location.host}/ws`)
+  sock = new WebSocket(wsUrl())
   sock.onopen = () => {
     verbindungEl.textContent = 'verbunden'
     verbindungEl.className = 'pill an'
@@ -324,7 +353,7 @@ function freigabenZeichnen() {
 }
 
 async function entscheiden(id, erlaubt) {
-  await fetch('/api/freigabe', {
+  await fetch(api('/api/freigabe'), {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ id, erlaubt, durch: 'ui' }),
   })
@@ -335,7 +364,7 @@ async function entscheiden(id, erlaubt) {
 async function logNeuLaden() {
   if (!runId) return
   logEl.innerHTML = ''
-  const r = await fetch(`/api/lauf/${runId}?seit=0`).then((x) => x.json())
+  const r = await fetch(api(`/api/lauf/${runId}?seit=0`)).then((x) => x.json())
   agenten = new Map(r.agenten.map((a) => { const b = umbenennen(a); return [b.agentId, b] }))
   freigaben = new Map(r.freigaben.map((f) => { const b = umbenennen(f); return [b.id, b] }))
   letzteSeq = 0
@@ -344,7 +373,21 @@ async function logNeuLaden() {
 }
 
 async function laeufeLaden() {
-  const r = await fetch('/api/laeufe').then((x) => x.json())
+  let r
+  try {
+    r = await fetch(api('/api/laeufe')).then((x) => x.json())
+  } catch (e) {
+    // Haeufigster Fall in der App: der Daemon laeuft nicht. Das gehoert
+    // gesagt, nicht als leeres Fenster praesentiert.
+    verbindungEl.textContent = `kein Daemon auf ${BASIS}`
+    verbindungEl.className = 'pill ab'
+    logEl.innerHTML =
+      `<div class="ende schlecht">Kein Daemon erreichbar auf ${BASIS}.\n\n` +
+      `Starten:  cd ~/projekte/cockpit && node dist/daemon.js\n` +
+      `Andere Adresse:  COCKPIT_DAEMON=100.126.179.60:8765 cockpit</div>`
+    logEl.firstChild.style.whiteSpace = 'pre-wrap'
+    return
+  }
   laufwahlEl.innerHTML = ''
   for (const l of r.laeufe) {
     const o = document.createElement('option')
@@ -371,7 +414,7 @@ async function starten() {
   if (!prompt) return
   $('#senden').disabled = true
   try {
-    const r = await fetch('/api/lauf', {
+    const r = await fetch(api('/api/lauf'), {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ prompt, label: prompt.slice(0, 40), cwd: null }),
     }).then((x) => x.json())
@@ -400,9 +443,10 @@ $('#prompt').addEventListener('keydown', (e) => {
 // Dauer-Anzeige der laufenden Agenten mitlaufen lassen.
 setInterval(() => { if ([...agenten.values()].some((a) => !a.endedAt)) agentenZeichnen() }, 1000)
 
+await basisErmitteln()
 await laeufeLaden()
 if (runId) await logNeuLaden()
-try { limitZeichnen((await fetch('/api/gesundheit').then((r) => r.json())).limit) } catch {}
+try { limitZeichnen((await fetch(api('/api/gesundheit')).then((r) => r.json())).limit) } catch {}
 verbinden()
 </script>
 </body>

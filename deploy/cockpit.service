@@ -1,0 +1,58 @@
+# systemd-Unit fuer den Cockpit-Daemon auf serverone.
+#
+# System-Unit mit User=claude, nicht User-Unit: fuer den Agent-Benutzer ist
+# Linger nicht gesetzt, eine --user-Unit ueberlebt das Abmelden also nicht
+# zuverlaessig.
+#
+# Installation:
+#   sudo cp deploy/cockpit.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now cockpit
+#
+# Das Abo-Token gehoert NICHT in diese Datei. Es steht in
+# /etc/cockpit/umgebung mit Rechten 600 claude:claude:
+#   CLAUDE_CODE_OAUTH_TOKEN=...
+
+[Unit]
+Description=Cockpit -- Zentrale fuer Claude-Code-Agenten
+Documentation=https://github.com/buergermiteis/cockpit
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=claude
+Group=claude
+WorkingDirectory=/opt/cockpit
+ExecStart=/usr/bin/node /opt/cockpit/dist/daemon.js
+EnvironmentFile=/etc/cockpit/umgebung
+Environment=NODE_ENV=production
+Environment=COCKPIT_HOST=127.0.0.1
+Environment=COCKPIT_PORT=8765
+Environment=COCKPIT_DB=/var/lib/cockpit/cockpit.db
+
+# Neustart, aber nicht endlos im Kreis: schlaegt der Start fuenfmal in zwei
+# Minuten fehl, liegt ein echter Fehler vor, den ein weiterer Versuch nicht
+# behebt -- dann soll die Unit stehenbleiben und sichtbar sein.
+Restart=on-failure
+RestartSec=5
+StartLimitBurst=5
+StartLimitIntervalSec=120
+
+# Der Daemon startet Claude-Code-Prozesse, die Dateien schreiben duerfen
+# muessen. Deshalb kein ProtectSystem=strict; die Einschraenkungen hier sind
+# die, die damit vertraeglich sind.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+StateDirectory=cockpit
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cockpit
+
+[Install]
+WantedBy=multi-user.target
