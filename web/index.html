@@ -69,6 +69,20 @@
   .k-agent_start .was{color:var(--lauf)}
   .k-hook .was{color:var(--overlay)}
   .k-usage .was{color:var(--akzent);opacity:.75}
+  .zeile.protokoll{background:color-mix(in srgb,var(--akzent) 7%,transparent);
+    border-bottom-color:color-mix(in srgb,var(--akzent) 25%,transparent)}
+  .zeile.protokoll .was{color:var(--akzent);font-weight:600}
+  .zeile.fall-entscheidung .was{color:var(--wartet)}
+  .zeile.fall-fertig .was{color:var(--fertig)}
+  .zeile.fall-lesen .was{color:var(--denkt)}
+  .zeile.blocker .was{color:var(--fehler);font-weight:600}
+  .agent.rolle-orchestrator{border-left:3px solid var(--akzent)}
+  .agent.rolle-worker{border-left:3px solid var(--lauf);margin-left:10px}
+  .ende{margin:10px 0;padding:10px 12px;border-radius:8px;font:12px/1.5 var(--mono);
+    border:1px solid var(--surface1);background:var(--mantle)}
+  .ende.gut{border-color:var(--fertig);color:var(--fertig)}
+  .ende.frage{border-color:var(--wartet);color:var(--wartet)}
+  .ende.schlecht{border-color:var(--fehler);color:var(--fehler)}
   #eingabe{border-top:1px solid var(--surface0);background:var(--mantle);padding:10px 14px;display:flex;gap:8px}
   textarea,input,select{background:var(--crust);color:var(--text);border:1px solid var(--surface0);
     border-radius:6px;padding:8px 10px;font:12px/1.5 var(--mono);resize:none}
@@ -159,6 +173,8 @@ function verbinden() {
     else if (typ === 'freigabe') freigabeSetzen(daten)
     else if (typ === 'freigaben') daten.forEach((f) => freigabeSetzen(umbenennen(f)))
     else if (typ === 'limit') limitZeichnen(daten)
+    else if (typ === 'orchestrator') protokollAnhaengen(daten)
+    else if (typ === 'lauf_ende') endeAnhaengen(daten.ende)
   }
 }
 
@@ -193,6 +209,61 @@ function ereignisAnhaengen(e) {
   if (unten) logEl.scrollTop = logEl.scrollHeight
 }
 
+// Ereignisse der Orchestrator-Engine -- keine Agentennachrichten, sondern
+// Schritte des Protokolls. Sie bekommen eine eigene, hervorgehobene Zeile,
+// weil sie den Lauf steuern.
+function protokollAnhaengen(e) {
+  const d = e.daten ?? {}
+  let text, klasse = 'protokoll'
+  if (e.art === 'runde_start') {
+    text = `── Runde ${d.runde}${d.auftraege > 1 ? ` · ${d.auftraege} Worker parallel` : ''} ──`
+  } else if (e.art === 'fall') {
+    const namen = { weiter: 'A weiter', entscheidung: 'B Entscheidung noetig',
+                    fertig: 'C fertig', lesen: 'D Leseanfrage' }
+    text = `Fall ${namen[d.fall] ?? d.fall}: ${d.statusKurz ?? ''}`
+    klasse += ` fall-${d.fall}`
+  } else if (e.art === 'leseanfrage') {
+    text = `Leseanfrage (kostet keine Runde): ${String(d.anfrage ?? '').replace(/\n/g, ' · ')}`
+    klasse += ' fall-lesen'
+  } else if (e.art === 'blocker') {
+    text = 'BLOCKER gemeldet: ' + (d ?? []).map((b) => `${b.agentId}: ${b.grund}`).join(' | ')
+    klasse += ' blocker'
+  } else if (e.art === 'report_ohne_typ') {
+    text = `${d.agentId}: Report ohne Report-Typ-Zeile`
+    klasse += ' blocker'
+  } else {
+    text = `${e.art}: ${JSON.stringify(d).slice(0, 120)}`
+  }
+  const div = document.createElement('div')
+  div.className = `zeile ${klasse} neu`
+  div.innerHTML = '<span class="zeit"></span><span class="wer"></span><span class="was"></span>'
+  div.children[0].textContent = zeit(e.ts)
+  div.children[1].textContent = 'protokoll'
+  div.children[2].textContent = text
+  const unten = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 60
+  logEl.appendChild(div)
+  if (unten) logEl.scrollTop = logEl.scrollHeight
+}
+
+function endeAnhaengen(ende) {
+  const gut = ende.grund === 'fertig'
+  const frage = ende.grund === 'entscheidung'
+  const texte = {
+    fertig: 'Lauf fertig', entscheidung: 'Entscheidung noetig', rundenlimit: 'Rundenlimit erreicht',
+    wiederholung: 'Gestoppt: der Lauf drehte sich im Kreis', budget: 'Gestoppt: Tokenbudget erschoepft',
+    formatfehler: 'Gestoppt: Formatfehler des Orchestrators', blocker: 'Gestoppt: Blocker nicht behandelt',
+    abgebrochen: 'Abgebrochen', fehler: 'Fehler',
+  }
+  const div = document.createElement('div')
+  div.className = 'ende ' + (gut ? 'gut' : frage ? 'frage' : 'schlecht')
+  div.textContent = (texte[ende.grund] ?? ende.grund) +
+    (ende.text ? `\n\n${ende.text}` : '') + (ende.frage ? `\n\n${ende.frage}` : '') +
+    (ende.verbraucht ? `\n\n${zahl(ende.verbraucht)} gewichtete Tokens verbraucht` : '')
+  div.style.whiteSpace = 'pre-wrap'
+  logEl.appendChild(div)
+  logEl.scrollTop = logEl.scrollHeight
+}
+
 function agentSetzen(a) {
   agenten.set(a.agentId, { ...(agenten.get(a.agentId) ?? {}), ...a })
   agentenZeichnen()
@@ -204,7 +275,8 @@ function agentenZeichnen() {
   agentenEl.innerHTML = ''
   for (const a of agenten.values()) {
     const d = document.createElement('div')
-    d.className = 'agent' + (gewaehlterAgent === a.agentId ? ' aktiv' : '')
+    d.className = 'agent rolle-' + (a.role ?? 'chat') +
+      (gewaehlterAgent === a.agentId ? ' aktiv' : '')
     const dauer = ((a.endedAt ?? Date.now()) - a.startedAt) / 1000
     d.innerHTML = `<div class="kopf">
         <span class="name"></span><span class="punkt ${a.status}"></span>

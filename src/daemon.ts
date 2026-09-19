@@ -9,6 +9,7 @@ import { join, extname, resolve as pfadAuflösen } from 'node:path'
 import { WebSocketServer, type WebSocket } from 'ws'
 import { CockpitDb } from './db.js'
 import { Supervisor } from './supervisor.js'
+import { Orchestrator, type OrchestratorKonfig } from './orchestrator.js'
 import type { CockpitEvent } from './typen.js'
 
 const PORT = Number(process.env.COCKPIT_PORT ?? 8765)
@@ -21,6 +22,7 @@ const verwaist = db.verwaisteLaeufeAufraeumen()
 if (verwaist > 0) console.log(`[cockpit] ${verwaist} verwaiste Lauf/Laeufe als abgebrochen markiert`)
 
 const supervisor = new Supervisor(db)
+const orchestratoren = new Map<string, Orchestrator>()
 
 // --- WebSocket-Verteilung ----------------------------------------------------
 
@@ -122,6 +124,48 @@ const server = createServer(async (req, res) => {
       })
     }
 
+    if (pfad === '/api/orchestrator' && req.method === 'POST') {
+      const k = (await koerperLesen(req)) as Record<string, unknown> | null
+      const anfangsPrompt = String(k?.anfangsPrompt ?? '').trim()
+      const cwd = String(k?.cwd ?? '')
+      if (!anfangsPrompt) return json(400, { fehler: 'anfangsPrompt fehlt' })
+      if (!cwd) return json(400, { fehler: 'cwd fehlt' })
+
+      const runId = randomUUID()
+      const label = String(k?.label ?? 'Orchestrator-Lauf')
+      db.runAnlegen(runId, label, cwd)
+
+      const konfig: OrchestratorKonfig = {
+        runId,
+        cwd,
+        projektBlock: String(k?.projektBlock ?? '(kein Projektblock angegeben)'),
+        anfangsPrompt,
+        maxRunden: Number(k?.maxRunden ?? 10),
+        parallelitaet: Number(k?.parallelitaet ?? 1),
+        orchestratorModell: k?.orchestratorModell ? String(k.orchestratorModell) : undefined,
+        workerModell: k?.workerModell ? String(k.workerModell) : undefined,
+        maxBudgetUsd: k?.maxBudgetUsd ? Number(k.maxBudgetUsd) : undefined,
+        tokenBudget: Number(k?.tokenBudget ?? 600000),
+      }
+
+      const orch = new Orchestrator(supervisor, db)
+      orchestratoren.set(runId, orch)
+      orch.on('orchestrator', (e: { runId: string }) => verteilen('orchestrator', e, e.runId))
+
+      json(202, { runId })
+
+      void orch
+        .fahren(konfig)
+        .then((ende) => {
+          const status = ende.grund === 'fertig' ? 'done' : ende.grund === 'abgebrochen' ? 'stopped' : 'failed'
+          db.runBeenden(runId, status, JSON.stringify(ende))
+          verteilen('lauf_ende', { runId, ende }, runId)
+        })
+        .catch((e) => db.runBeenden(runId, 'failed', String(e)))
+        .finally(() => orchestratoren.delete(runId))
+      return
+    }
+
     if (pfad === '/api/freigabe' && req.method === 'POST') {
       const k = (await koerperLesen(req)) as Record<string, unknown> | null
       const id = String(k?.id ?? '')
@@ -133,7 +177,18 @@ const server = createServer(async (req, res) => {
 
     if (pfad === '/api/abbrechen' && req.method === 'POST') {
       const k = (await koerperLesen(req)) as Record<string, unknown> | null
-      const ok = supervisor.agentAbbrechen(String(k?.runId ?? ''), String(k?.agentId ?? ''))
+      const runId = String(k?.runId ?? '')
+      const agentId = k?.agentId ? String(k.agentId) : null
+      if (!agentId) {
+        // Ganzen Lauf stoppen: der Orchestrator beendet nach der laufenden Runde.
+        const orch = orchestratoren.get(runId)
+        if (orch) orch.abbrechen()
+        for (const a of supervisor.agentenListe(runId)) {
+          supervisor.agentAbbrechen(runId, a.agentId)
+        }
+        return json(orch ? 200 : 404, { ok: Boolean(orch) })
+      }
+      const ok = supervisor.agentAbbrechen(runId, agentId)
       return json(ok ? 200 : 404, { ok })
     }
 

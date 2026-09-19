@@ -120,7 +120,9 @@ export class Supervisor extends EventEmitter {
    * wenn der Agent fertig ist; wirft nicht, sondern vermerkt Fehler am
    * Agentenzustand -- ein gestorbener Worker darf den Lauf nicht mitnehmen.
    */
-  async agentStarten(o: AgentStartOptionen): Promise<{ ergebnis: string | null; fehler: string | null }> {
+  async agentStarten(
+    o: AgentStartOptionen,
+  ): Promise<{ ergebnis: string | null; volltext: string; fehler: string | null }> {
     const k = this.schluessel(o.runId, o.agentId)
     const zustand: AgentState = {
       agentId: o.agentId,
@@ -149,6 +151,17 @@ export class Supervisor extends EventEmitter {
 
     let ergebnis: string | null = null
     let fehler: string | null = null
+    // Alle Assistant-Textbloecke des Laufs, in Reihenfolge.
+    //
+    // Warum nicht einfach `result`: ueberschreitet eine Antwort die
+    // Ausgabegrenze, setzt die CLI sie in einem weiteren Turn fort, und
+    // `result` traegt dann nur noch den LETZTEN Block. In Cans loop_log sind
+    // genau so zwei Orchestrator-Antworten verlorengegangen -- 32.510
+    // Ausgabe-Tokens, aber im `result` standen nur die letzten 1.041 Zeichen,
+    // beginnend mit "Fortsetzung des NAECHSTER-PROMPT:". Der Kopf mit
+    // STATUS-KURZ war weg, und der Lauf starb an einem vermeintlichen
+    // Formatfehler. Wer den Strom liest, hat das Problem nicht.
+    const textBloecke: string[] = []
 
     try {
       const lauf = query({
@@ -176,6 +189,17 @@ export class Supervisor extends EventEmitter {
       for await (const nachricht of lauf) {
         this.nachrichtVerarbeiten(o.runId, o.agentId, nachricht as Record<string, unknown>)
         const m = nachricht as Record<string, unknown>
+        if (m.type === 'assistant') {
+          const inhalt = ((m.message as Record<string, unknown>)?.content ?? []) as Record<
+            string,
+            unknown
+          >[]
+          for (const block of Array.isArray(inhalt) ? inhalt : []) {
+            if (block?.type === 'text' && typeof block.text === 'string') {
+              textBloecke.push(block.text)
+            }
+          }
+        }
         if (m.type === 'result') {
           ergebnis = typeof m.result === 'string' ? m.result : null
           if (m.is_error === true) fehler = `Lauf endete mit is_error (subtype=${String(m.subtype)})`
@@ -207,7 +231,7 @@ export class Supervisor extends EventEmitter {
       this.laufende.delete(k)
     }
 
-    return { ergebnis, fehler }
+    return { ergebnis, volltext: textBloecke.join('\n'), fehler }
   }
 
   private nachrichtVerarbeiten(runId: string, agentId: string, m: Record<string, unknown>): void {
