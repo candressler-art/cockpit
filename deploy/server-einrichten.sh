@@ -46,8 +46,11 @@ schritt "3/7  Abo-Token fuer den Server"
 # Nicht `claude auth status` auf dem Server pruefen: der Daemon bekommt das
 # Token ueber die Umgebung, nicht ueber ~/.claude/.credentials.json. Ein Server
 # ohne Anmeldedatei kann trotzdem vollstaendig eingerichtet sein.
-if "${SSH[@]}" 'sudo grep -q "^CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat" /etc/cockpit/umgebung 2>/dev/null'; then
-  ok "Token liegt bereits auf dem Server, ueberspringe"
+# Auf Laenge pruefen, nicht nur auf das Praefix: ein abgeschnittenes Token
+# beginnt genauso mit sk-ant-oat und wuerde den Schritt sonst ueberspringen --
+# genau so blieb beim ersten Anlauf ein 35 Zeichen langes Bruchstueck liegen.
+if "${SSH[@]}" 'sudo awk -F= "/^CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat/ { exit (length(\$2) >= 80 ? 0 : 1) } END { if (NR==0) exit 1 }" /etc/cockpit/umgebung 2>/dev/null'; then
+  ok "gueltig aussehendes Token liegt bereits auf dem Server, ueberspringe"
 else
   cat <<'HINWEIS'
    Die Anmeldung laeuft auf DIESEM Rechner, nicht auf dem Server.
@@ -187,6 +190,19 @@ if "${SSH[@]}" 'curl -sf --max-time 5 localhost:8765/api/gesundheit >/dev/null';
   ok "Daemon antwortet auf dem Server"
 else
   fehlt "Daemon antwortet nicht"
+fi
+
+# Der eigentliche Test: traegt das Token? Form und Laenge sagen darueber
+# nichts -- ein abgeschnittenes Token sieht richtig aus und liefert 401.
+# Kostet einen winzigen Aufruf, erspart aber eine spaetere Fehlersuche am
+# falschen Ende.
+ANTWORT=$("${SSH[@]}" 'cd /tmp && sudo -u claude env HOME=/home/claude CLAUDE_CODE_OAUTH_TOKEN="$(sudo grep -oP "^CLAUDE_CODE_OAUTH_TOKEN=\K.*" /etc/cockpit/umgebung)" timeout 60 claude -p "Antworte nur mit OK" --output-format json 2>&1' 2>/dev/null)
+if printf '%s' "$ANTWORT" | grep -q '"is_error":false'; then
+  ok "Anmeldung traegt -- Testaufruf beantwortet"
+elif printf '%s' "$ANTWORT" | grep -qi '401\|invalid'; then
+  fehlt "Token wird abgelehnt (401) -- /etc/cockpit/umgebung auf dem Server loeschen und Skript erneut starten"
+else
+  warn "Testaufruf unklar: $(printf '%s' "$ANTWORT" | head -c 160)"
 fi
 
 echo
