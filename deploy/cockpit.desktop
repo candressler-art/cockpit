@@ -6,7 +6,10 @@ Comment=Orchestrator und Worker fuer Claude Code
 # Die App bringt keinen Daemon mit. Ohne die Adresse unten faellt sie auf
 # 127.0.0.1:8765 zurueck -- dort laeuft hier aber keiner, der Daemon sitzt auf
 # dem Server. Den Platzhalter ersetzt installieren-desktop.sh beim Einrichten.
-Exec=env COCKPIT_DAEMON=@ADRESSE@ cockpit
+#
+# cockpit-start statt cockpit: der Wrapper holt vorher Wispr Flow hoch (und
+# ueber dessen eigenen Wrapper Obsidian), damit sofort diktiert werden kann.
+Exec=env COCKPIT_DAEMON=@ADRESSE@ cockpit-start
 Icon=cockpit
 Terminal=false
 Categories=Development;

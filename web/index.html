@@ -475,7 +475,7 @@ async function laeufeLaden() {
     logEl.innerHTML =
       `<div class="ende schlecht">Kein Daemon erreichbar auf ${BASIS}.\n\n` +
       `Starten:  cd ~/projekte/cockpit && node dist/daemon.js\n` +
-      `Andere Adresse:  COCKPIT_DAEMON=serverone.tail9c8a2b.ts.net cockpit</div>`
+      `Andere Adresse:  COCKPIT_DAEMON=servertwo.tail9c8a2b.ts.net:8443 cockpit</div>`
     logEl.firstChild.style.whiteSpace = 'pre-wrap'
     return
   }

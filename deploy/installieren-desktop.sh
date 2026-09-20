@@ -20,6 +20,12 @@ mkdir -p "$HOME/.local/bin" "$HOME/.local/share/applications" \
 
 install -m 755 "$BINAER" "$ZIEL" && echo "Binaer:   $ZIEL"
 
+# Startet Wispr Flow (und ueber dessen Wrapper Obsidian) vor dem Cockpit.
+# Gehoert ins Repo und nicht in eine Handaenderung an ~/.local/share/
+# applications/cockpit.desktop: diese Datei wird unten neu geschrieben.
+install -m 755 "$WURZEL/deploy/cockpit-start.sh" "$HOME/.local/bin/cockpit-start" \
+  && echo "Wrapper:  $HOME/.local/bin/cockpit-start"
+
 ICON="$WURZEL/src-tauri/icons/icon.png"
 if [ -f "$ICON" ]; then
   install -m 644 "$ICON" "$HOME/.local/share/icons/hicolor/512x512/apps/cockpit.png" \
@@ -32,7 +38,7 @@ fi
 # auf 127.0.0.1:8765, und wer keinen lokalen Daemon laufen hat, sieht beim
 # Klick aufs Icon nur "Kein Daemon erreichbar". Andere Adresse waehlen:
 #   COCKPIT_DAEMON=127.0.0.1:8765 ./deploy/installieren-desktop.sh
-ADRESSE="${COCKPIT_DAEMON:-serverone.tail9c8a2b.ts.net}"
+ADRESSE="${COCKPIT_DAEMON:-servertwo.tail9c8a2b.ts.net:8443}"
 sed "s|@ADRESSE@|$ADRESSE|" "$WURZEL/deploy/cockpit.desktop" \
   > "$HOME/.local/share/applications/cockpit.desktop" \
   && chmod 644 "$HOME/.local/share/applications/cockpit.desktop" \
@@ -46,13 +52,14 @@ command -v gtk-update-icon-cache >/dev/null \
 echo
 echo "Fertig. Starten:"
 echo "  ueber Startmenue/Icon                             (Daemon: $ADRESSE)"
-echo "  cockpit                                          (lokaler Daemon)"
-echo "  COCKPIT_DAEMON=serverone.tail9c8a2b.ts.net cockpit   (Server im Tailnet)"
+echo "  cockpit-start                                    (mit Wispr Flow + Obsidian)"
+echo "  cockpit                                          (nackt, ohne Kette)"
+echo "  COCKPIT_DAEMON=servertwo.tail9c8a2b.ts.net:8443 cockpit   (Server im Tailnet)"
 echo
 echo "Hyprland-Keybind: dieses System nutzt die Lua-Konfiguration."
 echo "In ~/.config/hypr/hyprland.lua ergaenzen:"
 echo ""
-echo "  hl.bind(\"SUPER + C\", hl.dsp.exec_cmd(\"env COCKPIT_DAEMON=$ADRESSE cockpit\"), {"
+echo "  hl.bind(\"SUPER + C\", hl.dsp.exec_cmd(\"env COCKPIT_DAEMON=$ADRESSE cockpit-start\"), {"
 echo '      description = "[Utilities] Cockpit",'
 echo '  })'
 echo ""
