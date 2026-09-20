@@ -221,11 +221,11 @@ export class Orchestrator extends EventEmitter {
         this.warteAufAntwort = null
         resolve(t)
       }
+      // Kein unref() auf diesem Timer: damit wuerde er den Prozess nicht am
+      // Leben halten und in einem Prozess, der sonst nichts tut, gar nicht
+      // mehr feuern -- die Frage liefe dann ewig statt in den Timeout. Im
+      // Daemon haelt ohnehin der HTTP-Server den Prozess offen.
       const uhr = setTimeout(() => fertig(null), timeoutMs)
-      // Der Timer darf den Prozess nicht am Leben halten, wenn sonst nichts
-      // mehr laeuft -- ein Lauf, auf dessen Antwort niemand mehr wartet, soll
-      // den Daemon nicht blockieren.
-      if (typeof uhr.unref === 'function') uhr.unref()
       this.warteAufAntwort = fertig
     })
   }

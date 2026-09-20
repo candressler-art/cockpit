@@ -63,8 +63,14 @@ export class DiscordAdapter extends EventEmitter {
   private kanal: TextChannel | null = null
   /** runId -> Thread-Id, damit ein Lauf seinen eigenen Faden behaelt. */
   private faeden = new Map<string, string>()
-  /** Auf welche Frage eine Antwort erwartet wird. */
-  private offeneFrage: { runId: string; nachrichtId: string } | null = null
+  /**
+   * Nachricht-Id -> runId fuer offene Fragen.
+   *
+   * Eine Map, kein Einzelwert: laufen zwei Orchestrator-Laeufe gleichzeitig
+   * und fragen beide, ginge sonst die erste Frage verloren und die Antwort
+   * darauf an den falschen Lauf.
+   */
+  private offeneFragen = new Map<string, string>()
   private bereit = false
 
   constructor(konfig: DiscordKonfig) {
@@ -175,7 +181,7 @@ export class DiscordAdapter extends EventEmitter {
       .setFooter({ text: 'Antworte auf diese Nachricht' })
       .setTimestamp()
     const n = await kanal.send({ embeds: [e] }).catch(() => null)
-    if (n) this.offeneFrage = { runId, nachrichtId: n.id }
+    if (n) this.offeneFragen.set(n.id, runId)
   }
 
   /** Lauf zu Ende -- mit Grund und Verbrauch. */
@@ -195,6 +201,11 @@ export class DiscordAdapter extends EventEmitter {
       .setTimestamp()
     await kanal.send({ embeds: [e] }).catch(() => {})
     this.faeden.delete(runId)
+    // Fragen dieses Laufs sind gegenstandslos -- eine spaete Antwort darauf
+    // wuerde sonst ins Leere laufen und als "niemand wartet" protokolliert.
+    for (const [nachrichtId, r] of this.offeneFragen) {
+      if (r === runId) this.offeneFragen.delete(nachrichtId)
+    }
   }
 
   /** Fehler, die jemand sehen sollte -- etwa eine abgelaufene Anmeldung. */
@@ -232,13 +243,11 @@ export class DiscordAdapter extends EventEmitter {
     if (!text) return
 
     // Antwort auf eine Entscheidungsfrage.
-    if (this.offeneFrage && m.reference?.messageId === this.offeneFrage.nachrichtId) {
-      this.emit('antwort', {
-        runId: this.offeneFrage.runId,
-        text,
-        durch: `discord:${m.author.username}`,
-      })
-      this.offeneFrage = null
+    const bezug = m.reference?.messageId
+    const runId = bezug ? this.offeneFragen.get(bezug) : undefined
+    if (runId) {
+      this.emit('antwort', { runId, text, durch: `discord:${m.author.username}` })
+      this.offeneFragen.delete(bezug!)
       await m.react('✅').catch(() => {})
       return
     }

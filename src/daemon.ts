@@ -152,9 +152,12 @@ if (DISCORD_TOKEN && DISCORD_KANAL) {
   discord.on('status', ({ antworten }: { antworten: (s: string) => void }) => {
     const laeufe = db.laeufeLesen(5)
     const zeilen = laeufe.map((l) => {
-      const agenten = supervisor.agentenListe(String(l.run_id))
-      const gew = agenten.reduce((x, a) => x + a.weightedTokens, 0)
-      const aktiv = agenten.filter((a) => !a.endedAt).length
+      // Aus der Datenbank, nicht aus dem Speicher: nach einem Neustart des
+      // Daemons kennt der Supervisor die alten Laeufe nicht mehr, und !status
+      // haette dann ueberall null gemeldet.
+      const reihen = db.agentenLesen(String(l.run_id))
+      const gew = reihen.reduce((x, a) => x + Number(a.weighted_tokens ?? 0), 0)
+      const aktiv = reihen.filter((a) => a.ended_at === null).length
       return `${l.status === 'running' ? '▶' : '·'} ${l.label} — ${l.status}` +
         (aktiv ? `, ${aktiv} aktiv` : '') +
         (gew ? `, ${Math.round(gew / 1000)}k gew.` : '')
