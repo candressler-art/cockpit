@@ -234,7 +234,11 @@ export class Orchestrator extends EventEmitter {
   async fahren(k: OrchestratorKonfig): Promise<LaufEnde> {
     const verlauf: { runde: number; statusKurz: string }[] = []
     const promptVerlauf: string[] = []
-    let auftraege: string[] = [k.anfangsPrompt]
+    // Auch der erste Auftrag darf schon mehrere sein -- derselbe Trenner wie
+    // spaeter beim Orchestrator. Sonst laeuft die erste Runde zwangslaeufig
+    // einspurig, und die Parallelitaet liesse sich nur ueber das Urteil des
+    // Orchestrators ausloesen, also nicht gezielt pruefen.
+    let auftraege: string[] = auftraegeTrennen(k.anfangsPrompt)
     let runde = 0
 
     while (runde < k.maxRunden) {
