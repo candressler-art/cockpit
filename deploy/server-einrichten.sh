@@ -42,63 +42,52 @@ else
 fi
 
 # --- 3. Anmeldung ------------------------------------------------------------
-schritt "3/7  Claude Code auf dem Server anmelden"
-if "${SSH[@]}" 'claude auth status 2>/dev/null | grep -q "\"loggedIn\": true"'; then
-  ok "bereits angemeldet, ueberspringe"
+schritt "3/7  Abo-Token fuer den Server"
+# Nicht `claude auth status` auf dem Server pruefen: der Daemon bekommt das
+# Token ueber die Umgebung, nicht ueber ~/.claude/.credentials.json. Ein Server
+# ohne Anmeldedatei kann trotzdem vollstaendig eingerichtet sein.
+if "${SSH[@]}" 'sudo grep -q "^CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat" /etc/cockpit/umgebung 2>/dev/null'; then
+  ok "Token liegt bereits auf dem Server, ueberspringe"
 else
   cat <<'HINWEIS'
-   Gleich oeffnet sich die Anmeldeseite in deinem Browser.
+   Die Anmeldung laeuft auf DIESEM Rechner, nicht auf dem Server.
+   Grund: hier oeffnet die CLI den Browser selbst, und das Token entsteht
+   lokal. Es ist ein eigenes, langlebiges Token -- deine Anmeldung hier
+   bleibt davon unberuehrt.
 
-     1. dort anmelden
-     2. die Seite zeigt danach einen kurzen CODE -- den kopieren
-     3. CODE hier ins Terminal einfuegen und Enter
-
-   Wichtig: ins Terminal gehoert der CODE von der Webseite, nicht die URL.
+     1. der Browser geht gleich auf, dort anmelden
+     2. danach erscheint das Token hier im Terminal
+     3. es wird automatisch uebernommen, du musst nichts kopieren
 
 HINWEIS
 
-  # Die CLI laeuft auf dem Server und kann dort keinen Browser oeffnen -- sie
-  # schreibt die URL nur hin. Also spiegeln wir ihre Ausgabe mit, fischen die
-  # URL heraus und oeffnen sie hier. Ohne das liegen URL und Eingabeaufforderung
-  # direkt untereinander, und man fuegt die URL statt des Codes ein.
+  # Lokal statt ueber SSH: ueber SSH kann die CLI keinen Browser oeffnen, und
+  # URL und Eingabefeld stehen dann direkt untereinander -- beim Einfuegen
+  # landet regelmaessig die URL statt des Codes im Feld. Lokal entfaellt der
+  # Schritt ganz.
   SPIEGEL="$(mktemp)"
-  (
-    # Warten, bis die URL in der Ausgabe auftaucht, dann lokal oeffnen.
-    for _ in $(seq 1 40); do
-      # Zuerst der OSC-8-Hyperlink: dort steht die URL am Stueck. Faellt der
-      # aus (anderes Terminal, andere CLI-Version), die sichtbaren Zeilen
-      # zusammensetzen -- die URL ist ueber mehrere Zeilen umbrochen und endet
-      # an der naechsten Leerzeile.
-      URL=$(grep -aoP '\x1b\]8;[^;]*;\Khttps://claude\.com/cai/oauth[^\x07\x1b]+' \
-              "$SPIEGEL" 2>/dev/null | head -1)
-      [ -z "$URL" ] && URL=$(sed 's/\x1b\[[0-9;]*[a-zA-Z]//g; s/\x1b\][^\x07]*\x07//g' \
-              "$SPIEGEL" 2>/dev/null | tr -d '\r' |
-              awk '/^https:\/\/claude\.com\/cai\/oauth/{f=1} f&&NF{printf "%s",$0} f&&!NF{exit}')
-      if [ -n "$URL" ]; then
-        if command -v xdg-open >/dev/null; then
-          xdg-open "$URL" >/dev/null 2>&1 &
-          printf '\n   [Anmeldeseite im Browser geoeffnet]\n' > /dev/tty
-        else
-          printf '\n   [kein xdg-open -- URL oben im Terminal verwenden]\n' > /dev/tty
-        fi
-        break
-      fi
-      sleep 0.5
-    done
-  ) &
-  OEFFNER=$!
+  script -qec "claude setup-token" /dev/null | tee "$SPIEGEL"
 
-  ssh -t -i "$KEY" "claude@$SERVER" 'claude setup-token' 2>&1 | tee "$SPIEGEL"
-  wait "$OEFFNER" 2>/dev/null
+  # Das Token aus der Ausgabe fischen. Es beginnt mit sk-ant-oat und steht
+  # als einziger solcher Wert darin.
+  TOKEN=$(sed 's/\x1b\[[0-9;]*[a-zA-Z]//g; s/\x1b\][^\x07]*\x07//g' "$SPIEGEL" 2>/dev/null |
+          tr -d '\r' | grep -aoE 'sk-ant-oat[A-Za-z0-9_-]+' | head -1)
   rm -f "$SPIEGEL"
-  echo
-  printf '   Token einfuegen (bleibt verborgen), dann Enter: '
-  read -rs TOKEN
-  echo
+
   if [ -z "$TOKEN" ]; then
-    fehlt "kein Token eingegeben"
+    warn "kein Token in der Ausgabe gefunden"
+    printf '   Token von Hand einfuegen (bleibt verborgen), dann Enter: '
+    read -rs TOKEN
+    echo
+  else
+    ok "Token uebernommen (${#TOKEN} Zeichen)"
+  fi
+
+  if [ -z "$TOKEN" ]; then
+    fehlt "kein Token"
     exit 1
   fi
+
   # Ueber stdin, damit das Token nicht in der Kommandozeile und damit in der
   # Prozessliste des Servers auftaucht.
   if printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\n' "$TOKEN" |
