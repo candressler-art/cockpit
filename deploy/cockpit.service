@@ -9,9 +9,10 @@
 #   sudo systemctl daemon-reload
 #   sudo systemctl enable --now cockpit
 #
-# Das Abo-Token gehoert NICHT in diese Datei. Es steht in
-# /etc/cockpit/umgebung mit Rechten 600 claude:claude:
-#   CLAUDE_CODE_OAUTH_TOKEN=...
+# Die Anmeldung liegt in /home/claude/.claude/.credentials.json und wird von
+# `claude auth login` dort abgelegt. /etc/cockpit/umgebung ist optional und
+# nur noetig, wenn stattdessen mit einem CLAUDE_CODE_OAUTH_TOKEN gearbeitet
+# werden soll.
 
 [Unit]
 Description=Cockpit -- Zentrale fuer Claude-Code-Agenten
@@ -34,6 +35,10 @@ ExecStart=/usr/bin/node --disable-warning=ExperimentalWarning /opt/cockpit/dist/
 # nicht erst hochzukommen.
 EnvironmentFile=-/etc/cockpit/umgebung
 Environment=NODE_ENV=production
+# Explizit, nicht auf systemd verlassen: die Claude-CLI sucht ihre Anmeldung
+# unter $HOME/.claude/.credentials.json. Ohne gesetztes HOME findet sie sie
+# nicht und meldet sich als nicht angemeldet, obwohl die Datei existiert.
+Environment=HOME=/home/claude
 Environment=COCKPIT_HOST=127.0.0.1
 Environment=COCKPIT_PORT=8765
 Environment=COCKPIT_DB=/var/lib/cockpit/cockpit.db

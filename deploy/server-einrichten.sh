@@ -42,84 +42,61 @@ else
 fi
 
 # --- 3. Anmeldung ------------------------------------------------------------
-schritt "3/7  Abo-Token fuer den Server"
-# Nicht `claude auth status` auf dem Server pruefen: der Daemon bekommt das
-# Token ueber die Umgebung, nicht ueber ~/.claude/.credentials.json. Ein Server
-# ohne Anmeldedatei kann trotzdem vollstaendig eingerichtet sein.
-# Auf Laenge pruefen, nicht nur auf das Praefix: ein abgeschnittenes Token
-# beginnt genauso mit sk-ant-oat und wuerde den Schritt sonst ueberspringen --
-# genau so blieb beim ersten Anlauf ein 35 Zeichen langes Bruchstueck liegen.
-if "${SSH[@]}" 'sudo awk -F= "/^CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat/ { exit (length(\$2) >= 80 ? 0 : 1) } END { if (NR==0) exit 1 }" /etc/cockpit/umgebung 2>/dev/null'; then
-  ok "gueltig aussehendes Token liegt bereits auf dem Server, ueberspringe"
+schritt "3/7  Anmeldung auf dem Server"
+# `claude auth login` statt `claude setup-token`.
+#
+# setup-token gibt das Token zum Abschreiben aus -- und genau daran ist es
+# zweimal gescheitert: die CLI baut die Anzeige schrittweise auf und maskiert
+# sie teilweise, sodass aus dem Terminalstrom zwar etwas Token-foermiges zu
+# holen ist, aber nicht das echte. Beide Male meldete der Server 401, beim
+# zweiten Mal bei formal einwandfreien 113 Zeichen.
+#
+# auth login legt die Anmeldung direkt in ~/.claude/.credentials.json auf dem
+# Server ab. Es gibt nichts zu kopieren, nichts zu uebertragen und nichts, was
+# unterwegs abgeschnitten werden kann.
+if "${SSH[@]}" 'claude auth status 2>/dev/null | grep -q "\"loggedIn\": true"'; then
+  ok "Server ist bereits angemeldet, ueberspringe"
 else
   cat <<'HINWEIS'
-   Die Anmeldung laeuft auf DIESEM Rechner, nicht auf dem Server.
-   Grund: hier oeffnet die CLI den Browser selbst, und das Token entsteht
-   lokal. Es ist ein eigenes, langlebiges Token -- deine Anmeldung hier
-   bleibt davon unberuehrt.
+   Die Anmeldeseite oeffnet sich gleich in deinem Browser.
 
-     1. der Browser geht gleich auf, dort anmelden
-     2. danach erscheint das Token hier im Terminal
-     3. es wird automatisch uebernommen, du musst nichts kopieren
+     1. dort anmelden
+     2. die Seite zeigt danach einen kurzen CODE
+     3. diesen CODE hier ins Terminal einfuegen und Enter
+
+   Ins Terminal gehoert der CODE von der Webseite -- nicht die URL.
 
 HINWEIS
 
-  # Lokal statt ueber SSH: ueber SSH kann die CLI keinen Browser oeffnen, und
-  # URL und Eingabefeld stehen dann direkt untereinander -- beim Einfuegen
-  # landet regelmaessig die URL statt des Codes im Feld. Lokal entfaellt der
-  # Schritt ganz.
   SPIEGEL="$(mktemp)"
-  # Breites Pseudo-Terminal: in einem schmalen Fenster bricht das Token ueber
-  # mehrere Zeilen um, und aus umbrochenen Teilen laesst es sich nicht sicher
-  # wieder zusammensetzen.
-  script -qec "stty cols 220 rows 50 2>/dev/null; claude setup-token" /dev/null | tee "$SPIEGEL"
+  (
+    # Sobald die URL im Strom auftaucht, lokal oeffnen. Die CLI laeuft auf dem
+    # Server und kann dort keinen Browser starten.
+    for _ in $(seq 1 60); do
+      URL=$(grep -aoP '\x1b\]8;[^;]*;\Khttps://claude\.com/[^\x07\x1b]+' "$SPIEGEL" 2>/dev/null | head -1)
+      [ -z "$URL" ] && URL=$(sed 's/\x1b\[[0-9;]*[a-zA-Z]//g; s/\x1b\][^\x07]*\x07//g' "$SPIEGEL" 2>/dev/null |
+            tr -d '\r' | awk '/^https:\/\/claude\.com\//{f=1} f&&NF{printf "%s",$0} f&&!NF{exit}')
+      if [ -n "$URL" ]; then
+        command -v xdg-open >/dev/null && xdg-open "$URL" >/dev/null 2>&1 &
+        printf '\n   [Anmeldeseite im Browser geoeffnet -- Code von dort holen]\n' > /dev/tty
+        break
+      fi
+      sleep 0.5
+    done
+  ) &
+  OEFFNER=$!
 
-  # Das Token aus der Ausgabe fischen. Es beginnt mit sk-ant-oat und steht
-  # als einziger solcher Wert darin.
-  # Den LAENGSTEN Treffer nehmen, nicht den ersten: die CLI baut das Token beim
-  # Anzeigen schrittweise auf, und `script` zeichnet jeden Zwischenzustand mit
-  # auf. Der erste Treffer ist deshalb regelmaessig ein Bruchstueck -- genau
-  # daran ist der erste Versuch gescheitert (35 statt rund 108 Zeichen, der
-  # Server antwortete mit 401).
-  TOKEN=$(sed 's/\x1b\[[0-9;]*[a-zA-Z]//g; s/\x1b\][^\x07]*\x07//g' "$SPIEGEL" 2>/dev/null |
-          tr -d '\r' | grep -aoE 'sk-ant-oat[A-Za-z0-9_-]+' |
-          awk '{ if (length($0) > length(l)) l = $0 } END { print l }')
+  ssh -t -i "$KEY" "claude@$SERVER" 'claude auth login' 2>&1 | tee "$SPIEGEL"
+  wait "$OEFFNER" 2>/dev/null
   rm -f "$SPIEGEL"
 
-  # Ein zu kurzes Token ist ein abgeschnittenes. Lieber hier auffallen als
-  # spaeter mit einem 401, den niemand dem Kopiervorgang zuordnet.
-  if [ -n "$TOKEN" ] && [ "${#TOKEN}" -lt 80 ]; then
-    warn "erkanntes Token ist nur ${#TOKEN} Zeichen lang -- das ist zu kurz"
-    TOKEN=""
-  fi
-
-  if [ -z "$TOKEN" ]; then
-    echo "   Die CLI hat das Token oben ausgegeben."
-    printf '   Token einfuegen (bleibt verborgen), dann Enter: '
-    read -rs TOKEN
-    echo
-    if [ -n "$TOKEN" ] && [ "${#TOKEN}" -lt 80 ]; then
-      fehlt "eingegebenes Token ist nur ${#TOKEN} Zeichen -- vermutlich unvollstaendig"
-      exit 1
-    fi
+  if "${SSH[@]}" 'claude auth status 2>/dev/null | grep -q "\"loggedIn\": true"'; then
+    ok "angemeldet"
+    "${SSH[@]}" 'claude auth status 2>/dev/null | grep -E "email|subscriptionType"' | sed 's/^/        /'
   else
-    ok "Token uebernommen (${#TOKEN} Zeichen)"
-  fi
-
-  if [ -z "$TOKEN" ]; then
-    fehlt "kein Token"
+    fehlt "Anmeldung hat nicht geklappt"
     exit 1
   fi
-
-  # Ueber stdin, damit das Token nicht in der Kommandozeile und damit in der
-  # Prozessliste des Servers auftaucht.
-  if printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\n' "$TOKEN" |
-       "${SSH[@]}" 'sudo install -d -m 755 /etc/cockpit && sudo tee /etc/cockpit/umgebung >/dev/null && sudo chown claude:claude /etc/cockpit/umgebung && sudo chmod 600 /etc/cockpit/umgebung'; then
-    ok "Token nach /etc/cockpit/umgebung geschrieben (600 claude:claude)"
-  else
-    fehlt "Token konnte nicht geschrieben werden"
-  fi
-  unset TOKEN
 fi
 
 # --- 4. Code ausrollen -------------------------------------------------------
@@ -196,11 +173,11 @@ fi
 # nichts -- ein abgeschnittenes Token sieht richtig aus und liefert 401.
 # Kostet einen winzigen Aufruf, erspart aber eine spaetere Fehlersuche am
 # falschen Ende.
-ANTWORT=$("${SSH[@]}" 'cd /tmp && sudo -u claude env HOME=/home/claude CLAUDE_CODE_OAUTH_TOKEN="$(sudo grep -oP "^CLAUDE_CODE_OAUTH_TOKEN=\K.*" /etc/cockpit/umgebung)" timeout 60 claude -p "Antworte nur mit OK" --output-format json 2>&1' 2>/dev/null)
+ANTWORT=$("${SSH[@]}" 'cd /tmp && timeout 60 claude -p "Antworte nur mit OK" --output-format json 2>&1' 2>/dev/null)
 if printf '%s' "$ANTWORT" | grep -q '"is_error":false'; then
   ok "Anmeldung traegt -- Testaufruf beantwortet"
 elif printf '%s' "$ANTWORT" | grep -qi '401\|invalid'; then
-  fehlt "Token wird abgelehnt (401) -- /etc/cockpit/umgebung auf dem Server loeschen und Skript erneut starten"
+  fehlt "Anmeldung wird abgelehnt (401) -- auf dem Server `claude auth logout` und Skript erneut starten"
 else
   warn "Testaufruf unklar: $(printf '%s' "$ANTWORT" | head -c 160)"
 fi
