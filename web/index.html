@@ -208,14 +208,28 @@ async function basisErmitteln() {
   }
 }
 
-const api = (pfad) => `http://${BASIS}${pfad}`
-const wsUrl = () => {
-  // Im Browser das Schema der Seite uebernehmen (hinter tailscale serve ist
-  // das https und damit wss); in der App immer ws, weil dort kein TLS-Kontext
-  // von der Seite kommt -- ausser die Adresse nennt ausdruecklich einen.
-  const sicher = !IN_TAURI && location.protocol === 'https:'
-  return `${sicher ? 'wss' : 'ws'}://${BASIS}/ws`
+/**
+ * Schema der Daemon-Adresse bestimmen.
+ *
+ * BASIS darf ein Schema mitbringen (`https://serverone…`). Fehlt es, wird
+ * geraten -- und zwar so, wie es in dieser Umgebung stimmt: lokal ist der
+ * Daemon unverschluesselt erreichbar, alles andere laeuft ueber
+ * `tailscale serve` und damit ausschliesslich ueber TLS. Ein http-Aufruf gegen
+ * den Tailnet-Namen liefe sonst ins Leere.
+ */
+function schema(fuerWebsocket = false) {
+  const m = /^(https?):\/\//.exec(BASIS)
+  if (m) return fuerWebsocket ? (m[1] === 'https' ? 'wss' : 'ws') : m[1]
+  const host = BASIS.replace(/^.*:\/\//, '')
+  const lokal = /^(localhost|127\.0\.0\.1|\[::1\])(:|$)/.test(host)
+  // Im Browser gilt zusaetzlich das Schema der Seite selbst.
+  const sicher = lokal ? (!IN_TAURI && location.protocol === 'https:') : true
+  return fuerWebsocket ? (sicher ? 'wss' : 'ws') : sicher ? 'https' : 'http'
 }
+
+const hostOhneSchema = () => BASIS.replace(/^https?:\/\//, '').replace(/\/+$/, '')
+const api = (pfad) => `${schema()}://${hostOhneSchema()}${pfad}`
+const wsUrl = () => `${schema(true)}://${hostOhneSchema()}/ws`
 const logEl = $('#log'), agentenEl = $('#agenten'), freigabenEl = $('#freigaben')
 const verbindungEl = $('#verbindung'), budgetEl = $('#budget'), laufwahlEl = $('#laufwahl')
 const limitEl = $('#limit')
@@ -461,7 +475,7 @@ async function laeufeLaden() {
     logEl.innerHTML =
       `<div class="ende schlecht">Kein Daemon erreichbar auf ${BASIS}.\n\n` +
       `Starten:  cd ~/projekte/cockpit && node dist/daemon.js\n` +
-      `Andere Adresse:  COCKPIT_DAEMON=100.126.179.60:8765 cockpit</div>`
+      `Andere Adresse:  COCKPIT_DAEMON=serverone.tail9c8a2b.ts.net cockpit</div>`
     logEl.firstChild.style.whiteSpace = 'pre-wrap'
     return
   }

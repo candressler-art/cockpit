@@ -24,8 +24,15 @@ Type=simple
 User=claude
 Group=claude
 WorkingDirectory=/opt/cockpit
-ExecStart=/usr/bin/node /opt/cockpit/dist/daemon.js
-EnvironmentFile=/etc/cockpit/umgebung
+# node:sqlite ist in Node 22 als experimentell markiert und warnt bei jedem
+# Start. Gezielt nur diese Warnung unterdruecken, nicht alle -- sonst gehen
+# echte Hinweise im Journal mit unter.
+ExecStart=/usr/bin/node --disable-warning=ExperimentalWarning /opt/cockpit/dist/daemon.js
+# Fuehrendes Minus: fehlt die Datei, startet die Unit trotzdem. Der Daemon
+# selbst braucht keine Anmeldung -- nur die Agenten, die er startet. So kann
+# der Dienst schon laufen und melden, dass die Anmeldung fehlt, statt gar
+# nicht erst hochzukommen.
+EnvironmentFile=-/etc/cockpit/umgebung
 Environment=NODE_ENV=production
 Environment=COCKPIT_HOST=127.0.0.1
 Environment=COCKPIT_PORT=8765
