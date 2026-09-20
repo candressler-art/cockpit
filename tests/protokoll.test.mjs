@@ -1,0 +1,79 @@
+// Testet die Protokollmechanik gegen das gebaute Modul.
+// Vorher `npm run build`, danach `node tests/protokoll.test.mjs`.
+import {
+  auftraegeTrennen,
+  orchestratorAntwortLesen,
+  blockerGrund,
+  reportTypLesen,
+  istWiederholung,
+} from '../dist/protokoll.js'
+
+const faelle = [
+  ['ein Auftrag ohne Trenner', 'Mach Punkt 1.', 1],
+  ['zwei Auftraege', 'Mach A.\n---WORKER---\nMach B.', 2],
+  ['drei Auftraege', 'A\n---WORKER---\nB\n---WORKER---\nC', 3],
+  ['Trenner mit mehr Strichen', 'A\n-----WORKER-----\nB', 2],
+  ['Trenner kleingeschrieben', 'A\n---worker---\nB', 2],
+  ['Trenner mit Leerzeichen', 'A\n  --- WORKER ---  \nB', 2],
+  ['leere Abschnitte werden verworfen', 'A\n---WORKER---\n\n---WORKER---\nB', 2],
+  ['Trenner mitten im Satz zaehlt nicht', 'Schreibe ---WORKER--- in die Datei.', 1],
+]
+let ok = 0
+for (const [name, text, erwartet] of faelle) {
+  const r = auftraegeTrennen(text)
+  const gut = r.length === erwartet
+  if (gut) ok++
+  console.log(`  ${gut ? 'ok   ' : 'FEHLT'} ${name}: ${r.length} (erwartet ${erwartet})`)
+  if (!gut) console.log('        ->', JSON.stringify(r))
+}
+
+// Zusammenspiel mit dem Parser: mehrere Auftraege bleiben EIN Fall-Feld.
+const antwort = orchestratorAntwortLesen(
+  'STATUS-KURZ: Zwei unabhaengige Aufgaben.\n' +
+  'NAECHSTER-PROMPT: Lege a.txt an.\n---WORKER---\nLege b.txt an.\n')
+const auftraege = auftraegeTrennen(antwort.naechsterPrompt)
+const gut = antwort.fall === 'weiter' && auftraege.length === 2
+console.log(`  ${gut ? 'ok   ' : 'FEHLT'} Parser: Fall=${antwort.fall}, Auftraege=${auftraege.length}`)
+if (gut) ok++
+
+// --- Blocker: Verneinungen duerfen nicht zaehlen, echte schon ---
+const blockerFaelle = [
+  ['BLOCKER: keiner', null],
+  ['BLOCKER: keiner (PlaceId stimmt)', null],
+  ['BLOCKER: kein Blocker', null],
+  ['BLOCKER: \u2014', null],
+  ['- BLOCKER: n/a', null],
+  ['**BLOCKER:** behoben', null],
+  ['BLOCKER: Keine Verbindung zu Studio', 'da'],
+  ['- BLOCKER: Can muss die PlaceId setzen', 'da'],
+]
+for (const [zeile, erwartet] of blockerFaelle) {
+  const r = blockerGrund(`Report-Typ: ZWISCHENSTAND\n${zeile}\n`)
+  const gut = erwartet === null ? r === null : r !== null
+  if (gut) ok++
+  console.log(`  ${gut ? 'ok   ' : 'FEHLT'} Blocker ${JSON.stringify(zeile)}`)
+}
+
+// Ein Zitat tiefer im Text darf keinen Lauf stoppen.
+const tief = 'Report-Typ: ZWISCHENSTAND\nZ1\nZ2\nZ3\nZ4\nZ5\nBLOCKER: nur zitiert\n'
+const tiefOk = blockerGrund(tief) === null
+if (tiefOk) ok++
+console.log(`  ${tiefOk ? 'ok   ' : 'FEHLT'} Blocker-Zitat tiefer im Text zaehlt nicht`)
+
+// --- Report-Typ ---
+const typOk =
+  reportTypLesen('Report-Typ: FERTIG-MELDUNG\n') === 'FERTIG-MELDUNG' &&
+  reportTypLesen('irgendein Text ohne Typ') === null
+if (typOk) ok++
+console.log(`  ${typOk ? 'ok   ' : 'FEHLT'} Report-Typ wird erkannt`)
+
+// --- Wiederholung ---
+const wdhOk =
+  istWiederholung(['Mach Punkt 22 fertig.', 'Mach Punkt 22 fertig!', 'Mach  Punkt 22 fertig.']) &&
+  !istWiederholung(['Mach Punkt 22.', 'Baue das Inventar um.', 'Schreibe Tests fuer den Shop.'])
+if (wdhOk) ok++
+console.log(`  ${wdhOk ? 'ok   ' : 'FEHLT'} Wiederholung wird erkannt, Unterschiedliches nicht`)
+
+const gesamt = faelle.length + 1 + blockerFaelle.length + 3
+console.log(`\n${ok}/${gesamt} bestanden`)
+process.exit(ok === gesamt ? 0 : 1)

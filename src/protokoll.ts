@@ -27,6 +27,27 @@ export interface OrchestratorAntwort {
 
 export class FormatFehler extends Error {}
 
+/**
+ * Trennzeichen fuer mehrere Auftraege in einem NAECHSTER-PROMPT.
+ *
+ * Das Protokoll kennt genau ein Fall-Feld je Antwort -- daran wird nicht
+ * geruettelt, weil die Eindeutigkeit der Grund ist, warum es mechanisch lesbar
+ * ist. Mehrere Worker gleichzeitig zu beauftragen passt trotzdem hinein: der
+ * Orchestrator schreibt die Auftraege untereinander und trennt sie mit dieser
+ * Zeile. Ohne Trenner bleibt alles wie bisher, ein Auftrag.
+ */
+export const AUFTRAG_TRENNER = /^[ \t]*-{3,}\s*WORKER\s*-{3,}[ \t]*$/gim
+
+/** Zerlegt einen NAECHSTER-PROMPT in einen oder mehrere Auftraege. */
+export function auftraegeTrennen(prompt: string): string[] {
+  AUFTRAG_TRENNER.lastIndex = 0
+  const teile = (prompt ?? '')
+    .split(AUFTRAG_TRENNER)
+    .map((t) => t.trim())
+    .filter(Boolean)
+  return teile.length > 0 ? teile : [(prompt ?? '').trim()].filter(Boolean)
+}
+
 const FELD_MARKER =
   /^(STATUS-KURZ|NAECHSTER-PROMPT|ENTSCHEIDUNG-NOETIG|PROJEKT-FERTIG|LESE-ANFRAGE):/gm
 

@@ -10,6 +10,7 @@ import { EventEmitter } from 'node:events'
 import type { Supervisor } from './supervisor.js'
 import type { CockpitDb } from './db.js'
 import {
+  auftraegeTrennen,
   blockerGrund,
   istWiederholung,
   orchestratorAntwortLesen,
@@ -93,6 +94,19 @@ Fall A -- weiter, du hast genug fuer den naechsten Auftrag:
 STATUS-KURZ: <1-2 Saetze Deutsch, nur das Wichtigste>
 NAECHSTER-PROMPT: <vollstaendiger Auftrag an den Worker>
 
+Brauchst du mehrere Worker gleichzeitig, schreib die Auftraege untereinander
+und trenne sie mit einer eigenen Zeile:
+
+STATUS-KURZ: <1-2 Saetze>
+NAECHSTER-PROMPT: <Auftrag fuer den ersten Worker>
+---WORKER---
+<Auftrag fuer den zweiten Worker>
+
+Das lohnt nur bei Aufgaben, die wirklich unabhaengig sind und sich nicht in
+dieselben Dateien schreiben. Zwei Worker im selben Verzeichnis, die einander
+ins Gehege kommen, kosten mehr als sie sparen. Hoechstens PARALLEL_MAX
+Auftraege je Runde; mehr werden auf die naechste Runde verschoben.
+
 Fall B -- du brauchst eine Entscheidung, die nur der Mensch treffen kann
 (Geld, Aussenwirkung, schwer rueckgaengig zu Machendes, ein Kriterium bleibt
 trotz Nachfrage ungeklaert, oder der Worker meldet einen Blocker):
@@ -152,6 +166,8 @@ function beschriften(art: string, d: unknown): string {
         (Array.isArray(d) ? d.map((b) => `${b.agentId}: ${b.grund}`).join(' | ') : '')
     case 'report_ohne_typ':
       return `${o.agentId}: Report ohne Report-Typ-Zeile`
+    case 'parallel':
+      return `${o.anzahl} Auftraege gleichzeitig vergeben`
     default:
       return art
   }
@@ -173,7 +189,10 @@ export class Orchestrator extends EventEmitter {
   }
 
   private systemPrompt(k: OrchestratorKonfig): string {
-    return `${ORCHESTRATOR_RAHMEN_VOR}\n${k.projektBlock.trim()}\n\n${ORCHESTRATOR_RAHMEN_NACH}`
+    return (
+      `${ORCHESTRATOR_RAHMEN_VOR}\n${k.projektBlock.trim()}\n\n` +
+      ORCHESTRATOR_RAHMEN_NACH.replace('PARALLEL_MAX', String(Math.max(1, k.parallelitaet)))
+    )
   }
 
   /** Verlaufsdigest fuer den Orchestrator -- nur die Statuszeilen, nicht die vollen Reports. */
@@ -343,6 +362,11 @@ export class Orchestrator extends EventEmitter {
         return { grund: 'wiederholung' }
       }
 
+      const neueAuftraege = auftraegeTrennen(naechster)
+      if (neueAuftraege.length > 1) {
+        this.melden(k.runId, 'parallel', { runde, anzahl: neueAuftraege.length })
+      }
+
       if (k.tokenBudget > 0) {
         const verbraucht = this.supervisor
           .agentenListe(k.runId)
@@ -352,7 +376,10 @@ export class Orchestrator extends EventEmitter {
         }
       }
 
-      auftraege = [naechster]
+      // Uebrige Auftraege bleiben in der Schlange: waren es mehr als
+      // parallelitaet erlaubt, arbeitet die naechste Runde sie ab, statt sie
+      // stillschweigend fallenzulassen.
+      auftraege = [...neueAuftraege, ...auftraege.slice(stapel.length)]
     }
 
     return { grund: 'rundenlimit' }
