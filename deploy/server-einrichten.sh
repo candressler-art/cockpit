@@ -47,14 +47,50 @@ if "${SSH[@]}" 'claude auth status 2>/dev/null | grep -q "\"loggedIn\": true"'; 
   ok "bereits angemeldet, ueberspringe"
 else
   cat <<'HINWEIS'
-   Gleich erscheint eine URL. So gehts:
-     1. URL kopieren und hier im Browser oeffnen
-     2. anmelden, den angezeigten Code kopieren
-     3. Code im Terminal einfuegen und Enter
-     4. das ausgegebene Token kopieren -- danach wird es abgefragt
+   Gleich oeffnet sich die Anmeldeseite in deinem Browser.
+
+     1. dort anmelden
+     2. die Seite zeigt danach einen kurzen CODE -- den kopieren
+     3. CODE hier ins Terminal einfuegen und Enter
+
+   Wichtig: ins Terminal gehoert der CODE von der Webseite, nicht die URL.
 
 HINWEIS
-  ssh -t -i "$KEY" "claude@$SERVER" 'claude setup-token'
+
+  # Die CLI laeuft auf dem Server und kann dort keinen Browser oeffnen -- sie
+  # schreibt die URL nur hin. Also spiegeln wir ihre Ausgabe mit, fischen die
+  # URL heraus und oeffnen sie hier. Ohne das liegen URL und Eingabeaufforderung
+  # direkt untereinander, und man fuegt die URL statt des Codes ein.
+  SPIEGEL="$(mktemp)"
+  (
+    # Warten, bis die URL in der Ausgabe auftaucht, dann lokal oeffnen.
+    for _ in $(seq 1 40); do
+      # Zuerst der OSC-8-Hyperlink: dort steht die URL am Stueck. Faellt der
+      # aus (anderes Terminal, andere CLI-Version), die sichtbaren Zeilen
+      # zusammensetzen -- die URL ist ueber mehrere Zeilen umbrochen und endet
+      # an der naechsten Leerzeile.
+      URL=$(grep -aoP '\x1b\]8;[^;]*;\Khttps://claude\.com/cai/oauth[^\x07\x1b]+' \
+              "$SPIEGEL" 2>/dev/null | head -1)
+      [ -z "$URL" ] && URL=$(sed 's/\x1b\[[0-9;]*[a-zA-Z]//g; s/\x1b\][^\x07]*\x07//g' \
+              "$SPIEGEL" 2>/dev/null | tr -d '\r' |
+              awk '/^https:\/\/claude\.com\/cai\/oauth/{f=1} f&&NF{printf "%s",$0} f&&!NF{exit}')
+      if [ -n "$URL" ]; then
+        if command -v xdg-open >/dev/null; then
+          xdg-open "$URL" >/dev/null 2>&1 &
+          printf '\n   [Anmeldeseite im Browser geoeffnet]\n' > /dev/tty
+        else
+          printf '\n   [kein xdg-open -- URL oben im Terminal verwenden]\n' > /dev/tty
+        fi
+        break
+      fi
+      sleep 0.5
+    done
+  ) &
+  OEFFNER=$!
+
+  ssh -t -i "$KEY" "claude@$SERVER" 'claude setup-token' 2>&1 | tee "$SPIEGEL"
+  wait "$OEFFNER" 2>/dev/null
+  rm -f "$SPIEGEL"
   echo
   printf '   Token einfuegen (bleibt verborgen), dann Enter: '
   read -rs TOKEN
