@@ -272,7 +272,14 @@ const server = createServer(async (req, res) => {
       return res.end('verboten')
     }
     const inhalt = await readFile(ziel)
-    res.writeHead(200, { 'content-type': MIME[extname(ziel)] ?? 'application/octet-stream' })
+    res.writeHead(200, {
+      'content-type': MIME[extname(ziel)] ?? 'application/octet-stream',
+      // Kein Caching: die Oberflaeche wird waehrend der Entwicklung staendig
+      // geaendert, und ein Browser, der altes CSS ausliefert, sieht aus wie ein
+      // Fehler im Code. Die Dateien sind klein und kommen ueber das Tailnet
+      // oder von localhost -- der Gewinn durch Caching waere ohnehin gering.
+      'cache-control': 'no-store, must-revalidate',
+    })
     return res.end(inhalt)
   } catch (e) {
     const code = (e as { code?: string }).code === 'ENOENT' ? 404 : 500

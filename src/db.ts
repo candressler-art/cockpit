@@ -213,13 +213,38 @@ export class CockpitDb {
    * Prozess, der ihn trieb, ist weg.
    */
   verwaisteLaeufeAufraeumen(): number {
+    const jetzt = Date.now()
     const r = this.db
       .prepare(
         `UPDATE runs SET status = 'orphaned', ended_at = ?,
            stop_reason = 'Daemon-Neustart: Lauf war beim Start noch als laufend markiert'
          WHERE status = 'running'`,
       )
-      .run(Date.now())
+      .run(jetzt)
+
+    // Auch die Agenten. Ein Agent, der auf 'waiting_permission' stehenbleibt,
+    // obwohl sein Prozess laengst weg ist, sieht aus wie einer, der auf eine
+    // Entscheidung wartet -- man wuerde eine Freigabe erteilen, die niemand
+    // mehr entgegennimmt. Dasselbe gilt fuer jeden anderen laufenden Zustand.
+    this.db
+      .prepare(
+        `UPDATE agents SET status = 'stopped', ended_at = COALESCE(ended_at, ?),
+           last_error = COALESCE(last_error, 'Daemon-Neustart: Prozess war weg')
+         WHERE ended_at IS NULL
+           AND status NOT IN ('done', 'failed', 'stopped')`,
+      )
+      .run(jetzt)
+
+    // Offene Freigaben desselben Laufs sind gegenstandslos: der Agent, der sie
+    // angefragt hat, existiert nicht mehr.
+    this.db
+      .prepare(
+        `UPDATE permissions SET decided_at = ?, decision = 'deny', decided_by = 'daemon',
+           reason = 'Daemon-Neustart: anfragender Agent existiert nicht mehr'
+         WHERE decided_at IS NULL`,
+      )
+      .run(jetzt)
+
     return Number(r.changes ?? 0)
   }
 
