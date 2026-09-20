@@ -66,19 +66,39 @@ HINWEIS
   # landet regelmaessig die URL statt des Codes im Feld. Lokal entfaellt der
   # Schritt ganz.
   SPIEGEL="$(mktemp)"
-  script -qec "claude setup-token" /dev/null | tee "$SPIEGEL"
+  # Breites Pseudo-Terminal: in einem schmalen Fenster bricht das Token ueber
+  # mehrere Zeilen um, und aus umbrochenen Teilen laesst es sich nicht sicher
+  # wieder zusammensetzen.
+  script -qec "stty cols 220 rows 50 2>/dev/null; claude setup-token" /dev/null | tee "$SPIEGEL"
 
   # Das Token aus der Ausgabe fischen. Es beginnt mit sk-ant-oat und steht
   # als einziger solcher Wert darin.
+  # Den LAENGSTEN Treffer nehmen, nicht den ersten: die CLI baut das Token beim
+  # Anzeigen schrittweise auf, und `script` zeichnet jeden Zwischenzustand mit
+  # auf. Der erste Treffer ist deshalb regelmaessig ein Bruchstueck -- genau
+  # daran ist der erste Versuch gescheitert (35 statt rund 108 Zeichen, der
+  # Server antwortete mit 401).
   TOKEN=$(sed 's/\x1b\[[0-9;]*[a-zA-Z]//g; s/\x1b\][^\x07]*\x07//g' "$SPIEGEL" 2>/dev/null |
-          tr -d '\r' | grep -aoE 'sk-ant-oat[A-Za-z0-9_-]+' | head -1)
+          tr -d '\r' | grep -aoE 'sk-ant-oat[A-Za-z0-9_-]+' |
+          awk '{ if (length($0) > length(l)) l = $0 } END { print l }')
   rm -f "$SPIEGEL"
 
+  # Ein zu kurzes Token ist ein abgeschnittenes. Lieber hier auffallen als
+  # spaeter mit einem 401, den niemand dem Kopiervorgang zuordnet.
+  if [ -n "$TOKEN" ] && [ "${#TOKEN}" -lt 80 ]; then
+    warn "erkanntes Token ist nur ${#TOKEN} Zeichen lang -- das ist zu kurz"
+    TOKEN=""
+  fi
+
   if [ -z "$TOKEN" ]; then
-    warn "kein Token in der Ausgabe gefunden"
-    printf '   Token von Hand einfuegen (bleibt verborgen), dann Enter: '
+    echo "   Die CLI hat das Token oben ausgegeben."
+    printf '   Token einfuegen (bleibt verborgen), dann Enter: '
     read -rs TOKEN
     echo
+    if [ -n "$TOKEN" ] && [ "${#TOKEN}" -lt 80 ]; then
+      fehlt "eingegebenes Token ist nur ${#TOKEN} Zeichen -- vermutlich unvollstaendig"
+      exit 1
+    fi
   else
     ok "Token uebernommen (${#TOKEN} Zeichen)"
   fi
