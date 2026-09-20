@@ -108,8 +108,13 @@ if (DISCORD_TOKEN && DISCORD_KANAL) {
   })
 
   discord.on('freigabe', ({ id, erlaubt, durch }: { id: string; erlaubt: boolean; durch: string }) => {
-    if (!supervisor.freigabeEntscheiden(id, erlaubt, durch)) {
-      console.warn(`[discord] Freigabe ${id} war nicht mehr offen`)
+    // Auch den Erfolg protokollieren, nicht nur den Fehlschlag. Sonst laesst
+    // sich im Nachhinein nicht unterscheiden, ob ein Knopfdruck ankam oder
+    // unterwegs verlorenging -- genau diese Frage stand beim ersten Einsatz.
+    if (supervisor.freigabeEntscheiden(id, erlaubt, durch)) {
+      console.log(`[discord] ${erlaubt ? 'erlaubt' : 'abgelehnt'}: ${id.slice(0, 8)} von ${durch}`)
+    } else {
+      console.warn(`[discord] Freigabe ${id.slice(0, 8)} war nicht mehr offen (${durch})`)
     }
   })
 
@@ -142,11 +147,21 @@ if (DISCORD_TOKEN && DISCORD_KANAL) {
     console.log(`[discord] Lauf ${runId.slice(0, 8)} von ${durch} gestartet`)
   })
 
-  discord.on('stop', ({ runId }: { runId: string | null }) => {
-    const ziel = runId || letzterLauf?.runId
-    if (!ziel) return
+  discord.on('stop', ({ runId, durch }: { runId: string | null; durch: string }) => {
+    // Eine abgekuerzte Lauf-Id genuegt: in Discord steht nur der Anfang, und
+    // niemand tippt eine volle UUID ab.
+    let ziel = runId || letzterLauf?.runId || null
+    if (runId && !orchestratoren.has(runId)) {
+      const treffer = [...orchestratoren.keys()].filter((k) => k.startsWith(runId))
+      ziel = treffer.length === 1 ? treffer[0]! : ziel
+    }
+    if (!ziel) {
+      console.warn(`[discord] !stop ohne Ziel (${durch})`)
+      return
+    }
     orchestratoren.get(ziel)?.abbrechen()
     for (const a of supervisor.agentenListe(ziel)) supervisor.agentAbbrechen(ziel, a.agentId)
+    console.log(`[discord] Lauf ${ziel.slice(0, 8)} von ${durch} abgebrochen`)
   })
 
   discord.on('status', ({ antworten }: { antworten: (s: string) => void }) => {
