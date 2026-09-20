@@ -6,6 +6,7 @@ import {
   blockerGrund,
   reportTypLesen,
   istWiederholung,
+  rolleAusAuftrag,
 } from '../dist/protokoll.js'
 
 const faelle = [
@@ -74,6 +75,26 @@ const wdhOk =
 if (wdhOk) ok++
 console.log(`  ${wdhOk ? 'ok   ' : 'FEHLT'} Wiederholung wird erkannt, Unterschiedliches nicht`)
 
-const gesamt = faelle.length + 1 + blockerFaelle.length + 3
+// --- AN-ROLLE ---
+// Die Zeile ist optional und steht je AUFTRAG, nicht je Antwort. Der letzte
+// Fall ist der wichtige: ohne Zeilenanfang darf nichts abgeschnitten werden,
+// sonst frisst der Parser Auftragstext.
+const rollenFaelle = [
+  ['Rolle wird gelesen', 'AN-ROLLE: rechercheur\nFinde X.', 'rechercheur', 'Finde X.'],
+  ['ohne Leerzeichen', 'AN-ROLLE:coder\nMach Y.', 'coder', 'Mach Y.'],
+  ['mit Einrueckung', '  AN-ROLLE: kommunikator\nMelde Z.', 'kommunikator', 'Melde Z.'],
+  ['Grossschreibung egal', 'AN-ROLLE: Coder\nMach Y.', 'coder', 'Mach Y.'],
+  ['ohne Zeile bleibt null', 'Einfach ein Auftrag.', null, 'Einfach ein Auftrag.'],
+  ['mitten im Text zaehlt nicht', 'Schreibe AN-ROLLE: x hinein.', null, 'Schreibe AN-ROLLE: x hinein.'],
+]
+for (const [name, ein, rolle, text] of rollenFaelle) {
+  const r = rolleAusAuftrag(ein)
+  const gut = r.rolle === rolle && r.text === text
+  if (gut) ok++
+  console.log(`  ${gut ? 'ok   ' : 'FEHLT'} ${name}`)
+  if (!gut) console.log('        ->', JSON.stringify(r))
+}
+
+const gesamt = faelle.length + 1 + blockerFaelle.length + 3 + rollenFaelle.length
 console.log(`\n${ok}/${gesamt} bestanden`)
 process.exit(ok === gesamt ? 0 : 1)

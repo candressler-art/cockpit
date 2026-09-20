@@ -38,6 +38,23 @@ export class FormatFehler extends Error {}
  */
 export const AUFTRAG_TRENNER = /^[ \t]*-{3,}\s*WORKER\s*-{3,}[ \t]*$/gim
 
+/**
+ * Zieht eine fuehrende Zeile `AN-ROLLE: <id>` aus einem Auftrag.
+ *
+ * Optional und je Auftrag, nicht je Antwort: so kann eine Runde einen
+ * Rechercheur und einen Coder gleichzeitig beschaeftigen. Fehlt die Zeile,
+ * bleibt `rolle` null und der Aufrufer nimmt seine Vorgabe -- damit laufen
+ * Auftraege aus der Zeit vor den Fachrollen unveraendert weiter.
+ */
+export function rolleAusAuftrag(auftrag: string): { rolle: string | null; text: string } {
+  const m = /^[ \t]*AN-ROLLE:[ \t]*([A-Za-z0-9_-]+)[ \t]*\r?\n?/.exec(auftrag ?? '')
+  if (!m) return { rolle: null, text: (auftrag ?? '').trim() }
+  return {
+    rolle: (m[1] as string).toLowerCase(),
+    text: (auftrag ?? '').slice(m[0].length).trim(),
+  }
+}
+
 /** Zerlegt einen NAECHSTER-PROMPT in einen oder mehrere Auftraege. */
 export function auftraegeTrennen(prompt: string): string[] {
   AUFTRAG_TRENNER.lastIndex = 0

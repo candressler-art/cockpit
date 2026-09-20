@@ -12,6 +12,20 @@
 const NS = 'http://www.w3.org/2000/svg'
 
 /** Farbe je Status -- dieselben Token wie im uebrigen Fenster. */
+/**
+ * Farbe je Fachrolle -- fuer den schmalen Streifen RECHTS am Knoten.
+ *
+ * Bewusst getrennt von STATUSFARBE: der Balken links sagt, wie es dem Agenten
+ * geht, der Streifen rechts sagt, was er ist. Beides in eine Farbe zu legen
+ * hiesse, eines von beiden nicht mehr sehen zu koennen.
+ */
+const ROLLENFARBE = {
+  orchestrator: 'var(--akzent)',
+  rechercheur: 'var(--lauf)',
+  coder: 'var(--denkt)',
+  kommunikator: 'var(--werkzeug)',
+}
+
 const STATUSFARBE = {
   starting: 'var(--overlay)',
   queued: 'var(--overlay)',
@@ -159,6 +173,16 @@ export class Agentengraph {
       // Statusbalken links -- die Farbe ist auf einen Blick lesbar, der Text nicht.
       g.appendChild(el('rect', { width: 4, height: KH, rx: 2, fill: farbe }))
 
+      // Rollenstreifen rechts. Nur wenn eine Fachrolle bekannt ist: bei Chat
+      // und Subagenten gibt es keine, und ein grauer Streifen waere nur
+      // Rauschen.
+      const rollenfarbe = ROLLENFARBE[a.fachrolle]
+      if (rollenfarbe) {
+        g.appendChild(el('rect', {
+          x: KB - 4, width: 4, height: KH, rx: 2, fill: rollenfarbe,
+        }))
+      }
+
       const t1 = el('text', {
         x: 13, y: 18, fill: 'var(--text)', 'font-size': 11.5,
         'font-family': 'var(--mono)', 'font-weight': 600,
@@ -168,7 +192,7 @@ export class Agentengraph {
       const gew = this.zahl.format(Math.round(a.weightedTokens ?? 0))
       const t2 = el('text', {
         x: 13, y: 33, fill: 'var(--overlay)', 'font-size': 9.5, 'font-family': 'var(--mono)',
-      }, `${a.status} · ${gew}`)
+      }, a.fachrolle ? `${a.fachrolle} · ${gew}` : `${a.status} · ${gew}`)
       g.appendChild(t2)
 
       if (AKTIV.has(a.status)) {

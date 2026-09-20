@@ -25,7 +25,15 @@ export type EventKind =
   | 'hook'
   | 'protocol'
 
-/** Rolle eines Agenten im Lauf. */
+/**
+ * Stellung eines Agenten im Lauf -- NICHT seine Spezialisierung.
+ *
+ * Daran haengt der Graph mit seinen drei Ebenen. Die Fachrolle (Rechercheur,
+ * Coder, Kommunikator) steht separat in AgentState.fachrolle; ein Rechercheur
+ * ist der Stellung nach ein 'worker'. Wuerde man die Fachrollen hier
+ * einsortieren, fielen sie alle in die Worker-Ebene und der Graph waere still
+ * falsch.
+ */
 export type AgentRole = 'orchestrator' | 'worker' | 'chat' | 'subagent'
 
 /** Status eines Agenten, wie ihn der Graph anzeigt. */
@@ -63,6 +71,8 @@ export interface AgentState {
   agentId: string
   runId: string
   role: AgentRole
+  /** Fachrolle aus rollen/*.md, z.B. 'rechercheur'. Null bei Chat und Subagenten. */
+  fachrolle: string | null
   status: AgentStatus
   sessionId: string | null
   label: string

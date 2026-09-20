@@ -11,6 +11,10 @@ import { dirname } from 'node:path'
 import type { AgentState, CockpitEvent, PermissionRequest } from './typen.js'
 
 const SCHEMA = `
+CREATE TABLE IF NOT EXISTS schema_version (
+  version INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS runs (
   run_id      TEXT PRIMARY KEY,
   label       TEXT NOT NULL,
@@ -25,6 +29,7 @@ CREATE TABLE IF NOT EXISTS agents (
   agent_id        TEXT NOT NULL,
   run_id          TEXT NOT NULL,
   role            TEXT NOT NULL,
+  fachrolle       TEXT,
   status          TEXT NOT NULL,
   session_id      TEXT,
   label           TEXT NOT NULL,
@@ -82,6 +87,37 @@ export class CockpitDb {
     this.db.exec('PRAGMA synchronous = NORMAL')
     this.db.exec('PRAGMA foreign_keys = ON')
     this.db.exec(SCHEMA)
+    this.migrieren()
+  }
+
+  /**
+   * Schemastand fortschreiben.
+   *
+   * Vorher gab es nur CREATE TABLE IF NOT EXISTS und kein Versionsfeld: eine
+   * bestehende Datenbank bekam neue Spalten schlicht nicht, und es fiel erst
+   * beim ersten INSERT auf. Jede Stufe hier ist additiv und darf zweimal
+   * laufen, damit ein halb durchgelaufener Start nichts kaputtmacht.
+   */
+  private migrieren(): void {
+    const zeile = this.db.prepare('SELECT version FROM schema_version LIMIT 1').get() as
+      | { version: number }
+      | undefined
+    let stand = zeile?.version ?? 0
+    if (zeile === undefined) this.db.prepare('INSERT INTO schema_version (version) VALUES (0)').run()
+
+    if (stand < 1) {
+      // Bestandsdatenbanken: die Spalte fehlt, CREATE TABLE hat sie nicht
+      // nachgetragen. Doppeltes ALTER wirft -- das ist hier der Normalfall
+      // bei einer frisch angelegten Datei und kein Fehler.
+      try {
+        this.db.exec('ALTER TABLE agents ADD COLUMN fachrolle TEXT')
+      } catch {
+        /* Spalte war schon da (neu angelegte Datenbank) */
+      }
+      stand = 1
+    }
+
+    this.db.prepare('UPDATE schema_version SET version = ?').run(stand)
   }
 
   runAnlegen(runId: string, label: string, cwd: string | null): void {
@@ -102,12 +138,13 @@ export class CockpitDb {
   agentSpeichern(a: AgentState): void {
     this.db
       .prepare(
-        `INSERT INTO agents (agent_id, run_id, role, status, session_id, label,
+        `INSERT INTO agents (agent_id, run_id, role, fachrolle, status, session_id, label,
            parent_agent_id, model, cwd, started_at, ended_at, weighted_tokens,
            raw_tokens, cost_usd, turns, last_error)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
          ON CONFLICT (run_id, agent_id) DO UPDATE SET
            status = excluded.status,
+           fachrolle = excluded.fachrolle,
            session_id = excluded.session_id,
            model = excluded.model,
            cwd = excluded.cwd,
@@ -119,7 +156,7 @@ export class CockpitDb {
            last_error = excluded.last_error`,
       )
       .run(
-        a.agentId, a.runId, a.role, a.status, a.sessionId, a.label,
+        a.agentId, a.runId, a.role, a.fachrolle, a.status, a.sessionId, a.label,
         a.parentAgentId, a.model, a.cwd, a.startedAt, a.endedAt,
         a.weightedTokens, a.rawTokens, a.costUsd, a.turns, a.lastError,
       )

@@ -35,6 +35,9 @@ export interface AgentStartOptionen {
   runId: string
   agentId: string
   role: AgentRole
+  /** Fachrolle aus rollen/*.md. Nur zur Anzeige und Auswertung -- Prompt,
+   *  Modell und Werkzeuge loest der Aufrufer bereits auf. */
+  fachrolle?: string | null
   label: string
   prompt: string
   cwd: string
@@ -138,6 +141,7 @@ export class Supervisor extends EventEmitter {
       agentId: o.agentId,
       runId: o.runId,
       role: o.role,
+      fachrolle: o.fachrolle ?? null,
       status: 'starting',
       sessionId: null,
       label: o.label,

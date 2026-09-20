@@ -13,6 +13,7 @@ import { Orchestrator, type OrchestratorKonfig } from './orchestrator.js'
 import { DiscordAdapter } from './discord.js'
 import type { CockpitEvent } from './typen.js'
 import { standLesen, type SystemStand } from './system.js'
+import { rollenLaden, rollenListe } from './rollen.js'
 
 const PORT = Number(process.env.COCKPIT_PORT ?? 8765)
 const HOST = process.env.COCKPIT_HOST ?? '127.0.0.1'
@@ -246,6 +247,10 @@ async function systemPuls(): Promise<void> {
 void systemPuls()
 setInterval(() => void systemPuls(), 20_000).unref()
 
+// Fachrollen beim Start einlesen. Ein Fehler hier soll frueh sichtbar sein --
+// nicht erst, wenn der Orchestrator in Runde drei eine Rolle adressiert.
+await rollenLaden()
+
 // --- HTTP --------------------------------------------------------------------
 
 /**
@@ -445,6 +450,10 @@ const server = createServer(async (req, res) => {
       }
       const ok = supervisor.agentAbbrechen(runId, agentId)
       return json(ok ? 200 : 404, { ok })
+    }
+
+    if (pfad === '/api/rollen' && req.method === 'GET') {
+      return json(200, { rollen: rollenListe() })
     }
 
     if (pfad === '/api/system' && req.method === 'GET') {

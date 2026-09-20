@@ -15,9 +15,11 @@ import {
   istWiederholung,
   orchestratorAntwortLesen,
   reportTypLesen,
+  rolleAusAuftrag,
   FormatFehler,
   type OrchestratorAntwort,
 } from './protokoll.js'
+import { rolleLesen, workerRollen, VORGABE_ROLLE } from './rollen.js'
 
 export interface OrchestratorKonfig {
   runId: string
@@ -32,6 +34,11 @@ export interface OrchestratorKonfig {
   parallelitaet: number
   orchestratorModell?: string
   workerModell?: string
+  /**
+   * Fachrollen, die der Orchestrator in diesem Lauf beauftragen darf.
+   * Leer oder fehlend: alle bekannten ausser 'orchestrator'.
+   */
+  rollen?: string[]
   /** Weicher Deckel je einzelnem Aufruf. */
   maxBudgetUsd?: number
   /** Gewichtetes Tokenbudget des ganzen Laufs; 0 schaltet die Pruefung ab. */
@@ -231,9 +238,35 @@ export class Orchestrator extends EventEmitter {
   }
 
   private systemPrompt(k: OrchestratorKonfig): string {
+    const eigene = rolleLesen('orchestrator')
     return (
+      (eigene ? `${eigene.systemPrompt}\n\n` : '') +
       `${ORCHESTRATOR_RAHMEN_VOR}\n${k.projektBlock.trim()}\n\n` +
-      ORCHESTRATOR_RAHMEN_NACH.replace('PARALLEL_MAX', String(Math.max(1, k.parallelitaet)))
+      ORCHESTRATOR_RAHMEN_NACH.replace('PARALLEL_MAX', String(Math.max(1, k.parallelitaet))) +
+      this.rollenBlock(k)
+    )
+  }
+
+  /**
+   * Welche Fachrollen der Orchestrator adressieren kann.
+   *
+   * Ohne diesen Block wuesste er nichts von ihnen und wuerde nie eine
+   * AN-ROLLE-Zeile schreiben -- die Rollen waeren da, aber unbenutzt.
+   */
+  private rollenBlock(k: OrchestratorKonfig): string {
+    const erlaubt = k.rollen?.length
+      ? workerRollen().filter((r) => k.rollen?.includes(r.id))
+      : workerRollen()
+    if (erlaubt.length === 0) return ''
+    const liste = erlaubt.map((r) => `- ${r.id}: ${r.beschreibung}`).join('\n')
+    return (
+      `\n\n# Fachrollen\n\n` +
+      `Jedem Auftrag im NAECHSTER-PROMPT darfst du als ERSTE Zeile voranstellen:\n\n` +
+      `    AN-ROLLE: <id>\n\n` +
+      `Verfuegbar sind:\n\n${liste}\n\n` +
+      `Ohne die Zeile gilt '${VORGABE_ROLLE}'. Die Rolle bestimmt Werkzeuge und ` +
+      `Modell des Workers -- ein Rechercheur kann nichts schreiben, ein Coder schon. ` +
+      `Waehle danach, was der Auftrag wirklich braucht.`
     )
   }
 
@@ -294,14 +327,30 @@ export class Orchestrator extends EventEmitter {
       const ergebnisse = await Promise.all(
         stapel.map(async (auftrag, i) => {
           const agentId = stapel.length === 1 ? `worker-r${runde}` : `worker-r${runde}-${i + 1}`
+          // Fachrolle je Auftrag, nicht je Runde: eine Runde darf einen
+          // Rechercheur und einen Coder gleichzeitig beschaeftigen.
+          const { rolle: gewuenscht, text: auftragstext } = rolleAusAuftrag(auftrag)
+          const fach = rolleLesen(gewuenscht ?? VORGABE_ROLLE) ?? rolleLesen(VORGABE_ROLLE)
+          if (gewuenscht && !rolleLesen(gewuenscht)) {
+            // Nicht stillschweigend ersetzen: der Orchestrator hat eine Rolle
+            // adressiert, die es nicht gibt, und das gehoert in den Verlauf.
+            this.melden(k.runId, 'rolle_unbekannt', { agentId, gewuenscht, statt: fach?.id ?? null })
+          }
+          const rollenVorspann = fach ? `${fach.systemPrompt}\n\n---\n\n` : ''
           const r = await this.supervisor.agentStarten({
             runId: k.runId,
             agentId,
             role: 'worker',
-            label: stapel.length === 1 ? `Worker R${runde}` : `Worker R${runde}.${i + 1}`,
-            prompt: WORKER_VORSPANN + auftrag,
+            fachrolle: fach?.id ?? null,
+            label: stapel.length === 1
+              ? `${fach?.name ?? 'Worker'} R${runde}`
+              : `${fach?.name ?? 'Worker'} R${runde}.${i + 1}`,
+            prompt: rollenVorspann + WORKER_VORSPANN + auftragstext,
             cwd: k.cwd,
-            model: k.workerModell,
+            // Modell der Rolle schlaegt die Laufvorgabe: ein Rechercheur auf
+            // Opus waere Verschwendung, ein Coder auf Haiku ein Rueckschritt.
+            model: fach?.modell ?? k.workerModell,
+            ...(fach?.werkzeuge ? { allowedTools: fach.werkzeuge } : {}),
             maxBudgetUsd: k.maxBudgetUsd,
           })
           // Volltext statt `result`: bei ueberschrittener Ausgabegrenze traegt
@@ -352,6 +401,7 @@ export class Orchestrator extends EventEmitter {
           runId: k.runId,
           agentId: `orchestrator-r${runde}${leseRunden ? `-l${leseRunden}` : ''}`,
           role: 'orchestrator',
+          fachrolle: 'orchestrator',
           label: `Orchestrator R${runde}${leseRunden ? `·L${leseRunden}` : ''}`,
           prompt: `${this.systemPrompt(k)}\n\n---\n\n${prompt}`,
           cwd: k.cwd,
