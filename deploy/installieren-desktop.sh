@@ -28,9 +28,15 @@ else
   echo "Hinweis: Icon nicht gefunden, App startet trotzdem"
 fi
 
-install -m 644 "$WURZEL/deploy/cockpit.desktop" \
-  "$HOME/.local/share/applications/cockpit.desktop" \
-  && echo "Eintrag:  ~/.local/share/applications/cockpit.desktop"
+# Der Startereintrag traegt die Daemon-Adresse fest ein. Ohne sie zeigt die App
+# auf 127.0.0.1:8765, und wer keinen lokalen Daemon laufen hat, sieht beim
+# Klick aufs Icon nur "Kein Daemon erreichbar". Andere Adresse waehlen:
+#   COCKPIT_DAEMON=127.0.0.1:8765 ./deploy/installieren-desktop.sh
+ADRESSE="${COCKPIT_DAEMON:-serverone.tail9c8a2b.ts.net}"
+sed "s|@ADRESSE@|$ADRESSE|" "$WURZEL/deploy/cockpit.desktop" \
+  > "$HOME/.local/share/applications/cockpit.desktop" \
+  && chmod 644 "$HOME/.local/share/applications/cockpit.desktop" \
+  && echo "Eintrag:  ~/.local/share/applications/cockpit.desktop  (Daemon: $ADRESSE)"
 
 command -v update-desktop-database >/dev/null \
   && update-desktop-database "$HOME/.local/share/applications" 2>/dev/null
@@ -39,13 +45,14 @@ command -v gtk-update-icon-cache >/dev/null \
 
 echo
 echo "Fertig. Starten:"
+echo "  ueber Startmenue/Icon                             (Daemon: $ADRESSE)"
 echo "  cockpit                                          (lokaler Daemon)"
 echo "  COCKPIT_DAEMON=serverone.tail9c8a2b.ts.net cockpit   (Server im Tailnet)"
 echo
 echo "Hyprland-Keybind: dieses System nutzt die Lua-Konfiguration."
 echo "In ~/.config/hypr/hyprland.lua ergaenzen:"
 echo ""
-echo '  hl.bind("SUPER + C", hl.dsp.exec_cmd("cockpit"), {'
+echo "  hl.bind(\"SUPER + C\", hl.dsp.exec_cmd(\"env COCKPIT_DAEMON=$ADRESSE cockpit\"), {"
 echo '      description = "[Utilities] Cockpit",'
 echo '  })'
 echo ""

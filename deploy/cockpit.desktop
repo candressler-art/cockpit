@@ -3,7 +3,10 @@ Type=Application
 Name=Cockpit
 GenericName=Agenten-Zentrale
 Comment=Orchestrator und Worker fuer Claude Code
-Exec=cockpit
+# Die App bringt keinen Daemon mit. Ohne die Adresse unten faellt sie auf
+# 127.0.0.1:8765 zurueck -- dort laeuft hier aber keiner, der Daemon sitzt auf
+# dem Server. Den Platzhalter ersetzt installieren-desktop.sh beim Einrichten.
+Exec=env COCKPIT_DAEMON=@ADRESSE@ cockpit
 Icon=cockpit
 Terminal=false
 Categories=Development;
