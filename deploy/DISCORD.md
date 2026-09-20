@@ -30,10 +30,21 @@ Der vollständige Ereignisstrom bleibt in der App und in der Datenbank.
    angezeigt.
 3. Auf derselben Seite **Message Content Intent** einschalten. Ohne ihn kommen
    deine Antworten auf Entscheidungsfragen leer an.
-4. Links **OAuth2** → **URL Generator** → Scopes `bot`, Berechtigungen
-   `Send Messages`, `Create Public Threads`, `Send Messages in Threads`,
-   `Read Message History`, `Add Reactions`. Die erzeugte URL öffnen und den Bot
-   auf deinen Server einladen.
+4. Links **OAuth2** → **URL Generator** → Scope `bot`. Diese sieben
+   Berechtigungen anhaken:
+
+   | Berechtigung | wofür |
+   |---|---|
+   | Kanäle ansehen | überhaupt in den Kanal sehen |
+   | Nachrichten senden | Status und Fragen |
+   | **Links einbetten** | **ohne das erscheint keine einzige formatierte Nachricht — kommentarlos** |
+   | Nachrichtenverlauf anzeigen | Antworten per Reply zuordnen |
+   | Reaktionen hinzufügen | Bestätigung, dass eine Antwort ankam |
+   | Öffentliche Threads erstellen | ein Thread je Lauf |
+   | Nachrichten in Threads senden | Protokollschritte dorthin |
+
+   Das entspricht `permissions=309237730368`. Die erzeugte URL öffnen und den
+   Bot auf deinen Server einladen.
 5. In Discord die Kanal-ID holen: Einstellungen → Erweitert →
    Entwicklermodus an, dann Rechtsklick auf den Kanal → **Kanal-ID kopieren**.
 
