@@ -36,6 +36,8 @@ export interface OrchestratorKonfig {
   maxBudgetUsd?: number
   /** Gewichtetes Tokenbudget des ganzen Laufs; 0 schaltet die Pruefung ab. */
   tokenBudget: number
+  /** Wie lange auf eine Antwort gewartet wird. Vorgabe acht Stunden. */
+  antwortTimeoutMs?: number
 }
 
 export type LaufEnde =
@@ -168,6 +170,12 @@ function beschriften(art: string, d: unknown): string {
       return `${o.agentId}: Report ohne Report-Typ-Zeile`
     case 'parallel':
       return `${o.anzahl} Auftraege gleichzeitig vergeben`
+    case 'frage':
+      return `Frage an dich: ${String(o.frage ?? '').slice(0, 300)}`
+    case 'warten':
+      return 'wartet auf deine Antwort'
+    case 'antwort':
+      return `Antwort erhalten: ${String(o.text ?? '').slice(0, 200)}`
     default:
       return art
   }
@@ -177,6 +185,8 @@ export class Orchestrator extends EventEmitter {
   private supervisor: Supervisor
   private db: CockpitDb
   private abbruch = false
+  /** Wer gerade auf eine Antwort wartet. */
+  private warteAufAntwort: ((text: string | null) => void) | null = null
 
   constructor(supervisor: Supervisor, db: CockpitDb) {
     super()
@@ -186,6 +196,38 @@ export class Orchestrator extends EventEmitter {
 
   abbrechen(): void {
     this.abbruch = true
+    // Eine wartende Frage aufloesen, sonst haengt der Lauf bis zum Timeout.
+    this.warteAufAntwort?.(null)
+  }
+
+  /**
+   * Antwort auf eine Entscheidungsfrage einspeisen. Gibt false zurueck, wenn
+   * gerade niemand wartet.
+   */
+  antwortGeben(text: string): boolean {
+    if (!this.warteAufAntwort) return false
+    this.warteAufAntwort(text)
+    return true
+  }
+
+  /** Wartet auf eine Antwort. null bei Abbruch oder Zeitablauf. */
+  private antwortAbwarten(timeoutMs: number): Promise<string | null> {
+    return new Promise((resolve) => {
+      let erledigt = false
+      const fertig = (t: string | null) => {
+        if (erledigt) return
+        erledigt = true
+        clearTimeout(uhr)
+        this.warteAufAntwort = null
+        resolve(t)
+      }
+      const uhr = setTimeout(() => fertig(null), timeoutMs)
+      // Der Timer darf den Prozess nicht am Leben halten, wenn sonst nichts
+      // mehr laeuft -- ein Lauf, auf dessen Antwort niemand mehr wartet, soll
+      // den Daemon nicht blockieren.
+      if (typeof uhr.unref === 'function') uhr.unref()
+      this.warteAufAntwort = fertig
+    })
   }
 
   private systemPrompt(k: OrchestratorKonfig): string {
@@ -345,7 +387,29 @@ export class Orchestrator extends EventEmitter {
         return { grund: 'fertig', text: antwort.begruendung ?? antwort.statusKurz }
       }
       if (antwort.fall === 'entscheidung') {
-        return { grund: 'entscheidung', frage: antwort.entscheidung ?? antwort.statusKurz }
+        const frage = antwort.entscheidung ?? antwort.statusKurz
+        this.melden(k.runId, 'frage', { runde, frage })
+
+        // Warten statt beenden. Der Vorgaenger loop.py wartet bis zu acht
+        // Stunden auf eine Antwort, und das ist der Grund, warum ein Lauf
+        // ueberhaupt unbeaufsichtigt laufen kann: eine Frage haelt ihn an,
+        // sie beendet ihn nicht.
+        this.melden(k.runId, 'warten', { runde })
+        const antworttext = await this.antwortAbwarten(k.antwortTimeoutMs ?? 8 * 3600 * 1000)
+        if (this.abbruch) return { grund: 'abgebrochen' }
+        if (antworttext === null) {
+          return { grund: 'entscheidung', frage }
+        }
+        this.melden(k.runId, 'antwort', { runde, text: antworttext })
+
+        // Die Antwort geht als naechster Auftrag an den Worker, zusammen mit
+        // der Frage -- ohne sie fehlt dem Worker der Zusammenhang.
+        auftraege = [
+          `Der Mensch wurde gefragt:\n\n${frage}\n\nSeine Antwort:\n\n${antworttext}\n\n` +
+            `Arbeite auf dieser Grundlage weiter und berichte.`,
+        ]
+        verlauf.push({ runde, statusKurz: `Antwort erhalten: ${antworttext.slice(0, 120)}` })
+        continue
       }
 
       // Blocker gemeldet, aber der Orchestrator macht weiter: harter Stopp.

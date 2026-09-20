@@ -10,6 +10,7 @@ import { WebSocketServer, type WebSocket } from 'ws'
 import { CockpitDb } from './db.js'
 import { Supervisor } from './supervisor.js'
 import { Orchestrator, type OrchestratorKonfig } from './orchestrator.js'
+import { DiscordAdapter } from './discord.js'
 import type { CockpitEvent } from './typen.js'
 
 const PORT = Number(process.env.COCKPIT_PORT ?? 8765)
@@ -23,6 +24,161 @@ if (verwaist > 0) console.log(`[cockpit] ${verwaist} verwaiste Lauf/Laeufe als a
 
 const supervisor = new Supervisor(db)
 const orchestratoren = new Map<string, Orchestrator>()
+
+/**
+ * Startet einen Orchestrator-Lauf. Gemeinsam genutzt von HTTP und Discord,
+ * damit ein per Discord gestarteter Lauf in jeder Hinsicht derselbe ist wie
+ * einer aus der Oberflaeche.
+ */
+function orchestratorLaufStarten(o: {
+  label: string
+  cwd: string
+  anfangsPrompt: string
+  projektBlock: string
+  maxRunden?: number
+  parallelitaet?: number
+  orchestratorModell?: string
+  workerModell?: string
+  maxBudgetUsd?: number
+  tokenBudget?: number
+}): string {
+  const runId = randomUUID()
+  db.runAnlegen(runId, o.label, o.cwd)
+
+  const konfig: OrchestratorKonfig = {
+    runId,
+    cwd: o.cwd,
+    projektBlock: o.projektBlock,
+    anfangsPrompt: o.anfangsPrompt,
+    maxRunden: o.maxRunden ?? 10,
+    parallelitaet: o.parallelitaet ?? 1,
+    orchestratorModell: o.orchestratorModell,
+    workerModell: o.workerModell,
+    maxBudgetUsd: o.maxBudgetUsd,
+    tokenBudget: o.tokenBudget ?? 600000,
+  }
+
+  const orch = new Orchestrator(supervisor, db)
+  orchestratoren.set(runId, orch)
+  letzterLauf = { runId, cwd: o.cwd }
+  orch.on('orchestrator', (e: { runId: string; art?: string; daten?: Record<string, unknown> }) => {
+    verteilen('orchestrator', e, e.runId)
+    if (e.art === 'frage' && e.daten?.frage) {
+      void discord?.frageStellen(runId, String(e.daten.frage))
+    }
+  })
+
+  void discord?.laufBegonnen(runId, o.label, o.cwd)
+
+  void orch
+    .fahren(konfig)
+    .then((ende) => {
+      const status =
+        ende.grund === 'fertig' ? 'done' : ende.grund === 'abgebrochen' ? 'stopped' : 'failed'
+      db.runBeenden(runId, status, JSON.stringify(ende))
+      verteilen('lauf_ende', { runId, ende }, runId)
+      const gew = supervisor.agentenListe(runId).reduce((x, a) => x + a.weightedTokens, 0)
+      const text = 'text' in ende ? ende.text : 'frage' in ende ? ende.frage : ''
+      void discord?.laufBeendet(runId, ende.grund, String(text ?? ''), gew)
+    })
+    .catch((e) => db.runBeenden(runId, 'failed', String(e)))
+    .finally(() => orchestratoren.delete(runId))
+
+  return runId
+}
+
+// --- Discord (optional) ------------------------------------------------------
+//
+// Nur aktiv, wenn Token und Kanal konfiguriert sind. Ohne beides laeuft der
+// Daemon unveraendert weiter -- Discord ist ein Kanal, keine Voraussetzung.
+const DISCORD_TOKEN = process.env.COCKPIT_DISCORD_TOKEN ?? ''
+const DISCORD_KANAL = process.env.COCKPIT_DISCORD_KANAL ?? ''
+const DISCORD_BENUTZER = (process.env.COCKPIT_DISCORD_BENUTZER ?? '')
+  .split(',').map((x) => x.trim()).filter(Boolean)
+
+let discord: DiscordAdapter | null = null
+/** Zuletzt gestarteter Lauf -- Ziel fuer Befehle ohne ausdrueckliche Lauf-Id. */
+let letzterLauf: { runId: string; cwd: string } | null = null
+
+if (DISCORD_TOKEN && DISCORD_KANAL) {
+  discord = new DiscordAdapter({
+    token: DISCORD_TOKEN,
+    kanalId: DISCORD_KANAL,
+    erlaubteBenutzer: DISCORD_BENUTZER,
+  })
+
+  discord.on('freigabe', ({ id, erlaubt, durch }: { id: string; erlaubt: boolean; durch: string }) => {
+    if (!supervisor.freigabeEntscheiden(id, erlaubt, durch)) {
+      console.warn(`[discord] Freigabe ${id} war nicht mehr offen`)
+    }
+  })
+
+  discord.on('antwort', ({ runId, text, durch }: { runId: string; text: string; durch: string }) => {
+    const orch = orchestratoren.get(runId)
+    if (orch?.antwortGeben(text)) {
+      console.log(`[discord] Antwort von ${durch} an Lauf ${runId.slice(0, 8)}`)
+    } else {
+      console.warn(`[discord] auf Lauf ${runId.slice(0, 8)} wartet gerade niemand`)
+    }
+  })
+
+  discord.on('lauf', ({ prompt, durch }: { prompt: string; durch: string }) => {
+    // Verzeichnis und Projektblock kommen aus der Konfiguration -- per Discord
+    // laesst sich absichtlich kein beliebiges Verzeichnis oeffnen.
+    const cwd = process.env.COCKPIT_DISCORD_CWD ?? process.env.HOME ?? '.'
+    const block = process.env.COCKPIT_DISCORD_PROJEKTBLOCK ??
+      '# Projekt\n\nKein Projektblock konfiguriert. Arbeite nach dem Auftrag und ' +
+      'frag nach, wenn Kriterien fehlen.'
+    const runId = orchestratorLaufStarten({
+      label: prompt.slice(0, 60),
+      cwd,
+      anfangsPrompt: prompt,
+      projektBlock: block,
+      maxRunden: Number(process.env.COCKPIT_DISCORD_MAXRUNDEN ?? 8),
+      parallelitaet: Number(process.env.COCKPIT_DISCORD_PARALLEL ?? 1),
+      workerModell: process.env.COCKPIT_WORKER_MODELL,
+      orchestratorModell: process.env.COCKPIT_ORCHESTRATOR_MODELL,
+    })
+    console.log(`[discord] Lauf ${runId.slice(0, 8)} von ${durch} gestartet`)
+  })
+
+  discord.on('stop', ({ runId }: { runId: string | null }) => {
+    const ziel = runId || letzterLauf?.runId
+    if (!ziel) return
+    orchestratoren.get(ziel)?.abbrechen()
+    for (const a of supervisor.agentenListe(ziel)) supervisor.agentAbbrechen(ziel, a.agentId)
+  })
+
+  discord.on('status', ({ antworten }: { antworten: (s: string) => void }) => {
+    const laeufe = db.laeufeLesen(5)
+    const zeilen = laeufe.map((l) => {
+      const agenten = supervisor.agentenListe(String(l.run_id))
+      const gew = agenten.reduce((x, a) => x + a.weightedTokens, 0)
+      const aktiv = agenten.filter((a) => !a.endedAt).length
+      return `${l.status === 'running' ? '▶' : '·'} ${l.label} — ${l.status}` +
+        (aktiv ? `, ${aktiv} aktiv` : '') +
+        (gew ? `, ${Math.round(gew / 1000)}k gew.` : '')
+    })
+    antworten(zeilen.join('\n') || 'Keine Laeufe.')
+  })
+
+  void discord.starten().catch((e) => {
+    console.error('[discord] Start fehlgeschlagen:', e instanceof Error ? e.message : e)
+    discord = null
+  })
+}
+
+// Freigaben und Protokollschritte nach Discord spiegeln.
+supervisor.on('freigabe', (f: PermissionRequestLike) => void discord?.freigabeAnfragen(f as never))
+supervisor.on('ereignis', (e: CockpitEvent) => {
+  if (!discord) return
+  // Nur Protokollschritte und echte Fehler -- alles andere waere Rauschen und
+  // liefe binnen Sekunden in Discords Ratenbegrenzung.
+  if (e.kind === 'protocol') void discord.protokoll(e.runId, e.summary)
+  else if (e.kind === 'error') void discord.warnen(`${e.agentId}: ${e.summary}`)
+})
+
+interface PermissionRequestLike { runId: string }
 
 // --- WebSocket-Verteilung ----------------------------------------------------
 
@@ -193,39 +349,19 @@ const server = createServer(async (req, res) => {
       if (!anfangsPrompt) return json(400, { fehler: 'anfangsPrompt fehlt' })
       if (!cwd) return json(400, { fehler: 'cwd fehlt' })
 
-      const runId = randomUUID()
-      const label = String(k?.label ?? 'Orchestrator-Lauf')
-      db.runAnlegen(runId, label, cwd)
-
-      const konfig: OrchestratorKonfig = {
-        runId,
+      const runId = orchestratorLaufStarten({
+        label: String(k?.label ?? 'Orchestrator-Lauf'),
         cwd,
-        projektBlock: String(k?.projektBlock ?? '(kein Projektblock angegeben)'),
         anfangsPrompt,
-        maxRunden: Number(k?.maxRunden ?? 10),
-        parallelitaet: Number(k?.parallelitaet ?? 1),
+        projektBlock: String(k?.projektBlock ?? '(kein Projektblock angegeben)'),
+        maxRunden: k?.maxRunden ? Number(k.maxRunden) : undefined,
+        parallelitaet: k?.parallelitaet ? Number(k.parallelitaet) : undefined,
         orchestratorModell: k?.orchestratorModell ? String(k.orchestratorModell) : undefined,
         workerModell: k?.workerModell ? String(k.workerModell) : undefined,
         maxBudgetUsd: k?.maxBudgetUsd ? Number(k.maxBudgetUsd) : undefined,
-        tokenBudget: Number(k?.tokenBudget ?? 600000),
-      }
-
-      const orch = new Orchestrator(supervisor, db)
-      orchestratoren.set(runId, orch)
-      orch.on('orchestrator', (e: { runId: string }) => verteilen('orchestrator', e, e.runId))
-
-      json(202, { runId })
-
-      void orch
-        .fahren(konfig)
-        .then((ende) => {
-          const status = ende.grund === 'fertig' ? 'done' : ende.grund === 'abgebrochen' ? 'stopped' : 'failed'
-          db.runBeenden(runId, status, JSON.stringify(ende))
-          verteilen('lauf_ende', { runId, ende }, runId)
-        })
-        .catch((e) => db.runBeenden(runId, 'failed', String(e)))
-        .finally(() => orchestratoren.delete(runId))
-      return
+        tokenBudget: k?.tokenBudget !== undefined ? Number(k.tokenBudget) : undefined,
+      })
+      return json(202, { runId })
     }
 
     if (pfad === '/api/freigabe' && req.method === 'POST') {
@@ -381,6 +517,7 @@ server.listen(PORT, HOST, () => {
 
 function beenden(signal: string): void {
   console.log(`[cockpit] ${signal} -- beende Agenten und schliesse DB`)
+  void discord?.beenden()
   supervisor.alleAbbrechen()
   server.close()
   db.close()
