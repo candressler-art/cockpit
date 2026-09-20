@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Cockpit</title>
+<link rel="manifest" href="./manifest.webmanifest">
+<meta name="theme-color" content="#1e1e2e">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <style>
   :root {
     --base:#1e1e2e; --mantle:#181825; --crust:#11111b;
@@ -17,7 +21,7 @@
   }
   *{box-sizing:border-box}
   body{margin:0;background:var(--base);color:var(--text);font:14px/1.5 var(--sans);height:100vh;overflow:hidden}
-  #app{display:grid;grid-template-columns:260px 1fr 300px;grid-template-rows:44px 1fr;height:100vh}
+  #app{display:grid;grid-template-columns:260px 1fr 300px;grid-template-rows:44px 34px 1fr;height:100vh}
   header{grid-column:1/-1;display:flex;align-items:center;gap:10px;padding:0 14px;overflow:hidden;
     background:var(--mantle);border-bottom:1px solid var(--surface0)}
   header h1{font-size:13px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;
@@ -131,6 +135,75 @@
   .leer{color:var(--overlay);font-size:12px;padding:6px 2px}
   .zeile.neu{animation:rein .25s ease-out}
   @keyframes rein{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
+  /* --- Tabs --------------------------------------------------------------
+   * Die Lauf-Ansicht behaelt das dreispaltige Grid; alle anderen Tabs
+   * bekommen eine Flaeche ueber die volle Breite. Umgeschaltet wird ueber
+   * #app.nur-lauf, damit aside/main/#rechts direkte Grid-Kinder bleiben --
+   * in einen Wrapper gepackt waere das Layout hin. */
+  #tableiste{grid-column:1/-1;grid-row:2;display:flex;align-items:stretch;gap:2px;
+    padding:0 10px;background:var(--mantle);border-bottom:1px solid var(--surface0)}
+  #tableiste button{display:flex;align-items:center;gap:6px;border:0;background:none;
+    color:var(--subtext);font:12px/1 var(--sans);padding:0 12px;cursor:pointer;
+    border-bottom:2px solid transparent}
+  #tableiste button:hover{color:var(--text)}
+  #tableiste button.an{color:var(--akzent);border-bottom-color:var(--akzent)}
+  #tableiste .sym{font-size:13px;line-height:1}
+  aside,main,#rechts{grid-row:3}
+  .tabflaeche{grid-column:1/-1;grid-row:3;overflow:auto;padding:16px;display:none}
+  .tabflaeche.an{display:block}
+  #app:not(.nur-lauf)>aside,#app:not(.nur-lauf)>main,#app:not(.nur-lauf)>#rechts{display:none}
+  .schubladenknopf{display:none}
+
+  /* --- Handy -------------------------------------------------------------
+   * Eine Spalte, Tableiste an den unteren Rand (Daumenreichweite). Agenten
+   * und Freigaben werden zu Schubladen, die ueber den Inhalt fahren -- auf
+   * 375px Breite waere eine dritte Spalte nicht lesbar. */
+  @media (max-width:820px){
+    #app{grid-template-columns:1fr;grid-template-rows:44px 1fr 54px}
+    header{grid-row:1}
+    header h1{display:none}
+    header select{max-width:130px}
+    #tableiste{grid-row:3;padding:0;justify-content:space-around;
+      border-bottom:0;border-top:1px solid var(--surface0)}
+    #tableiste button{flex:1;flex-direction:column;gap:3px;justify-content:center;
+      font-size:10px;padding:0;border-bottom:0;border-top:2px solid transparent}
+    #tableiste button.an{border-top-color:var(--akzent)}
+    #tableiste .sym{font-size:16px}
+    main,.tabflaeche{grid-row:2;grid-column:1}
+    aside,#rechts{position:fixed;top:44px;bottom:54px;width:min(84vw,320px);z-index:20;
+      transition:transform .18s ease-out;box-shadow:0 0 24px #0008}
+    aside{left:0;transform:translateX(-100%)}
+    #rechts{right:0;transform:translateX(100%)}
+    #app.schublade-links>aside{transform:none}
+    #app.schublade-rechts>#rechts{transform:none}
+    #app.nur-lauf .schubladenknopf{display:inline-flex}
+    #graphbox{max-height:38vh}
+  }
+  /* --- Tab "Server" ------------------------------------------------------ */
+  .hostliste{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+  .hostkarte{border:1px solid var(--surface0);border-radius:10px;background:var(--mantle);
+    padding:12px 14px}
+  .hostkopf{display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+  .hostkopf h3{margin:0;font-size:14px;font-weight:600}
+  .ampel{width:8px;height:8px;border-radius:50%;flex:0 0 auto;background:var(--overlay)}
+  .ampel.an{background:var(--fertig)} .ampel.ab{background:var(--fehler)}
+  .quelle{font:10px/1 var(--mono);color:var(--overlay);border:1px solid var(--surface0);
+    border-radius:999px;padding:3px 7px}
+  .messungen{display:flex;gap:6px;justify-content:space-around;text-align:center}
+  .messung{flex:1;min-width:0}
+  .ring{width:64px;height:64px;transform:rotate(-90deg)}
+  .ring .bahn{fill:none;stroke:var(--surface0);stroke-width:6}
+  .ring .fuellung{fill:none;stroke:var(--fertig);stroke-width:6;stroke-linecap:round;
+    transition:stroke-dasharray .4s ease-out}
+  .messung.warm .ring .fuellung,.pill.warm{stroke:var(--werkzeug);color:var(--werkzeug)}
+  .messung.heiss .ring .fuellung,.pill.heiss{stroke:var(--fehler);color:var(--fehler)}
+  .messung.unbekannt .ring .fuellung{stroke:var(--surface2)}
+  .messung .wert{font:13px/1.2 var(--mono);margin-top:-6px}
+  .messung .was{font-size:11px;color:var(--subtext);margin-top:2px}
+  .messung .zusatz{font-size:10px;color:var(--overlay)}
+  .hinweis{border:1px solid var(--surface0);border-left:3px solid var(--werkzeug);
+    border-radius:6px;padding:9px 12px;margin-bottom:14px;font-size:12px;color:var(--subtext)}
+  .hinweis code{font:11px/1 var(--mono);background:var(--crust);padding:2px 5px;border-radius:3px}
 </style>
 </head>
 <body>
@@ -141,9 +214,13 @@
     <span class="pill" id="budget">0 Tokens</span>
     <span class="pill" id="limit" title="Gemessene Auslastung der Nutzungsfenster">Fenster —</span>
     <div class="spacer"></div>
+    <button class="still schubladenknopf" id="aufAgenten" title="Agenten">☰</button>
     <select id="laufwahl" title="Lauf"></select>
     <button class="still" id="neu">Neuer Lauf</button>
+    <button class="still schubladenknopf" id="aufFreigaben" title="Freigaben">✓</button>
   </header>
+
+  <nav id="tableiste"></nav>
 
   <aside>
     <h2>Agenten</h2>
@@ -181,402 +258,6 @@
   </div>
 </div>
 
-<script type="module">
-import { Agentengraph } from './graph.js'
-import { Zeitachse } from './zeitachse.js'
-
-const $ = (s) => document.querySelector(s)
-
-// Wohin der Client spricht.
-//
-// Im Browser ist das der Host, von dem die Seite kam. Im Tauri-Fenster nicht:
-// dort ist location.host die App selbst. Die Huelle reicht die Adresse des
-// Daemons durch, damit dieselbe Oberflaeche lokal, im Tailnet und in der App
-// funktioniert, ohne neu gebaut zu werden.
-let BASIS = location.host
-let IN_TAURI = false
-
-async function basisErmitteln() {
-  const tauri = window.__TAURI__
-  if (!tauri?.core?.invoke) return
-  IN_TAURI = true
-  try {
-    const adresse = await tauri.core.invoke('daemon_basis')
-    if (adresse) BASIS = adresse
-  } catch (e) {
-    console.warn('Daemon-Adresse nicht ermittelbar, bleibe bei', BASIS, e)
-  }
-}
-
-/**
- * Schema der Daemon-Adresse bestimmen.
- *
- * BASIS darf ein Schema mitbringen (`https://serverone…`). Fehlt es, wird
- * geraten -- und zwar so, wie es in dieser Umgebung stimmt: lokal ist der
- * Daemon unverschluesselt erreichbar, alles andere laeuft ueber
- * `tailscale serve` und damit ausschliesslich ueber TLS. Ein http-Aufruf gegen
- * den Tailnet-Namen liefe sonst ins Leere.
- */
-function schema(fuerWebsocket = false) {
-  const m = /^(https?):\/\//.exec(BASIS)
-  if (m) return fuerWebsocket ? (m[1] === 'https' ? 'wss' : 'ws') : m[1]
-  const host = BASIS.replace(/^.*:\/\//, '')
-  const lokal = /^(localhost|127\.0\.0\.1|\[::1\])(:|$)/.test(host)
-  // Im Browser gilt zusaetzlich das Schema der Seite selbst.
-  const sicher = lokal ? (!IN_TAURI && location.protocol === 'https:') : true
-  return fuerWebsocket ? (sicher ? 'wss' : 'ws') : sicher ? 'https' : 'http'
-}
-
-const hostOhneSchema = () => BASIS.replace(/^https?:\/\//, '').replace(/\/+$/, '')
-const api = (pfad) => `${schema()}://${hostOhneSchema()}${pfad}`
-const wsUrl = () => `${schema(true)}://${hostOhneSchema()}/ws`
-const logEl = $('#log'), agentenEl = $('#agenten'), freigabenEl = $('#freigaben')
-const verbindungEl = $('#verbindung'), budgetEl = $('#budget'), laufwahlEl = $('#laufwahl')
-const limitEl = $('#limit')
-
-let runId = new URLSearchParams(location.search).get('run') || null
-let letzteSeq = 0
-let agenten = new Map()
-let freigaben = new Map()
-let gewaehlterAgent = null
-let sock = null
-let graph = null
-let zeitachse = null
-
-const zeit = (ts) => new Date(ts).toLocaleTimeString('de-DE', { hour12: false })
-const zahl = (n) => new Intl.NumberFormat('de-DE').format(Math.round(n))
-
-function verbinden() {
-  sock = new WebSocket(wsUrl())
-  sock.onopen = () => {
-    verbindungEl.textContent = 'verbunden'
-    verbindungEl.className = 'pill an'
-    sock.send(JSON.stringify({ typ: 'folgen', runId, seit: letzteSeq }))
-  }
-  sock.onclose = () => {
-    verbindungEl.textContent = 'getrennt — neuer Versuch'
-    verbindungEl.className = 'pill ab'
-    // Wiederverbinden mit Backfill ab letzteSeq: kein Loch im Verlauf.
-    setTimeout(verbinden, 1500)
-  }
-  sock.onmessage = (ev) => {
-    const { typ, daten } = JSON.parse(ev.data)
-    if (typ === 'ereignis') ereignisAnhaengen(daten)
-    else if (typ === 'agent') agentSetzen(daten)
-    else if (typ === 'agenten') daten.forEach((a) => agentSetzen(umbenennen(a)))
-    else if (typ === 'freigabe') freigabeSetzen(daten)
-    else if (typ === 'freigaben') daten.forEach((f) => freigabeSetzen(umbenennen(f)))
-    else if (typ === 'limit') limitZeichnen(daten)
-    // 'orchestrator' wird bewusst ignoriert: dieselben Schritte kommen als
-    // persistiertes 'protocol'-Ereignis durch, und die ueberleben einen
-    // Neustart. Zwei Quellen fuer dieselbe Zeile hiesse sie doppelt zu zeigen.
-    else if (typ === 'lauf_ende') endeAnhaengen(daten.ende)
-  }
-}
-
-// Die REST-Antworten kommen in SQL-Schreibweise (snake_case), der Live-Strom in
-// camelCase. Hier auf eine Form bringen, damit die Anzeige nur eine kennt.
-function umbenennen(o) {
-  const m = {
-    agent_id:'agentId', run_id:'runId', session_id:'sessionId', parent_agent_id:'parentAgentId',
-    started_at:'startedAt', ended_at:'endedAt', weighted_tokens:'weightedTokens',
-    raw_tokens:'rawTokens', cost_usd:'costUsd', last_error:'lastError',
-    tool_name:'toolName', requested_at:'requestedAt', decided_at:'decidedAt',
-  }
-  const r = {}
-  for (const [k, v] of Object.entries(o)) r[m[k] ?? k] = v
-  if (typeof r.input === 'string') { try { r.input = JSON.parse(r.input) } catch {} }
-  return r
-}
-
-function ereignisAnhaengen(e, lebend = true) {
-  if (e.seq > letzteSeq) letzteSeq = e.seq
-  // Nur bei laufenden Ereignissen aufleuchten lassen; beim Nachladen eines
-  // alten Laufs waere ein Gewitter aus Animationen nur Unruhe.
-  if (lebend && e.kind !== 'protocol') graph?.puls(e.agentId)
-  // Protokollschritte gehoeren zum Lauf, nicht zu einem Agenten -- sie bleiben
-  // sichtbar, auch wenn nach einem einzelnen Agenten gefiltert wird.
-  if (gewaehlterAgent && e.agentId !== gewaehlterAgent && e.kind !== 'protocol') return
-  const unten = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 60
-  const div = document.createElement('div')
-  const fall = e.kind === 'protocol' ? fallKlasse(e.summary) : ''
-  div.className = `zeile k-${e.kind} neu` + (e.kind === 'protocol' ? ` protokoll ${fall}` : '')
-  div.innerHTML =
-    `<span class="zeit"></span><span class="wer"></span><span class="was"></span>`
-  div.children[0].textContent = zeit(e.ts)
-  div.children[1].textContent = e.agentId
-  div.children[2].textContent = e.summary
-  logEl.appendChild(div)
-  while (logEl.children.length > 2000) logEl.removeChild(logEl.firstChild)
-  if (unten) logEl.scrollTop = logEl.scrollHeight
-}
-
-// Ereignisse der Orchestrator-Engine -- keine Agentennachrichten, sondern
-// Schritte des Protokolls. Sie bekommen eine eigene, hervorgehobene Zeile,
-// weil sie den Lauf steuern.
-function fallKlasse(summary) {
-  if (/^Fall B/.test(summary)) return 'fall-entscheidung'
-  if (/^Fall C/.test(summary)) return 'fall-fertig'
-  if (/^Fall D/.test(summary) || /^Leseanfrage/.test(summary)) return 'fall-lesen'
-  if (/^BLOCKER|Report ohne/.test(summary)) return 'blocker'
-  return ''
-}
-
-function endeAnhaengen(ende) {
-  const gut = ende.grund === 'fertig'
-  const frage = ende.grund === 'entscheidung'
-  const texte = {
-    fertig: 'Lauf fertig', entscheidung: 'Entscheidung noetig', rundenlimit: 'Rundenlimit erreicht',
-    wiederholung: 'Gestoppt: der Lauf drehte sich im Kreis', budget: 'Gestoppt: Tokenbudget erschoepft',
-    formatfehler: 'Gestoppt: Formatfehler des Orchestrators', blocker: 'Gestoppt: Blocker nicht behandelt',
-    abgebrochen: 'Abgebrochen', fehler: 'Fehler',
-  }
-  const div = document.createElement('div')
-  div.className = 'ende ' + (gut ? 'gut' : frage ? 'frage' : 'schlecht')
-  div.textContent = (texte[ende.grund] ?? ende.grund) +
-    (ende.text ? `\n\n${ende.text}` : '') + (ende.frage ? `\n\n${ende.frage}` : '') +
-    (ende.verbraucht ? `\n\n${zahl(ende.verbraucht)} gewichtete Tokens verbraucht` : '')
-  div.style.whiteSpace = 'pre-wrap'
-  logEl.appendChild(div)
-  logEl.scrollTop = logEl.scrollHeight
-}
-
-function agentSetzen(a) {
-  agenten.set(a.agentId, { ...(agenten.get(a.agentId) ?? {}), ...a })
-  agentenZeichnen()
-  budgetZeichnen()
-  graph?.setzen([...agenten.values()])
-  zeitachse?.setzen([...agenten.values()])
-}
-
-function agentenZeichnen() {
-  if (agenten.size === 0) { agentenEl.innerHTML = '<div class="leer">noch keine</div>'; return }
-  agentenEl.innerHTML = ''
-  for (const a of agenten.values()) {
-    const d = document.createElement('div')
-    d.className = 'agent rolle-' + (a.role ?? 'chat') +
-      (gewaehlterAgent === a.agentId ? ' aktiv' : '')
-    const dauer = ((a.endedAt ?? Date.now()) - a.startedAt) / 1000
-    d.innerHTML = `<div class="kopf">
-        <span class="name"></span><span class="punkt ${a.status}"></span>
-      </div>
-      <div class="meta"></div>`
-    d.querySelector('.name').textContent = a.label || a.agentId
-    d.querySelector('.meta').textContent =
-      `${a.status} · ${zahl(a.weightedTokens ?? 0)} gew. · ${dauer.toFixed(0)}s` +
-      (a.role ? ` · ${a.role}` : '')
-    d.onclick = () => {
-      agentWaehlen(gewaehlterAgent === a.agentId ? null : a.agentId)
-    }
-    agentenEl.appendChild(d)
-  }
-}
-
-/**
- * Einen Agenten auswaehlen. Graph, Liste und Log zeigen danach dasselbe --
- * ohne diese Verknuepfung muesste man bei jeder Frage selbst zwischen den
- * Ansichten uebersetzen, und genau daran scheitern solche Fenster meistens.
- */
-function agentWaehlen(agentId) {
-  gewaehlterAgent = agentId
-  graph?.auswaehlen(agentId)
-  zeitachse?.auswaehlen(agentId)
-  agentenZeichnen()
-  const hinweis = $('#filterhinweis')
-  if (agentId) {
-    const a = agenten.get(agentId)
-    $('#filtertext').textContent = `nur ${a?.label || agentId}`
-    hinweis.classList.add('an')
-  } else {
-    hinweis.classList.remove('an')
-  }
-  logNeuLaden()
-}
-
-function budgetZeichnen() {
-  let gew = 0, roh = 0, usd = 0
-  for (const a of agenten.values()) {
-    gew += a.weightedTokens ?? 0; roh += a.rawTokens ?? 0; usd += a.costUsd ?? 0
-  }
-  budgetEl.textContent = `${zahl(gew)} gew. / ${zahl(roh)} roh${usd ? ` · ${usd.toFixed(2)} $` : ''}`
-  budgetEl.className = 'pill' + (gew > 600000 ? ' ab' : '')
-  budgetEl.title = 'Gewichtet nach loop.py-Gewichten; 600.000 ist dort die Budgetgrenze je Lauf'
-}
-
-function limitZeichnen(l) {
-  if (!l) return
-  const p = (x) => (typeof x === 'number' ? Math.round(x * 100) + ' %' : '—')
-  const reset = l.fuenfStundenResetsAt
-    ? new Date(l.fuenfStundenResetsAt * 1000).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
-    : '—'
-  limitEl.textContent = `5h ${p(l.fuenfStundenAnteil)} · Woche ${p(l.siebenTageAnteil)} · Reset ${reset}`
-  const eng = (l.fuenfStundenAnteil ?? 0) > 0.8 || (l.siebenTageAnteil ?? 0) > 0.8
-  limitEl.className = 'pill' + (l.status !== 'allowed' ? ' ab' : eng ? ' ab' : ' an')
-  limitEl.title = `Status: ${l.status}${l.rateLimitType ? ' · ' + l.rateLimitType : ''}` +
-    ' — gemessene Werte vom Server, keine Schaetzung'
-}
-
-function freigabeSetzen(f) {
-  if (f.decidedAt) freigaben.delete(f.id); else freigaben.set(f.id, f)
-  freigabenZeichnen()
-}
-
-function freigabenZeichnen() {
-  if (freigaben.size === 0) { freigabenEl.innerHTML = '<div class="leer">keine offen</div>'; return }
-  freigabenEl.innerHTML = ''
-  for (const f of freigaben.values()) {
-    const d = document.createElement('div')
-    d.className = 'freigabe'
-    d.innerHTML = `<div class="werkzeug"></div><div class="meta"></div>
-      <pre></pre><div class="knoepfe">
-        <button class="ja">Erlauben</button><button class="nein">Ablehnen</button>
-      </div>`
-    d.querySelector('.werkzeug').textContent = f.toolName
-    d.querySelector('.meta').textContent = `${f.agentId} · ${zeit(f.requestedAt)}`
-    d.querySelector('pre').textContent = JSON.stringify(f.input, null, 1).slice(0, 1200)
-    d.querySelector('.ja').onclick = () => entscheiden(f.id, true)
-    d.querySelector('.nein').onclick = () => entscheiden(f.id, false)
-    freigabenEl.appendChild(d)
-  }
-}
-
-async function entscheiden(id, erlaubt) {
-  await fetch(api('/api/freigabe'), {
-    method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ id, erlaubt, durch: 'ui' }),
-  })
-  freigaben.delete(id)
-  freigabenZeichnen()
-}
-
-async function logNeuLaden() {
-  if (!runId) return
-  logEl.innerHTML = ''
-  const r = await fetch(api(`/api/lauf/${runId}?seit=0`)).then((x) => x.json())
-  agenten = new Map(r.agenten.map((a) => { const b = umbenennen(a); return [b.agentId, b] }))
-  freigaben = new Map(r.freigaben.map((f) => { const b = umbenennen(f); return [b.id, b] }))
-  letzteSeq = 0
-  for (const e of r.ereignisse) ereignisAnhaengen(e, false)
-  agentenZeichnen(); freigabenZeichnen(); budgetZeichnen()
-  graph?.setzen([...agenten.values()])
-  zeitachse?.setzen([...agenten.values()])
-  zeitachse?.setzen([...agenten.values()])
-}
-
-async function laeufeLaden() {
-  let r
-  try {
-    r = await fetch(api('/api/laeufe')).then((x) => x.json())
-  } catch (e) {
-    // Haeufigster Fall in der App: der Daemon laeuft nicht. Das gehoert
-    // gesagt, nicht als leeres Fenster praesentiert.
-    verbindungEl.textContent = `kein Daemon auf ${BASIS}`
-    verbindungEl.className = 'pill ab'
-    logEl.innerHTML =
-      `<div class="ende schlecht">Kein Daemon erreichbar auf ${BASIS}.\n\n` +
-      `Starten:  cd ~/projekte/cockpit && node dist/daemon.js\n` +
-      `Andere Adresse:  COCKPIT_DAEMON=servertwo.tail9c8a2b.ts.net:8443 cockpit</div>`
-    logEl.firstChild.style.whiteSpace = 'pre-wrap'
-    return
-  }
-  laufwahlEl.innerHTML = ''
-  for (const l of r.laeufe) {
-    const o = document.createElement('option')
-    o.value = l.run_id
-    o.textContent = `${l.label} · ${zeit(l.started_at)} · ${l.status}`
-    laufwahlEl.appendChild(o)
-  }
-  if (!runId && r.laeufe.length > 0) runId = r.laeufe[0].run_id
-  if (runId) laufwahlEl.value = runId
-}
-
-laufwahlEl.onchange = async () => {
-  runId = laufwahlEl.value
-  history.replaceState(null, '', `?run=${runId}`)
-  await logNeuLaden()
-  sock?.send(JSON.stringify({ typ: 'folgen', runId, seit: 0 }))
-}
-
-$('#neu').onclick = () => { runId = null; agenten.clear(); freigaben.clear(); logEl.innerHTML = ''
-  agentenZeichnen(); freigabenZeichnen(); $('#prompt').focus() }
-
-async function starten() {
-  const prompt = $('#prompt').value.trim()
-  if (!prompt) return
-  $('#senden').disabled = true
-  try {
-    const r = await fetch(api('/api/lauf'), {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ prompt, label: prompt.slice(0, 40), cwd: null }),
-    }).then((x) => x.json())
-    if (r.runId) {
-      runId = r.runId
-      letzteSeq = 0
-      logEl.innerHTML = ''
-      agenten.clear(); freigaben.clear()
-      $('#prompt').value = ''
-      history.replaceState(null, '', `?run=${runId}`)
-      sock?.send(JSON.stringify({ typ: 'folgen', runId, seit: 0 }))
-      await laeufeLaden()
-    } else {
-      alert('Start fehlgeschlagen: ' + JSON.stringify(r))
-    }
-  } finally {
-    $('#senden').disabled = false
-  }
-}
-
-$('#senden').onclick = starten
-$('#prompt').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); starten() }
-})
-
-// Dauer-Anzeige der laufenden Agenten mitlaufen lassen.
-setInterval(() => {
-  if (![...agenten.values()].some((a) => !a.endedAt)) return
-  agentenZeichnen()
-  if (!$('#zeitachse').classList.contains('weg')) zeitachse?.zeichnen()
-}, 1000)
-
-graph = new Agentengraph($('#graph'), agentWaehlen)
-zeitachse = new Zeitachse($('#zeitachse'), agentWaehlen)
-
-for (const b of document.querySelectorAll('#ansichtwahl button')) {
-  b.onclick = () => {
-    const ansicht = b.dataset.ansicht
-    for (const x of document.querySelectorAll('#ansichtwahl button')) x.classList.toggle('an', x === b)
-    $('#graph').classList.toggle('weg', ansicht !== 'graph')
-    $('#zeitachse').classList.toggle('weg', ansicht !== 'zeit')
-    $('#ansichttitel').textContent = ansicht === 'graph' ? 'Agentengraph' : 'Zeitachse'
-    // Nach dem Einblenden neu legen: ein verstecktes SVG hat Breite 0, die
-    // Positionen waeren sonst auf der alten Rechnung stehengeblieben.
-    if (ansicht === 'graph') graph.zeichnen()
-    else zeitachse.zeichnen()
-  }
-}
-
-$('#filterweg').onclick = () => agentWaehlen(null)
-$('#graphklapp').onclick = () => {
-  const box = $('#graphbox')
-  box.classList.toggle('zu')
-  $('#graphklapp').textContent = box.classList.contains('zu') ? 'ausklappen' : 'einklappen'
-}
-// Der Graph rechnet mit der Breite des Fensters -- nach einer Groessenaenderung
-// muss er neu gelegt werden, sonst stehen die Knoten falsch oder ausserhalb.
-let legeNeu
-addEventListener('resize', () => {
-  clearTimeout(legeNeu)
-  legeNeu = setTimeout(() => {
-    if (!$('#graph').classList.contains('weg')) graph?.zeichnen()
-    if (!$('#zeitachse').classList.contains('weg')) zeitachse?.zeichnen()
-  }, 120)
-})
-
-await basisErmitteln()
-await laeufeLaden()
-if (runId) await logNeuLaden()
-try { limitZeichnen((await fetch(api('/api/gesundheit')).then((r) => r.json())).limit) } catch {}
-verbinden()
-</script>
+<script type="module" src="./app.js"></script>
 </body>
 </html>

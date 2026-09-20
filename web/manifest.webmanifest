@@ -1,0 +1,15 @@
+{
+  "name": "Cockpit — Agenten-Zentrale",
+  "short_name": "Cockpit",
+  "description": "Orchestrator und Worker fuer Claude Code",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#1e1e2e",
+  "theme_color": "#1e1e2e",
+  "icons": [
+    { "src": "./symbol.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "./symbol.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

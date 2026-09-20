@@ -12,6 +12,7 @@ import { Supervisor } from './supervisor.js'
 import { Orchestrator, type OrchestratorKonfig } from './orchestrator.js'
 import { DiscordAdapter } from './discord.js'
 import type { CockpitEvent } from './typen.js'
+import { standLesen, type SystemStand } from './system.js'
 
 const PORT = Number(process.env.COCKPIT_PORT ?? 8765)
 const HOST = process.env.COCKPIT_HOST ?? '127.0.0.1'
@@ -223,6 +224,28 @@ supervisor.on('freigabe', (f: { runId: string }) => verteilen('freigabe', f, f.r
 // Der Limitstand gilt kontoweit, nicht je Lauf -- also an alle Klienten.
 supervisor.on('limit', (l: unknown) => verteilen('limit', l, null))
 
+// --- Auslastung der Server ---------------------------------------------------
+//
+// Gepollt statt ereignisgetrieben: die Quellen (Beszel, /proc) kennen keinen
+// Push. 20 Sekunden sind der Kompromiss -- Beszels Agenten messen ohnehin nur
+// jede Minute, haeufiger zu fragen brachte nur Last ohne neue Zahlen.
+let letzterSystemStand: SystemStand | null = null
+
+async function systemPuls(): Promise<void> {
+  try {
+    letzterSystemStand = await standLesen()
+    verteilen('system', letzterSystemStand, null)
+  } catch (e) {
+    console.warn('[cockpit] Systemstand nicht ermittelbar:', String(e))
+  }
+}
+
+// Erster Aufruf sofort, damit die CPU-Differenz eine Grundlage hat: der Wert
+// beim allerersten Lesen ist immer null, weil eine Differenz zwei Messungen
+// braucht.
+void systemPuls()
+setInterval(() => void systemPuls(), 20_000).unref()
+
 // --- HTTP --------------------------------------------------------------------
 
 /**
@@ -266,6 +289,12 @@ const MIME: Record<string, string> = {
   '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
+  // Ohne den richtigen Typ ignoriert der Browser das Manifest still, und
+  // "Zum Startbildschirm hinzufuegen" bietet statt der App nur ein Lesezeichen.
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.ico': 'image/x-icon',
 }
 
 async function koerperLesen(req: import('node:http').IncomingMessage): Promise<unknown> {
@@ -280,7 +309,17 @@ async function koerperLesen(req: import('node:http').IncomingMessage): Promise<u
 }
 
 const server = createServer(async (req, res) => {
-  const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`)
+  // Defensiv, weil dieser Aufruf VOR dem grossen try steht: `new URL` wirft bei
+  // einem protokollrelativen Pfad wie '//' (Eingabe '//', Basis der Host) --
+  // und eine unbehandelte Ausnahme im Anfrage-Handler nimmt den ganzen Daemon
+  // mit. Eine krumme Anfrage darf die Zentrale nicht umbringen.
+  let url: URL
+  try {
+    url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`)
+  } catch {
+    res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' })
+    return res.end('ungueltiger Pfad')
+  }
   const pfad = url.pathname
   const origin = req.headers.origin
   const erlaubt = herkunftErlaubt(origin, req.headers.host)
@@ -406,6 +445,12 @@ const server = createServer(async (req, res) => {
       }
       const ok = supervisor.agentAbbrechen(runId, agentId)
       return json(ok ? 200 : 404, { ok })
+    }
+
+    if (pfad === '/api/system' && req.method === 'GET') {
+      // Den gepollten Stand ausliefern, nicht neu messen: sonst kaeme bei
+      // jedem Neuladen der Seite eine CPU-Differenz ueber Millisekunden heraus.
+      return json(200, letzterSystemStand ?? (await standLesen()))
     }
 
     if (pfad === '/api/gesundheit') {
