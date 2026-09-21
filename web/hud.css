@@ -161,3 +161,143 @@ aside, #rechts, #graphbox { border-color: var(--hud-rand); }
   .hud-aktiv { animation: none; }
   .hud-schein::before { transition: none; }
 }
+
+/* ==========================================================================
+ * Die uebrigen Ansichten ins Thema holen.
+ *
+ * Bewusst hier und nicht in den Modulen: es sind Klammern, Farben und
+ * Abstaende, keine Struktur. Die Ansichten funktionieren unveraendert weiter,
+ * und wer das Thema loswerden will, nimmt eine Zeile aus index.html.
+ * ======================================================================== */
+
+/* --- Panels bekommen Klammern -------------------------------------------- */
+.agent, .freigabe, .chateintrag, .keintrag, .hostkarte, #graphbox, #eingabe,
+aside, #rechts, .z-agent {
+  position: relative;
+}
+.agent::before, .freigabe::before, .chateintrag::before, .keintrag::before,
+.hostkarte::before, #graphbox::before, aside::before, #rechts::before,
+.agent::after, .freigabe::after, .chateintrag::after, .keintrag::after,
+.hostkarte::after, #graphbox::after, aside::after, #rechts::after {
+  content: '';
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  border-style: solid;
+  border-color: var(--klammer-farbe, var(--hud-rand));
+  pointer-events: none;
+  transition: border-color .25s ease-out;
+  z-index: 2;
+}
+.agent::before, .freigabe::before, .chateintrag::before, .keintrag::before,
+.hostkarte::before, #graphbox::before, aside::before, #rechts::before {
+  top: -1px; left: -1px; border-width: 2px 0 0 2px;
+}
+.agent::after, .freigabe::after, .chateintrag::after, .keintrag::after,
+.hostkarte::after, #graphbox::after, aside::after, #rechts::after {
+  right: -1px; bottom: -1px; border-width: 0 2px 2px 0;
+}
+/* Grosse Flaechen bekommen groessere Klammern, sonst wirken sie verloren. */
+aside::before, aside::after, #rechts::before, #rechts::after,
+#graphbox::before, #graphbox::after { width: 14px; height: 14px; }
+
+/* --- Ueberschriften ------------------------------------------------------ */
+h2, #ansichttitel, .lesekopf h3, .hostkopf h3 {
+  font-family: var(--mono);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--hud);
+  opacity: .9;
+}
+.hostkopf h3, .lesekopf h3 { font-size: 12px; opacity: 1; }
+
+/* --- Tab "Lauf" ---------------------------------------------------------- */
+aside, #rechts { background: var(--mantle); }
+#graphbox {
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--hud) 3.5%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--hud) 3.5%, transparent) 1px, transparent 1px);
+  background-size: 34px 34px;
+}
+/* Die Klammerfarbe der Agentenkarte kommt aus ihrem echten Zustand -- die
+ * Klassen dafuer setzt lauf.js ohnehin schon fuer den Statuspunkt. */
+.agent.s-thinking { --klammer-farbe: var(--denkt); }
+.agent.s-tool { --klammer-farbe: var(--werkzeug); }
+.agent.s-writing { --klammer-farbe: var(--lauf); }
+.agent.s-starting { --klammer-farbe: var(--akzent); }
+.agent.s-waiting_permission,
+.agent.s-waiting_ratelimit { --klammer-farbe: var(--wartet); }
+.agent.s-failed { --klammer-farbe: var(--fehler); }
+.agent.s-done { --klammer-farbe: color-mix(in srgb, var(--fertig) 55%, transparent); }
+.agent .kopf { font-family: var(--mono); }
+.agent .meta { font-family: var(--mono); font-size: 9.5px; }
+
+.freigabe { --klammer-farbe: var(--wartet); }
+
+/* Der Tokenzaehler ist eine Kennzahl -- der bekommt Licht, der Log nicht. */
+#budget, #limit { font-family: var(--mono); }
+#budget { color: var(--hud); text-shadow: 0 0 10px color-mix(in srgb, var(--hud) 60%, transparent); }
+
+#eingabe textarea:focus { outline: none; border-color: var(--hud); }
+#senden {
+  border-color: color-mix(in srgb, var(--hud) 45%, transparent);
+  color: var(--hud);
+  background: color-mix(in srgb, var(--hud) 12%, transparent);
+}
+#senden:hover:not(:disabled) { background: color-mix(in srgb, var(--hud) 22%, transparent); }
+
+/* --- Tab "Chats" --------------------------------------------------------- */
+.chateintrag.an { --klammer-farbe: var(--hud); border-color: var(--hud); }
+.cheinmeta .ja { color: var(--hud); }
+.cheintitel { font-family: var(--mono); }
+#chatsuche:focus { border-color: var(--hud); box-shadow: 0 0 14px color-mix(in srgb, var(--hud) 22%, transparent); }
+.beitrag.user { border-left-color: var(--hud); }
+
+/* --- Tab "Konsole" ------------------------------------------------------- */
+.keintrag { --klammer-farbe: var(--hud-rand); }
+.keintrag.p-freigabe { --klammer-farbe: var(--wartet); }
+.keintrag.p-laeuft { --klammer-farbe: var(--lauf); }
+.keintrag.p-fertig { --klammer-farbe: color-mix(in srgb, var(--fertig) 55%, transparent); }
+.keintrag.p-abgelehnt,
+.keintrag.p-fehler { --klammer-farbe: var(--fehler); }
+.kbefehl { color: var(--hud); }
+#kbefehl:focus, #kcwd:focus { border-color: var(--hud) !important; }
+.kwarnung { border-left-color: var(--wartet); }
+
+/* --- Tab "Server" -------------------------------------------------------- */
+.hostkarte { --klammer-farbe: var(--hud-rand); }
+.hostkarte.ok { --klammer-farbe: color-mix(in srgb, var(--hud) 55%, transparent); }
+.hostkarte.warm { --klammer-farbe: var(--werkzeug); }
+.hostkarte.heiss { --klammer-farbe: var(--fehler); }
+.ring .fuellung { filter: drop-shadow(0 0 6px currentColor); }
+.messung .wert {
+  color: #eaffff;
+  text-shadow: 0 0 4px #fff, 0 0 12px var(--hud), 0 0 26px color-mix(in srgb, var(--hud) 50%, transparent);
+}
+.messung.warm .wert { text-shadow: 0 0 4px #fff, 0 0 12px var(--werkzeug), 0 0 26px var(--werkzeug); }
+.messung.heiss .wert { text-shadow: 0 0 4px #fff, 0 0 12px var(--fehler), 0 0 26px var(--fehler); }
+.messung .was { font-family: var(--mono); letter-spacing: .1em; text-transform: uppercase; font-size: 9.5px; }
+.quelle { border-color: var(--hud-rand); color: var(--hud); }
+
+/* --- Tab "Vault" --------------------------------------------------------- */
+.vlabel { font-family: var(--mono); letter-spacing: .04em; }
+.vlabel.agent { color: var(--hud); text-shadow: 0 0 8px var(--hud); }
+#vaultbuehne::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(circle at 50% 50%,
+    color-mix(in srgb, var(--hud) 11%, transparent) 0%, transparent 62%);
+}
+
+/* --- Knoepfe und Felder allgemein ---------------------------------------- */
+button.still:hover { border-color: color-mix(in srgb, var(--hud) 45%, transparent); color: var(--hud); }
+select:focus { outline: none; border-color: var(--hud); }
+
+/* Auf schmalen Schirmen faellt die Klammer weg -- bei 9 Pixeln Kantenlaenge
+ * auf einer 320-Pixel-Karte ist sie nur noch Unruhe. */
+@media (max-width: 520px) {
+  .agent::before, .agent::after,
+  .chateintrag::before, .chateintrag::after { display: none; }
+}

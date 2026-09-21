@@ -16,6 +16,19 @@ let gewaehlterAgent = null
 let graph = null
 let zeitachse = null
 
+/** Zustaende, in denen ein Agent tatsaechlich Arbeit leistet. Nur sie
+ *  bekommen den umlaufenden Rahmen -- auf allen Karten gleichzeitig waere er
+ *  der Grund, warum ein Handy heiss wird. */
+const ARBEITET = new Set(['thinking', 'tool', 'writing', 'starting'])
+
+/** Farbe je Fachrolle, wie im Graphen und in der Zentrale. */
+const FACHFARBE = {
+  orchestrator: 'var(--akzent)',
+  rechercheur: 'var(--lauf)',
+  coder: 'var(--denkt)',
+  kommunikator: 'var(--werkzeug)',
+}
+
 const zeit = (ts) => new Date(ts).toLocaleTimeString('de-DE', { hour12: false })
 const zahl = (n) => new Intl.NumberFormat('de-DE').format(Math.round(n))
 
@@ -133,8 +146,13 @@ function agentenZeichnen() {
   agentenEl.innerHTML = ''
   for (const a of agenten.values()) {
     const d = document.createElement('div')
-    d.className = 'agent rolle-' + (a.role ?? 'chat') +
+    // Die Statusklasse traegt die Klammerfarbe (siehe hud.css); 'hud-aktiv'
+    // laesst den Rahmen nur dann umlaufen, wenn der Agent WIRKLICH arbeitet.
+    const arbeitet = ARBEITET.has(a.status)
+    d.className = 'agent rolle-' + (a.role ?? 'chat') + ' s-' + a.status +
+      (arbeitet ? ' hud-aktiv' : '') +
       (gewaehlterAgent === a.agentId ? ' aktiv' : '')
+    if (a.fachrolle) d.style.setProperty('--klammer-farbe', FACHFARBE[a.fachrolle] ?? '')
     const dauer = ((a.endedAt ?? Date.now()) - a.startedAt) / 1000
     d.innerHTML = `<div class="kopf">
         <span class="name"></span><span class="punkt ${a.status}"></span>
@@ -143,7 +161,7 @@ function agentenZeichnen() {
     d.querySelector('.name').textContent = a.label || a.agentId
     d.querySelector('.meta').textContent =
       `${a.status} · ${zahl(a.weightedTokens ?? 0)} gew. · ${dauer.toFixed(0)}s` +
-      (a.role ? ` · ${a.role}` : '')
+      (a.fachrolle ? ` · ${a.fachrolle}` : a.role ? ` · ${a.role}` : '')
     d.onclick = () => {
       agentWaehlen(gewaehlterAgent === a.agentId ? null : a.agentId)
     }

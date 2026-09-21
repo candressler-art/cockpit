@@ -58,7 +58,11 @@ function karte(h) {
   const temp = h.tempC === null || h.tempC === undefined ? '—' : `${h.tempC.toFixed(1)} °C`
   const ramGb = h.ramGesamtMb ? ` von ${(h.ramGesamtMb / 1024).toFixed(1)} GB` : ''
   const plGb = h.plattenGesamtGb ? ` von ${h.plattenGesamtGb} GB` : ''
-  return `<article class="hostkarte">
+  // Die Karte traegt den schlimmsten ihrer drei Werte -- so sieht man am
+  // Rahmen, ob etwas klemmt, ohne die Ringe einzeln zu lesen.
+  const schlimmst = Math.max(h.cpuProzent ?? 0, h.ramProzent ?? 0, h.plattenProzent ?? 0)
+  const kartenzustand = h.status !== 'ok' ? '' : schlimmst >= 85 ? 'heiss' : schlimmst >= 60 ? 'warm' : 'ok'
+  return `<article class="hostkarte ${kartenzustand}">
     <header class="hostkopf">
       <span class="ampel ${h.status === 'ok' ? 'an' : 'ab'}"></span>
       <h3>${esc(h.name)}</h3>

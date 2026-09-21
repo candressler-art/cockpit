@@ -335,6 +335,48 @@ export class Wissenskern {
     this.renderer.render(this.szene, this.kamera)
   }
 
+  /**
+   * Bildschirmpositionen der am staerksten verknuepften Knoten.
+   *
+   * Fuer Beschriftungen: der Kern selbst zeichnet keinen Text -- Schrift in
+   * WebGL waere entweder unscharf oder eine eigene Texturverwaltung. HTML
+   * darueber ist schaerfer und kostet nichts.
+   */
+  beschriftungen(anzahl = 14) {
+    if (!this.punkte || !this.renderer) return []
+    const pos = this.punkte.geometry.attributes.position.array
+    const rang = this.knoten
+      .map((k, i) => ({ i, grad: k.grad ?? 0, titel: k.titel, id: k.id }))
+      .sort((a, b) => b.grad - a.grad)
+      .slice(0, anzahl)
+    const gr = this.renderer.domElement
+    const v = new THREE.Vector3()
+    const raus = []
+    for (const k of rang) {
+      v.set(pos[k.i * 3], pos[k.i * 3 + 1], pos[k.i * 3 + 2])
+      this.gruppe.localToWorld(v)
+      v.project(this.kamera)
+      if (v.z > 1) continue
+      raus.push({
+        id: k.id,
+        titel: k.titel,
+        x: (v.x * 0.5 + 0.5) * gr.clientWidth,
+        y: (-v.y * 0.5 + 0.5) * gr.clientHeight,
+        // Hinten liegende Knoten werden blasser -- sonst schwebt der Text
+        // ueber der Kugel, statt darin zu stecken.
+        tiefe: v.z,
+      })
+    }
+    return raus
+  }
+
+  /** Alle Knoten, deren Titel den Text enthaelt. */
+  suchen(text) {
+    const t = text.trim().toLowerCase()
+    if (!t) return []
+    return this.knoten.filter((k) => (k.titel ?? '').toLowerCase().includes(t))
+  }
+
   abbauen(ganz = true) {
     this.punkte?.geometry.dispose()
     this.punkte?.material.dispose()

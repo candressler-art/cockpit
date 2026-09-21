@@ -92,6 +92,8 @@ function eintragZeichnen(id) {
     ? `<pre class="kaus">${esc(e.stdout)}${e.stderr ? `<span class="kerr">${esc(e.stderr)}</span>` : ''}</pre>`
     : ''
 
+  // Die Phase traegt die Klammerfarbe: wartend gelb, laufend gruen, abgelehnt rot.
+  e.el.className = `keintrag p-${e.phase}${e.phase === 'laeuft' ? ' hud-aktiv' : ''}`
   e.el.innerHTML = `
     <div class="kkopf">
       <span class="kzeit">${e.zeit}</span>
