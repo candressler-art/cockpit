@@ -206,6 +206,38 @@
   .hinweis code{font:11px/1 var(--mono);background:var(--crust);padding:2px 5px;border-radius:3px}
   #stimmwahl{flex:0 0 auto;max-width:130px}
   @media (max-width:820px){ #stimmwahl{max-width:52px} }
+  /* --- Tab "Chats" -------------------------------------------------------- */
+  .chatkopf{display:flex;gap:10px;align-items:center;margin-bottom:12px}
+  #chatsuche{flex:1;background:var(--crust);border:1px solid var(--surface0);border-radius:8px;
+    color:var(--text);font:13px var(--sans);padding:8px 12px}
+  #chatsuche:focus{outline:none;border-color:var(--akzent)}
+  .chatspalten{display:grid;grid-template-columns:minmax(260px,340px) 1fr;gap:14px;
+    height:calc(100% - 46px);min-height:0}
+  #chatliste{overflow-y:auto;min-height:0;display:flex;flex-direction:column;gap:6px}
+  #chatlese{overflow-y:auto;min-height:0;border-left:1px solid var(--surface0);padding-left:14px}
+  .chateintrag{text-align:left;background:var(--mantle);border:1px solid var(--surface0);
+    border-radius:8px;padding:9px 11px;cursor:pointer;color:var(--text);font:inherit;width:100%}
+  .chateintrag:hover{border-color:var(--surface2)}
+  .chateintrag.an{border-color:var(--akzent);
+    background:color-mix(in srgb,var(--akzent) 12%,var(--mantle))}
+  .cheintitel{font-size:12.5px;font-weight:600;margin-bottom:4px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .cheinmeta{display:flex;flex-wrap:wrap;gap:8px;font:10px/1.5 var(--mono);color:var(--overlay)}
+  .cheinmeta .ja{color:var(--fertig)} .cheinmeta .nein{color:var(--overlay)}
+  .lesekopf{display:flex;align-items:center;gap:10px;margin-bottom:4px}
+  .lesekopf h3{margin:0;font-size:14px}
+  .lesemeta{font:10px var(--mono);color:var(--overlay);margin-bottom:12px}
+  .beitrag{border-left:2px solid var(--surface1);padding:0 0 0 10px;margin-bottom:12px}
+  .beitrag.user{border-left-color:var(--akzent)}
+  .beitrag.assistant{border-left-color:var(--lauf)}
+  .brolle{font:10px var(--mono);color:var(--overlay);margin-bottom:3px}
+  .beitrag pre{margin:0;font:11.5px/1.5 var(--mono);white-space:pre-wrap;word-break:break-word;
+    color:var(--subtext);max-height:340px;overflow:auto}
+  @media (max-width:820px){
+    .chatspalten{grid-template-columns:1fr;grid-template-rows:auto 1fr}
+    #chatlese{border-left:0;border-top:1px solid var(--surface0);padding-left:0;padding-top:12px}
+    #chatliste{max-height:38vh}
+  }
 </style>
 </head>
 <body>

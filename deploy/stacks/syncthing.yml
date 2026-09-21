@@ -1,0 +1,28 @@
+# Syncthing auf servertwo -- holt Vault und Sessions vom Desktop.
+#
+# PUID/PGID 1001 ist der Agent-Benutzer 'claude'. Ohne das gehoerten die
+# empfangenen Dateien root, und der Cockpit-Daemon (der als claude laeuft)
+# koennte den Vault-Index nicht bauen. Genau dieser Fehler steckt schon im
+# Spiegel auf serverone: er liegt unter /home/can/vault und ist fuer claude
+# nicht lesbar.
+#
+# Kein Port 22000 nach aussen: servertwo baut die Verbindung zum Desktop
+# selbst auf (ueber das Tailnet), eingehend muss hier nichts offenstehen.
+# Die Oberflaeche haengt auf 127.0.0.1 und ist nur ueber einen SSH-Tunnel
+# erreichbar -- absichtlich, sie kann die Ordnerpfade aendern.
+services:
+  syncthing:
+    image: syncthing/syncthing:latest
+    container_name: syncthing
+    hostname: servertwo
+    environment:
+      - PUID=1001
+      - PGID=1001
+    ports:
+      - "127.0.0.1:8384:8384"
+    volumes:
+      - ./config:/var/syncthing/config
+      - /var/lib/cockpit/vault:/var/syncthing/vault
+      - /var/lib/cockpit/sessions-desktop:/var/syncthing/sessions
+    restart: unless-stopped
+    mem_limit: 256m

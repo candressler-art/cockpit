@@ -15,6 +15,8 @@ import type { CockpitEvent } from './typen.js'
 import { standLesen, type SystemStand } from './system.js'
 import { rollenLaden, rollenListe } from './rollen.js'
 import { sprechenGecacht } from './stimme.js'
+import { chatsIndizieren, chatsSuchen, chatLesen } from './chats.js'
+import { existsSync } from 'node:fs'
 
 const PORT = Number(process.env.COCKPIT_PORT ?? 8765)
 const HOST = process.env.COCKPIT_HOST ?? '127.0.0.1'
@@ -252,6 +254,15 @@ setInterval(() => void systemPuls(), 20_000).unref()
 // nicht erst, wenn der Orchestrator in Runde drei eine Rolle adressiert.
 await rollenLaden()
 
+// Sitzungsverzeichnis im Hintergrund aufbauen. 285 Dateien mit 185 MB zu
+// lesen dauert Sekunden -- der Daemon soll deswegen nicht spaeter lauschen.
+// Unveraenderte Dateien werden uebersprungen, spaetere Laeufe sind billig.
+void chatsIndizieren(DB_PFAD).catch((e) => console.warn('[chats] Index fehlgeschlagen:', String(e)))
+setInterval(
+  () => void chatsIndizieren(DB_PFAD).catch(() => {}),
+  10 * 60_000,
+).unref()
+
 // --- HTTP --------------------------------------------------------------------
 
 /**
@@ -451,6 +462,26 @@ const server = createServer(async (req, res) => {
       }
       const ok = supervisor.agentAbbrechen(runId, agentId)
       return json(ok ? 200 : 404, { ok })
+    }
+
+    if (pfad === '/api/chats' && req.method === 'GET') {
+      const treffer = chatsSuchen(DB_PFAD, url.searchParams.get('q') ?? '')
+      // Fortsetzbar ist nur, was hier auch ein Arbeitsverzeichnis hat. Das
+      // gehoert in die Liste und nicht in eine Enttaeuschung beim Klick:
+      // die Sessions stammen vom Desktop, dessen Pfade es hier meist nicht gibt.
+      return json(200, {
+        chats: treffer.map((c) => ({ ...c, fortsetzbar: Boolean(c.cwd && existsSync(c.cwd)) })),
+      })
+    }
+
+    if (pfad.startsWith('/api/chats/') && req.method === 'GET') {
+      const id = pfad.slice('/api/chats/'.length)
+      const d = await chatLesen(DB_PFAD, id)
+      if (!d) return json(404, { fehler: 'Sitzung unbekannt' })
+      return json(200, {
+        ...d,
+        kopf: { ...d.kopf, fortsetzbar: Boolean(d.kopf.cwd && existsSync(d.kopf.cwd)) },
+      })
     }
 
     if (pfad === '/api/sprechen' && req.method === 'POST') {

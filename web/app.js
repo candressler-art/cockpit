@@ -13,8 +13,10 @@ import * as tabs from './tabs.js'
 import * as stimme from './stimme.js'
 import lauf from './tabs/lauf.js'
 import server from './tabs/server.js'
+import chats from './tabs/chats.js'
 
 tabs.registrieren(lauf)
+tabs.registrieren(chats)
 tabs.registrieren(server)
 
 await bus.basisErmitteln()

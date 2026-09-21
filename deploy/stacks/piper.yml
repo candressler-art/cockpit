@@ -1,0 +1,26 @@
+# Sprachausgabe fuer das Cockpit.
+#
+# Wyoming-Protokoll auf 10200, gebunden auf 127.0.0.1: erreichbar ist der
+# Dienst nur fuer den Daemon auf derselben Maschine. Nach aussen geht nichts
+# eigenes -- das Cockpit reicht fertiges Audio ueber seinen eigenen Endpunkt
+# durch, der schon hinter `tailscale serve` liegt.
+#
+# de_DE-thorsten-medium: deutsche Stimme, laeuft auf der CPU schnell genug.
+# 'high' klingt besser, braucht aber spuerbar mehr Rechenzeit, und servertwo
+# hat nur vier Kerne, die sich schon Agenten teilen.
+#
+# mem_limit ist hier keine Formsache: bei 7,5 GB Gesamtspeicher und Agenten,
+# die je rund 300 MB brauchen, ist ein unbegrenzter Container das, was im
+# Zweifel den Daemon mitnimmt.
+services:
+  piper:
+    image: rhasspy/wyoming-piper:latest
+    container_name: piper
+    command: --voice de_DE-thorsten-medium
+    ports:
+      - "127.0.0.1:10200:10200"
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+    mem_limit: 1g
+    cpus: 2.0
