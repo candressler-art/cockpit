@@ -1,0 +1,163 @@
+/* HUD-Thema.
+ *
+ * Liegt als eigene Datei ueber dem Grundthema in index.html, damit sich das
+ * Aussehen aendern laesst, ohne die Struktur anzufassen -- und damit man es
+ * durch Weglassen einer Zeile wieder loswird.
+ *
+ * Drei Regeln, die die Recherche als Unterschied zwischen "teuer" und
+ * "Kirmes" nennt, und an die sich alles hier haelt:
+ *
+ *   1. EIN Eckklammer-Motiv, konsequent auf allen Panels. Gemischte Ecken
+ *      (mal rund, mal eckig, mal Klammer) kippen sofort in Kitsch.
+ *   2. Glimmen nur auf Kennzahlen und Raendern, nie auf Fliesstext. Ein
+ *      Log-Absatz mit text-shadow ist nach drei Zeilen unlesbar.
+ *   3. Bewegt wird ausschliesslich opacity und transform. Wer box-shadow
+ *      oder blur per Keyframe animiert, rastert jedes Bild neu -- das ist
+ *      der Hauptgrund, warum solche Oberflaechen auf dem Handy ruckeln.
+ */
+
+:root {
+  /* Der HUD-Akzent liegt kuehler als --akzent, bleibt aber im selben
+   * Farbraum -- so beissen sich die bestehenden Statusfarben nicht. */
+  --hud: #6fe3ff;
+  --hud-schwach: color-mix(in srgb, var(--hud) 30%, transparent);
+  --hud-rand: color-mix(in srgb, var(--hud) 22%, var(--surface0));
+  --klammer: 11px;
+}
+
+/* --- Eckklammern ---------------------------------------------------------
+ * Zwei Pseudoelemente je Panel, jeweils nur zwei Kanten. Kein Bild, kein SVG.
+ * Die Farbe kommt aus --klammer-farbe, die der Zustand setzt -- bei einer
+ * Agentenkarte also aus dem echten Status und nicht aus einem Zeitgeber. */
+.hud-panel { position: relative; }
+.hud-panel::before,
+.hud-panel::after {
+  content: '';
+  position: absolute;
+  width: var(--klammer);
+  height: var(--klammer);
+  border-style: solid;
+  border-color: var(--klammer-farbe, var(--hud-rand));
+  pointer-events: none;
+  transition: border-color .25s ease-out;
+}
+.hud-panel::before { top: -1px; left: -1px; border-width: 2px 0 0 2px; }
+.hud-panel::after { right: -1px; bottom: -1px; border-width: 0 2px 2px 0; }
+
+/* --- Panel-Titel ---------------------------------------------------------
+ * Gesperrte Versalien in Monospace: das liest sich als Messgeraet statt als
+ * Webseite, und kostet nichts. */
+.hud-titel {
+  font: 10px/1 var(--mono);
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--hud);
+  opacity: .85;
+}
+
+/* --- Kennzahlen ----------------------------------------------------------
+ * Der Glimmkern ist weiss und eng, der Halo breit und farbig. Der Buchstabe
+ * selbst bleibt scharf -- weichgezeichnet wird nur das Licht drumherum. */
+.hud-zahl {
+  font: 600 var(--zahl-groesse, 22px)/1 var(--mono);
+  color: #eaffff;
+  text-shadow:
+    0 0 4px #fff,
+    0 0 12px var(--hud),
+    0 0 30px color-mix(in srgb, var(--hud) 55%, transparent);
+}
+.hud-zahl.warm { text-shadow: 0 0 4px #fff, 0 0 12px var(--werkzeug), 0 0 30px var(--werkzeug); }
+.hud-zahl.heiss { text-shadow: 0 0 4px #fff, 0 0 12px var(--fehler), 0 0 30px var(--fehler); }
+
+/* --- Rahmen-Glimmen bei echter Aktivitaet --------------------------------
+ * Ein umlaufender Farbverlauf, aber NUR auf Panels, die gerade wirklich
+ * arbeiten. Mehrere gleichzeitig rotierende conic-gradients sind genau der
+ * Fall, der ein Handy in die Knie zwingt -- deshalb paused als Vorgabe. */
+@property --hud-winkel {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+.hud-aktiv {
+  border: 1px solid transparent;
+  background:
+    linear-gradient(var(--mantle), var(--mantle)) padding-box,
+    conic-gradient(
+      from var(--hud-winkel),
+      transparent 0deg,
+      var(--klammer-farbe, var(--hud)) 40deg,
+      transparent 110deg,
+      transparent 360deg
+    ) border-box;
+  animation: hud-drehen var(--hud-tempo, 3.2s) linear infinite;
+}
+@keyframes hud-drehen { to { --hud-winkel: 360deg; } }
+
+/* --- Pulsierender Schein -------------------------------------------------
+ * Der Schatten steht fest, bewegt wird nur die Deckkraft eines
+ * Pseudoelements. Der Radius bleibt unter 40px, weil die Kosten mit Radius
+ * und Flaeche wachsen. */
+.hud-schein { position: relative; }
+.hud-schein::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  box-shadow: 0 0 22px var(--klammer-farbe, var(--hud));
+  opacity: var(--schein, .18);
+  pointer-events: none;
+  transition: opacity .4s ease-out;
+}
+
+/* --- Ringe ---------------------------------------------------------------
+ * Ein conic-gradient und eine Custom-Property. Das Aktualisieren ist eine
+ * Zahl, kein Neuaufbau von Pfaden. */
+.hud-ring {
+  --prozent: 0;
+  position: relative;
+  width: var(--ring-groesse, 74px);
+  height: var(--ring-groesse, 74px);
+  border-radius: 50%;
+  background: conic-gradient(
+    var(--ring-farbe, var(--hud)) calc(var(--prozent) * 1%),
+    color-mix(in srgb, var(--surface0) 70%, transparent) 0
+  );
+  display: grid;
+  place-items: center;
+  transition: background .5s ease-out;
+}
+.hud-ring::after {
+  content: '';
+  position: absolute;
+  inset: 7px;
+  border-radius: 50%;
+  background: var(--crust);
+}
+.hud-ring > * { position: relative; z-index: 1; text-align: center; }
+
+/* --- Rasterlinien im Hintergrund -----------------------------------------
+ * Sehr schwach, sonst wird es zum Millimeterpapier. Statisch, also kostenlos. */
+.hud-raster {
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--hud) 4%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--hud) 4%, transparent) 1px, transparent 1px);
+  background-size: 34px 34px;
+}
+
+/* --- Bestehende Bauteile ins Thema holen ---------------------------------
+ * Nur Farbe und Rand, keine Struktur: die Ansichten sollen weiter genau so
+ * funktionieren wie vorher. */
+#tableiste button.an { color: var(--hud); border-bottom-color: var(--hud); }
+@media (max-width: 820px) {
+  #tableiste button.an { border-top-color: var(--hud); }
+}
+.pill.an { background: color-mix(in srgb, var(--hud) 18%, transparent); color: var(--hud); }
+aside, #rechts, #graphbox { border-color: var(--hud-rand); }
+
+/* Schwaechere Geraete und wer Bewegung abgestellt hat, bekommen die Ruhe.
+ * Das ist keine Nettigkeit: eine dauerhaft rotierende Randanimation auf
+ * einem Mittelklasse-Handy ist der Unterschied zwischen fluessig und heiss. */
+@media (prefers-reduced-motion: reduce) {
+  .hud-aktiv { animation: none; }
+  .hud-schein::before { transition: none; }
+}

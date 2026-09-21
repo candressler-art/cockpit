@@ -620,13 +620,19 @@ const server = createServer(async (req, res) => {
       return res.end('verboten')
     }
     const inhalt = await readFile(ziel)
+    // Der Service Worker ist die eine Ausnahme vom no-store unten: manche
+    // Browser lehnen die Registrierung ab, wenn das Skript mit no-store
+    // ausgeliefert wird, und melden das nur als "unknown error". Eine Minute
+    // Frist ist kurz genug, dass eine Aenderung schnell greift.
+    const istWorker = datei === 'sw.js'
     res.writeHead(200, {
       'content-type': MIME[extname(ziel)] ?? 'application/octet-stream',
+      ...(istWorker ? { 'service-worker-allowed': '/' } : {}),
       // Kein Caching: die Oberflaeche wird waehrend der Entwicklung staendig
       // geaendert, und ein Browser, der altes CSS ausliefert, sieht aus wie ein
       // Fehler im Code. Die Dateien sind klein und kommen ueber das Tailnet
       // oder von localhost -- der Gewinn durch Caching waere ohnehin gering.
-      'cache-control': 'no-store, must-revalidate',
+      'cache-control': istWorker ? 'max-age=60' : 'no-store, must-revalidate',
     })
     return res.end(inhalt)
   } catch (e) {

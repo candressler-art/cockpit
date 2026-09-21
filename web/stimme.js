@@ -8,6 +8,7 @@
  * nicht bemerkt.
  */
 import { api } from './bus.js'
+import * as sp from './sprachpegel.js'
 
 /** aus | wichtig | alles */
 let stufe = 'aus'
@@ -64,11 +65,16 @@ async function abspielen(text) {
     const blob = await r.blob()
     const url = URL.createObjectURL(blob)
     const audio = new Audio(url)
+    // Durch den Analyser schleifen, damit die Wellenform und der Kern dem
+    // ECHTEN Pegel folgen und nicht einer nachgebauten Kurve.
+    await sp.aufwecken()
+    sp.ausgabeAnhaengen(audio)
     await new Promise((fertig) => {
       audio.onended = fertig
       audio.onerror = fertig
       audio.play().catch(fertig)
     })
+    sp.ausgabeBeendet()
     URL.revokeObjectURL(url)
   } catch (e) {
     console.warn('Serverstimme nicht verfuegbar, nehme die des Browsers:', String(e))

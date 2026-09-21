@@ -11,12 +11,14 @@
 import * as bus from './bus.js'
 import * as tabs from './tabs.js'
 import * as stimme from './stimme.js'
+import zentrale from './tabs/zentrale.js'
 import lauf from './tabs/lauf.js'
 import server from './tabs/server.js'
 import chats from './tabs/chats.js'
 import vault from './tabs/vault.js'
 import konsole from './tabs/konsole.js'
 
+tabs.registrieren(zentrale)
 tabs.registrieren(lauf)
 tabs.registrieren(chats)
 tabs.registrieren(vault)
@@ -80,10 +82,18 @@ bus.abonnieren('ereignis', (e) => {
 addEventListener('pagehide', () => tabs.alleAbbauen())
 
 // --- PWA --------------------------------------------------------------------
-// Nur ueber https: im Tauri-Fenster und auf http gibt es keinen Service
-// Worker, und der Registrierungsfehler waere bloss Rauschen in der Konsole.
-if ('serviceWorker' in navigator && location.protocol === 'https:') {
-  navigator.serviceWorker.register('./sw.js').catch((e) => {
-    console.warn('Service Worker nicht registriert', e)
+// Der Worker dient allein der Installierbarkeit auf dem Handy. In eingebetteten
+// Ansichten (Tauri-Huelle, Browser-Fenster der Desktop-App) ist er weder
+// moeglich noch noetig -- dort scheiterte die Registrierung bei JEDEM Laden
+// und schrieb einen Fehler in die Konsole, der wie ein Defekt aussah, aber
+// keiner war. Deshalb gar nicht erst versuchen.
+// 'Claude/' faengt das Browser-Fenster der Desktop-App ab -- es meldet sich
+// nicht als Electron, verweigert die Registrierung aber trotzdem. Geprueft am
+// echten Fehler: auch mit korrekten Kopfzeilen (max-age statt no-store,
+// Service-Worker-Allowed) bleibt es bei "unknown error".
+const eingebettet = /Electron|Tauri|Claude\/|wv\)/i.test(navigator.userAgent)
+if ('serviceWorker' in navigator && location.protocol === 'https:' && !eingebettet) {
+  navigator.serviceWorker.register('./sw.js').catch(() => {
+    // Still: wer kein Symbol auf dem Startbildschirm braucht, merkt nichts.
   })
 }
