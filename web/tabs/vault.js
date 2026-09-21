@@ -124,15 +124,71 @@ function steuerung(cv) {
   }
 }
 
+/* Masse der Beschriftung. Monospace, deshalb laesst sich die Breite aus der
+ * Zeichenzahl rechnen, ohne zu messen -- eine echte Messung kostete je Bild
+ * ein erzwungenes Layout, und das bei sechzehn Elementen und sechzig Bildern
+ * je Sekunde. */
+const LABEL_ZEICHEN = 5.75   // Breite eines Zeichens bei 9.5px Monospace
+const LABEL_HOEHE = 13
+const LABEL_LUFT = 4
+
+/**
+ * Beschriftungen setzen, ohne dass sie sich ueberlagern.
+ *
+ * Die Kugel ist dicht; projiziert man sechzehn Namen darauf, liegen sie
+ * zwangslaeufig uebereinander und keiner ist mehr zu lesen. Deshalb wird
+ * jeder Kandidat gegen die schon gesetzten geprueft und faellt weg, wenn er
+ * sich mit einem ueberschneidet.
+ *
+ * Die Reihenfolge entscheidet, wer gewinnt: kern.beschriftungen() liefert
+ * nach Verknuepfungsgrad sortiert, also bekommt die wichtigste Notiz ihren
+ * Platz zuerst. Treffer einer Suche draengeln sich davor -- wer sucht, will
+ * das Gesuchte lesen und nicht dessen Nachbarn.
+ */
 function beschriftungZeichnen() {
   if (!beschriftung || !kern) return
+  const breite = beschriftung.clientWidth
+  const hoehe = beschriftung.clientHeight
+
+  const kandidaten = kern.beschriftungen(24)
+    // Was hinter der Kugelmitte liegt, ist ohnehin kaum sichtbar -- es belegt
+    // aber Platz, den ein vorderer Name besser gebrauchen kann.
+    .filter((b) => b.vorne > -0.15)
+    .sort((a, b) => (treffer.has(b.id) ? 1 : 0) - (treffer.has(a.id) ? 1 : 0))
+
+  // Auf schmalen Schirmen kuerzere Namen: ein 30-Zeichen-Titel ist dort
+  // rund 170 Pixel breit, und nach dreien ist die Kugel voll. Lieber acht
+  // kurze Namen als drei lange -- lesbar sind beide, aber nur das eine
+  // zeigt, wo man gerade ist.
+  const maxZeichen = breite < 560 ? 17 : breite < 900 ? 24 : 30
+  const belegt = []
   const teile = []
-  for (const b of kern.beschriftungen(16)) {
+  for (const b of kandidaten) {
+    if (teile.length >= 14) break
     const hell = treffer.has(b.id)
-    // Hinten liegende Knoten werden blasser, sonst schwebt der Text ueber der
-    // Kugel statt darin zu stecken.
-    const deckung = hell ? 1 : Math.max(0.25, 1 - b.tiefe * 0.9)
-    const titel = b.titel.length > 32 ? b.titel.slice(0, 31) + '…' : b.titel
+    const titel = b.titel.length > maxZeichen
+      ? b.titel.slice(0, maxZeichen - 1) + '…'
+      : b.titel
+
+    // Kasten aus der Transformation ableiten: translate(-50%,-170%) setzt den
+    // Text mittig ueber den Punkt.
+    const w = titel.length * LABEL_ZEICHEN
+    const kasten = {
+      l: b.x - w / 2 - LABEL_LUFT,
+      r: b.x + w / 2 + LABEL_LUFT,
+      o: b.y - LABEL_HOEHE * 1.7 - LABEL_LUFT,
+      u: b.y - LABEL_HOEHE * 0.7 + LABEL_LUFT,
+    }
+    // Was aus dem Bild ragt, wird gar nicht erst gesetzt.
+    if (kasten.l < 0 || kasten.r > breite || kasten.o < 0 || kasten.u > hoehe) continue
+    if (belegt.some((k) => kasten.l < k.r && kasten.r > k.l && kasten.o < k.u && kasten.u > k.o)) {
+      continue
+    }
+    belegt.push(kasten)
+
+    // Vorne voll, nach hinten ausblendend -- so steckt der Text in der Kugel,
+    // statt darueber zu schweben.
+    const deckung = hell ? 1 : Math.min(1, Math.max(0.3, 0.55 + b.vorne * 0.5))
     teile.push(
       `<span class="vlabel${hell ? ' treffer' : ''}" style="left:${b.x.toFixed(0)}px;` +
       `top:${b.y.toFixed(0)}px;opacity:${deckung.toFixed(2)}">${esc(titel)}</span>`)

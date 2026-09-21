@@ -151,6 +151,7 @@ export class Wissenskern {
     this.index = new Map(roh.map((k, i) => [k.id, i]))
 
     const radius = 44
+    this.radius = radius
     const pos = new Float32Array(n * 3)
     const phase = new Float32Array(n)
     const aktiv = new Float32Array(n)
@@ -351,20 +352,26 @@ export class Wissenskern {
       .slice(0, anzahl)
     const gr = this.renderer.domElement
     const v = new THREE.Vector3()
+    const welt = new THREE.Vector3()
+    const kamAbstand = this.kamera.position.length()
     const raus = []
     for (const k of rang) {
       v.set(pos[k.i * 3], pos[k.i * 3 + 1], pos[k.i * 3 + 2])
       this.gruppe.localToWorld(v)
+      welt.copy(v)
       v.project(this.kamera)
       if (v.z > 1) continue
+      // NICHT v.z als Tiefe nehmen: bei near=0.1 liegt die projizierte Tiefe
+      // fuer die ganze Kugel bei rund 0.998, der Wert unterscheidet also
+      // nichts. Der Abstand zur Kamera, am Kugelradius gemessen, tut es:
+      // +1 heisst vorderster Punkt, -1 hinterster.
+      const vorne = (kamAbstand - welt.distanceTo(this.kamera.position)) / (this.radius || 1)
       raus.push({
         id: k.id,
         titel: k.titel,
         x: (v.x * 0.5 + 0.5) * gr.clientWidth,
         y: (-v.y * 0.5 + 0.5) * gr.clientHeight,
-        // Hinten liegende Knoten werden blasser -- sonst schwebt der Text
-        // ueber der Kugel, statt darin zu stecken.
-        tiefe: v.z,
+        vorne,
       })
     }
     return raus
