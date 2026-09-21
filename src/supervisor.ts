@@ -7,7 +7,7 @@
 
 import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
-import { query, USAGE_LIMIT_ERROR_PREFIXES } from '@anthropic-ai/claude-agent-sdk'
+import { query, USAGE_LIMIT_ERROR_PREFIXES, type McpServerConfig } from '@anthropic-ai/claude-agent-sdk'
 import type { CockpitDb } from './db.js'
 import { einordnen } from './normalisieren.js'
 import {
@@ -49,7 +49,12 @@ export interface AgentStartOptionen {
   resume?: string
   /** Werkzeuge, die ohne Rueckfrage laufen duerfen. */
   allowedTools?: string[]
+  /** MCP-Server, die dieser Agent nutzen darf. Leer: keine. */
+  mcpServers?: Record<string, McpServerConfig>
 }
+
+/** Pseudo-Lauf fuer alles, was zu keinem Agentenlauf gehoert. */
+export const KONSOLE_LAUF = 'konsole'
 
 export class Supervisor extends EventEmitter {
   private db: CockpitDb
@@ -188,6 +193,10 @@ export class Supervisor extends EventEmitter {
           maxBudgetUsd: o.maxBudgetUsd,
           resume: o.resume,
           allowedTools: o.allowedTools,
+          // Nur was die Fachrolle ausdruecklich nennt. Ein Coder braucht
+          // keinen Browser, und ein Werkzeug, das niemand nutzt, ist nur
+          // zusaetzliche Angriffsflaeche im Kontext.
+          ...(o.mcpServers && Object.keys(o.mcpServers).length ? { mcpServers: o.mcpServers } : {}),
           // Subagenten sollen auch ihren Text zeigen, nicht nur Tool-Aufrufe --
           // sonst bleibt im Graphen ein stummer Knoten stehen.
           forwardSubagentText: true,
@@ -351,6 +360,48 @@ export class Supervisor extends EventEmitter {
         },
       })
     })
+  }
+
+  /**
+   * Freigabe ausserhalb eines Agentenlaufs einholen -- fuer die Konsole.
+   *
+   * Bewusst derselbe Broker und dieselbe Tabelle wie bei Werkzeugaufrufen:
+   * ein Befehl, den ein Mensch tippt, ist nicht weniger pruefenswert als
+   * einer, den ein Agent vorschlaegt, und er gehoert in denselben Nachweis.
+   * Die Anfrage wird mit runId null verteilt, also an alle Klienten -- sie
+   * gehoert zu keinem Lauf.
+   */
+  freigabeAnfragen(
+    agentId: string,
+    toolName: string,
+    input: Record<string, unknown>,
+  ): { id: string; entschieden: Promise<{ erlaubt: boolean; grund: string | null }> } {
+    const anfrage: PermissionRequest = {
+      id: randomUUID(),
+      runId: KONSOLE_LAUF,
+      agentId,
+      toolName,
+      input,
+      requestedAt: Date.now(),
+      decidedAt: null,
+      decision: null,
+      decidedBy: null,
+      reason: null,
+    }
+    this.db.freigabeAnlegen(anfrage)
+    this.emit('freigabe', anfrage)
+
+    const entschieden = new Promise<{ erlaubt: boolean; grund: string | null }>((resolve) => {
+      this.offeneFreigaben.set(anfrage.id, {
+        anfrage,
+        aufloesen: (erlaubt, grund) => {
+          this.offeneFreigaben.delete(anfrage.id)
+          this.db.freigabeEntscheiden(anfrage.id, erlaubt ? 'allow' : 'deny', grund ?? 'ui', null)
+          resolve({ erlaubt, grund: grund ?? null })
+        },
+      })
+    })
+    return { id: anfrage.id, entschieden }
   }
 
   /** Entscheidet eine offene Freigabe. Gibt false zurueck, wenn sie unbekannt ist. */

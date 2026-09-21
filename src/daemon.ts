@@ -17,6 +17,7 @@ import { rollenLaden, rollenListe } from './rollen.js'
 import { sprechenGecacht } from './stimme.js'
 import { chatsIndizieren, chatsSuchen, chatLesen } from './chats.js'
 import { vaultIndizieren, vaultGraphLesen, vaultBeobachten, vaultDa } from './vault.js'
+import { konsoleBefehl, cwdPruefen } from './konsole.js'
 import { existsSync } from 'node:fs'
 
 const PORT = Number(process.env.COCKPIT_PORT ?? 8765)
@@ -465,6 +466,22 @@ const server = createServer(async (req, res) => {
       }
       const ok = supervisor.agentAbbrechen(runId, agentId)
       return json(ok ? 200 : 404, { ok })
+    }
+
+    if (pfad === '/api/konsole' && req.method === 'POST') {
+      const k = (await koerperLesen(req)) as Record<string, unknown> | null
+      const befehl = String(k?.befehl ?? '').trim()
+      const cwd = String(k?.cwd ?? '/opt/cockpit')
+      if (!befehl) return json(400, { fehler: 'befehl fehlt' })
+      const schlecht = cwdPruefen(cwd)
+      if (schlecht) return json(400, { fehler: schlecht })
+
+      // Antwortet sofort mit der Freigabe-Id. Das Ergebnis kommt ueber den
+      // Live-Strom nach -- ein Befehl kann zwei Minuten laufen, und so lange
+      // eine HTTP-Verbindung offenzuhalten waere die schlechtere Wahl.
+      const { id } = konsoleBefehl(supervisor, befehl, cwd, (e) => verteilen('konsole', e, null))
+      verteilen('konsole', { id, phase: 'freigabe', befehl, cwd }, null)
+      return json(202, { id })
     }
 
     if (pfad === '/api/vault/graph' && req.method === 'GET') {

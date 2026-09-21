@@ -20,6 +20,7 @@ import {
   type OrchestratorAntwort,
 } from './protokoll.js'
 import { rolleLesen, workerRollen, VORGABE_ROLLE } from './rollen.js'
+import { mcpAufloesen } from './mcp.js'
 
 export interface OrchestratorKonfig {
   runId: string
@@ -351,6 +352,7 @@ export class Orchestrator extends EventEmitter {
             // Opus waere Verschwendung, ein Coder auf Haiku ein Rueckschritt.
             model: fach?.modell ?? k.workerModell,
             ...(fach?.werkzeuge ? { allowedTools: fach.werkzeuge } : {}),
+            mcpServers: mcpAufloesen(fach?.mcp),
             maxBudgetUsd: k.maxBudgetUsd,
           })
           // Volltext statt `result`: bei ueberschrittener Ausgabegrenze traegt

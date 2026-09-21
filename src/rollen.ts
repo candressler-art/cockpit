@@ -22,6 +22,8 @@ export interface Fachrolle {
   /** Leer bedeutet: keine Einschraenkung (SDK-Vorgabe). Nicht: keine Werkzeuge. */
   werkzeuge: string[] | null
   beschreibung: string
+  /** Namen der MCP-Server, die diese Rolle nutzen darf, z.B. 'browser'. */
+  mcp: string[] | null
   systemPrompt: string
 }
 
@@ -48,6 +50,7 @@ function zerlegen(id: string, roh: string): Fachrolle {
   const name = kopf.get('name')
   if (!name) throw new Error(`rollen/${id}.md: Feld 'name' fehlt`)
   const werkzeugeRoh = kopf.get('werkzeuge') ?? ''
+  const mcpRoh = kopf.get('mcp') ?? ''
   const systemPrompt = (m[2] ?? '').trim()
   if (!systemPrompt) throw new Error(`rollen/${id}.md: Prompt ist leer`)
   return {
@@ -56,6 +59,7 @@ function zerlegen(id: string, roh: string): Fachrolle {
     modell: kopf.get('modell') || null,
     werkzeuge: werkzeugeRoh ? werkzeugeRoh.split(',').map((w) => w.trim()).filter(Boolean) : null,
     beschreibung: kopf.get('beschreibung') ?? '',
+    mcp: mcpRoh ? mcpRoh.split(',').map((w) => w.trim()).filter(Boolean) : null,
     systemPrompt,
   }
 }

@@ -1,0 +1,64 @@
+// Welche MCP-Server es gibt und wo sie hoeren.
+//
+// Nur hier eingetragen, nicht in den Rollendateien: die Rolle nennt einen
+// Namen ('browser'), die Adresse gehoert zur Umgebung. So laesst sich der
+// Browser umziehen oder abschalten, ohne vier Markdown-Dateien anzufassen.
+
+import type { McpServerConfig } from '@anthropic-ai/claude-agent-sdk'
+
+export type McpKatalog = Record<string, McpServerConfig>
+
+/**
+ * Der Browser laeuft ueber stdio, nicht ueber HTTP.
+ *
+ * Der HTTP-Weg war der erste Versuch und ist gescheitert: der
+ * Playwright-Server beantwortet Anfragen an seinen Endpunkt mit 403 (Schutz
+ * gegen DNS-Rebinding), und die CLI meldet den Server daraufhin als
+ * "needs authentication". Zwei Laeufe sind genau daran mit einem Blocker
+ * stehengeblieben.
+ *
+ * Ueber stdio faellt beides weg: kein Port, keine Herkunftspruefung, keine
+ * Autorisierung. Je Sitzung startet ein eigener Container, der sich danach
+ * selbst entfernt (--rm). Das passt ohnehin zu --isolated, das schon vorher
+ * kein Profil behalten sollte.
+ */
+const KATALOG: McpKatalog = {
+  browser: {
+    type: 'stdio',
+    command: 'docker',
+    args: [
+      'run', '--rm', '-i',
+      // Abschottung wie beim Dauercontainer: kein Host-Netz, keine
+      // zusaetzlichen Rechte, hartes Speicherlimit.
+      '--network', 'bridge',
+      '--memory', '2g',
+      '--security-opt', 'no-new-privileges:true',
+      '--init',
+      'mcr.microsoft.com/playwright/mcp:latest',
+      '--headless', '--isolated', '--no-sandbox', '--browser', 'chromium',
+    ],
+  },
+}
+
+/**
+ * Loest die Namen einer Fachrolle in Serveradressen auf.
+ *
+ * Unbekannte Namen werden gemeldet und weggelassen, nicht geraten: ein
+ * Tippfehler in einer Rollendatei soll auffallen, aber keinen Lauf
+ * verhindern.
+ */
+export function mcpAufloesen(namen: string[] | null | undefined): McpKatalog {
+  if (!namen?.length) return {}
+  const r: McpKatalog = {}
+  for (const n of namen) {
+    const s = KATALOG[n]
+    if (!s) {
+      console.warn(`[mcp] Rolle nennt unbekannten Server '${n}' -- wird ausgelassen`)
+      continue
+    }
+    r[n] = s
+  }
+  return r
+}
+
+export const mcpNamen = () => Object.keys(KATALOG)

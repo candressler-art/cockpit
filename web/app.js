@@ -15,10 +15,12 @@ import lauf from './tabs/lauf.js'
 import server from './tabs/server.js'
 import chats from './tabs/chats.js'
 import vault from './tabs/vault.js'
+import konsole from './tabs/konsole.js'
 
 tabs.registrieren(lauf)
 tabs.registrieren(chats)
 tabs.registrieren(vault)
+tabs.registrieren(konsole)
 tabs.registrieren(server)
 
 await bus.basisErmitteln()

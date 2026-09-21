@@ -8,6 +8,14 @@ und stehen hier, damit nachvollziehbar bleibt, was dort laeuft und warum.
 | `piper.yml` | Sprachausgabe (Wyoming-Protokoll) fuer `/api/sprechen` | 127.0.0.1:10200 |
 | `syncthing.yml` | holt Obsidian-Vault und Claude-Code-Sessions vom Desktop | 127.0.0.1:8384 |
 
+Der Browser der Agenten hat bewusst KEINEN Stack: er laeuft je Sitzung als
+eigener Container ueber `docker run --rm -i` und ist in `src/mcp.ts`
+beschrieben. Der erste Versuch war ein Dauercontainer mit HTTP-Endpunkt --
+der Playwright-Server antwortet darauf mit 403 (Schutz gegen DNS-Rebinding),
+und die CLI meldete ihn als "needs authentication". Zwei Testlaeufe sind
+genau daran mit einem Blocker stehengeblieben. Ueber stdio faellt das weg:
+kein Port, keine Herkunftspruefung, keine Autorisierung.
+
 ## Warum beide nur auf 127.0.0.1 hoeren
 
 Nach aussen geht ausschliesslich das Cockpit selbst, und zwar ueber
