@@ -86,6 +86,22 @@ function geruest() {
         <span class="hud-titel">Strom</span>
         <div id="z-stromliste"><div class="leer">still</div></div>
       </section>
+
+      <section class="z-panel hud-panel" id="z-auftrag">
+        <div class="z-kopf"><span class="hud-titel">Neuer Auftrag</span>
+          <div class="spacer"></div>
+          <span class="z-rollen" id="z-rollen"></span></div>
+        <textarea id="a-text" rows="2" spellcheck="false"
+          placeholder="Was soll getan werden? Mit 'AN-ROLLE: rechercheur' in der ersten Zeile gezielt adressieren."></textarea>
+        <div class="z-auftragzeile">
+          <input id="a-cwd" value="/opt/cockpit" spellcheck="false" title="Arbeitsverzeichnis">
+          <label>Runden <input id="a-runden" type="number" min="1" max="40" value="6"></label>
+          <label>Parallel <input id="a-parallel" type="number" min="1" max="4" value="2"></label>
+          <div class="spacer"></div>
+          <button class="still" id="a-start">Orchestrator starten</button>
+        </div>
+        <div class="z-auftragnote" id="a-note"></div>
+      </section>
     </div>
 
     <div class="z-sprachleiste hud-panel" id="z-sprache">
@@ -101,6 +117,47 @@ function geruest() {
   welle = wurzel.querySelector('#z-welle')
   wurzel.querySelector('#z-mikro').onclick = () => void mikroSchalten()
   wurzel.querySelector('#z-testen').onclick = () => void sprechenTesten()
+  wurzel.querySelector('#a-start').onclick = () => void auftragStarten()
+}
+
+/**
+ * Einen Orchestrator-Lauf starten.
+ *
+ * Das ging vorher nur ueber die API -- die ganzen Fachrollen waren aus der
+ * Oberflaeche heraus nicht erreichbar, obwohl sie der Kern des Aufbaus sind.
+ * Ein Weg, den man nur mit curl geht, wird nicht benutzt.
+ */
+async function auftragStarten() {
+  const text = wurzel.querySelector('#a-text').value.trim()
+  const note = wurzel.querySelector('#a-note')
+  if (!text) { note.textContent = 'Kein Auftrag eingetragen.'; return }
+  const knopf = wurzel.querySelector('#a-start')
+  knopf.disabled = true
+  note.textContent = 'wird gestartet…'
+  try {
+    const r = await fetch(api('/api/orchestrator'), {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        label: text.split('\n')[0].slice(0, 50),
+        cwd: wurzel.querySelector('#a-cwd').value.trim() || '/opt/cockpit',
+        anfangsPrompt: text,
+        projektBlock: 'Auftrag aus der Cockpit-Zentrale.',
+        maxRunden: Number(wurzel.querySelector('#a-runden').value) || 6,
+        parallelitaet: Number(wurzel.querySelector('#a-parallel').value) || 2,
+      }),
+    }).then((x) => x.json())
+    if (r.runId) {
+      wurzel.querySelector('#a-text').value = ''
+      note.textContent = `läuft: ${r.runId.slice(0, 8)} — im Tab „Lauf“ zu sehen`
+      stimme.sagen('Der Auftrag läuft.', { wichtig: true })
+    } else {
+      note.textContent = `Start abgelehnt: ${r.fehler ?? JSON.stringify(r)}`
+    }
+  } catch (e) {
+    note.textContent = `nicht absendbar: ${String(e)}`
+  } finally {
+    knopf.disabled = false
+  }
 }
 
 async function mikroSchalten() {
@@ -289,6 +346,15 @@ export default {
       systemZeichnen()
       limitZeichnen()
     } catch { /* der Live-Strom liefert es gleich nach */ }
+
+    // Die verfuegbaren Fachrollen anzeigen: ohne sie zu kennen schreibt
+    // niemand eine AN-ROLLE-Zeile.
+    try {
+      const r = await fetch(api('/api/rollen')).then((x) => x.json())
+      const ids = (r.rollen ?? []).filter((x) => x.id !== 'orchestrator').map((x) => x.id)
+      const el = wurzel.querySelector('#z-rollen')
+      if (el && ids.length) el.textContent = ids.join(' · ')
+    } catch { /* ohne Liste geht es auch, nur unbequemer */ }
 
     kern.starten()
     this.sichtbar(true)

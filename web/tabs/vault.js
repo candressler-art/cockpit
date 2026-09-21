@@ -126,74 +126,102 @@ function steuerung(cv) {
 
 /* Masse der Beschriftung. Monospace, deshalb laesst sich die Breite aus der
  * Zeichenzahl rechnen, ohne zu messen -- eine echte Messung kostete je Bild
- * ein erzwungenes Layout, und das bei sechzehn Elementen und sechzig Bildern
+ * ein erzwungenes Layout, und das bei vierzehn Elementen und sechzig Bildern
  * je Sekunde. */
 const LABEL_ZEICHEN = 5.75   // Breite eines Zeichens bei 9.5px Monospace
 const LABEL_HOEHE = 13
-const LABEL_LUFT = 4
+const LABEL_LUFT = 3
+
+/* Wie weit ein Name von seinem Knoten wegruecken darf, bevor aufgegeben wird.
+ * Weiter als das verliert man den Zusammenhang, auch mit Fuehrungslinie. */
+const VERSATZ = [18, 30, 44, 60, 78, 98]
+
+function kollidiert(k, belegt) {
+  return belegt.some((b) => k.l < b.r && k.r > b.l && k.o < b.u && k.u > b.o)
+}
 
 /**
- * Beschriftungen setzen, ohne dass sie sich ueberlagern.
+ * Beschriftungen setzen -- ausweichen statt wegwerfen.
  *
- * Die Kugel ist dicht; projiziert man sechzehn Namen darauf, liegen sie
- * zwangslaeufig uebereinander und keiner ist mehr zu lesen. Deshalb wird
- * jeder Kandidat gegen die schon gesetzten geprueft und faellt weg, wenn er
- * sich mit einem ueberschneidet.
+ * Erst wurde jeder Name verworfen, der sich mit einem schon gesetzten
+ * ueberschnitt. Das war ueberschneidungsfrei, aber auf schmalen Schirmen
+ * blieben drei Namen uebrig. Jetzt ruecken sie stattdessen nach aussen, weg
+ * von der Kugelmitte, und eine duenne Linie haelt die Verbindung zum Knoten.
  *
- * Die Reihenfolge entscheidet, wer gewinnt: kern.beschriftungen() liefert
- * nach Verknuepfungsgrad sortiert, also bekommt die wichtigste Notiz ihren
- * Platz zuerst. Treffer einer Suche draengeln sich davor -- wer sucht, will
- * das Gesuchte lesen und nicht dessen Nachbarn.
+ * Nach aussen und nicht in eine beliebige Richtung: dort ist der Platz, weil
+ * die Knoten zur Mitte hin dichter stehen. Wer trotzdem keinen Platz findet,
+ * faellt weg -- ein Name, der quer ueber der Kugel schwebt, sagt weniger als
+ * gar keiner.
  */
 function beschriftungZeichnen() {
   if (!beschriftung || !kern) return
   const breite = beschriftung.clientWidth
   const hoehe = beschriftung.clientHeight
+  if (!breite || !hoehe) return
+  const mx = breite / 2
+  const my = hoehe / 2
 
-  const kandidaten = kern.beschriftungen(24)
-    // Was hinter der Kugelmitte liegt, ist ohnehin kaum sichtbar -- es belegt
-    // aber Platz, den ein vorderer Name besser gebrauchen kann.
+  const kandidaten = kern.beschriftungen(26)
     .filter((b) => b.vorne > -0.15)
     .sort((a, b) => (treffer.has(b.id) ? 1 : 0) - (treffer.has(a.id) ? 1 : 0))
 
-  // Auf schmalen Schirmen kuerzere Namen: ein 30-Zeichen-Titel ist dort
-  // rund 170 Pixel breit, und nach dreien ist die Kugel voll. Lieber acht
-  // kurze Namen als drei lange -- lesbar sind beide, aber nur das eine
-  // zeigt, wo man gerade ist.
-  const maxZeichen = breite < 560 ? 17 : breite < 900 ? 24 : 30
+  // Auf schmalen Schirmen kuerzere Namen: ein 30-Zeichen-Titel ist dort rund
+  // 170 Pixel breit, und dann ist auch mit Ausweichen schnell Schluss.
+  const maxZeichen = breite < 560 ? 18 : breite < 900 ? 26 : 34
   const belegt = []
-  const teile = []
+  const spans = []
+  const linien = []
+
   for (const b of kandidaten) {
-    if (teile.length >= 14) break
+    if (spans.length >= 16) break
     const hell = treffer.has(b.id)
     const titel = b.titel.length > maxZeichen
       ? b.titel.slice(0, maxZeichen - 1) + '…'
       : b.titel
-
-    // Kasten aus der Transformation ableiten: translate(-50%,-170%) setzt den
-    // Text mittig ueber den Punkt.
     const w = titel.length * LABEL_ZEICHEN
-    const kasten = {
-      l: b.x - w / 2 - LABEL_LUFT,
-      r: b.x + w / 2 + LABEL_LUFT,
-      o: b.y - LABEL_HOEHE * 1.7 - LABEL_LUFT,
-      u: b.y - LABEL_HOEHE * 0.7 + LABEL_LUFT,
-    }
-    // Was aus dem Bild ragt, wird gar nicht erst gesetzt.
-    if (kasten.l < 0 || kasten.r > breite || kasten.o < 0 || kasten.u > hoehe) continue
-    if (belegt.some((k) => kasten.l < k.r && kasten.r > k.l && kasten.o < k.u && kasten.u > k.o)) {
-      continue
-    }
-    belegt.push(kasten)
 
-    // Vorne voll, nach hinten ausblendend -- so steckt der Text in der Kugel,
-    // statt darueber zu schweben.
-    const deckung = hell ? 1 : Math.min(1, Math.max(0.3, 0.55 + b.vorne * 0.5))
-    teile.push(
-      `<span class="vlabel${hell ? ' treffer' : ''}" style="left:${b.x.toFixed(0)}px;` +
-      `top:${b.y.toFixed(0)}px;opacity:${deckung.toFixed(2)}">${esc(titel)}</span>`)
+    // Richtung nach aussen. Knoten genau in der Mitte bekommen eine
+    // Ersatzrichtung, sonst waere der Vektor null.
+    let dx = b.x - mx
+    let dy = b.y - my
+    const laenge = Math.hypot(dx, dy)
+    if (laenge < 1) { dx = 0; dy = -1 } else { dx /= laenge; dy /= laenge }
+
+    let platz = null
+    for (const d of VERSATZ) {
+      const cx = b.x + dx * d
+      const cy = b.y + dy * d
+      const k = {
+        l: cx - w / 2 - LABEL_LUFT, r: cx + w / 2 + LABEL_LUFT,
+        o: cy - LABEL_HOEHE / 2 - LABEL_LUFT, u: cy + LABEL_HOEHE / 2 + LABEL_LUFT,
+      }
+      if (k.l < 2 || k.r > breite - 2 || k.o < 2 || k.u > hoehe - 2) continue
+      if (kollidiert(k, belegt)) continue
+      platz = { cx, cy, k, d }
+      break
+    }
+    if (!platz) continue
+    belegt.push(platz.k)
+
+    const deckung = hell ? 1 : Math.min(1, Math.max(0.32, 0.55 + b.vorne * 0.5))
+    spans.push(
+      `<span class="vlabel${hell ? ' treffer' : ''}" style="left:${platz.cx.toFixed(0)}px;` +
+      `top:${platz.cy.toFixed(0)}px;opacity:${deckung.toFixed(2)}">${esc(titel)}</span>`)
+
+    // Fuehrungslinie nur, wenn der Name wirklich weggerueckt ist -- bei
+    // achtzehn Pixeln sieht man den Zusammenhang ohnehin.
+    if (platz.d > VERSATZ[0]) {
+      linien.push(
+        `<line x1="${b.x.toFixed(0)}" y1="${b.y.toFixed(0)}" ` +
+        `x2="${(platz.cx - dx * (w / 2 + 3)).toFixed(0)}" ` +
+        `y2="${(platz.cy - dy * (LABEL_HOEHE / 2 + 2)).toFixed(0)}" ` +
+        `opacity="${(deckung * 0.5).toFixed(2)}"/>`)
+    }
   }
-  beschriftung.innerHTML = teile.join('')
+
+  beschriftung.innerHTML =
+    `<svg class="vlinien" width="${breite}" height="${hoehe}">${linien.join('')}</svg>` +
+    spans.join('')
 }
 
 export default {
