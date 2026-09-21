@@ -10,6 +10,7 @@
  */
 import * as bus from './bus.js'
 import * as tabs from './tabs.js'
+import * as stimme from './stimme.js'
 import lauf from './tabs/lauf.js'
 import server from './tabs/server.js'
 
@@ -33,6 +34,38 @@ document.getElementById('aufFreigaben').onclick = () => schublade('schublade-rec
 // treffen, und die Schublade verdeckt vier Fuenftel des Schirms.
 document.querySelector('main').addEventListener('pointerdown', () => {
   app.classList.remove('schublade-links', 'schublade-rechts')
+})
+
+// --- Sprachausgabe ----------------------------------------------------------
+const stimmwahl = document.getElementById('stimmwahl')
+stimmwahl.value = stimme.stufeLaden()
+stimmwahl.onchange = async () => {
+  stimme.stufeSetzen(stimmwahl.value)
+  // Die Auswahl ist selbst der Klick, den der Browser fuer die Tonfreigabe
+  // verlangt -- deshalb hier und nirgends sonst freigeben.
+  if (stimmwahl.value !== 'aus') await stimme.freigeben()
+}
+
+// Gesprochen wird, was eine Entscheidung verlangt oder einen Lauf abschliesst.
+// Nicht jeder Zwischenstand: eine Stimme, die dauernd redet, schaltet man ab.
+bus.abonnieren('lauf_ende', (d) => {
+  const grund = d?.ende?.grund ?? 'beendet'
+  const text = grund === 'entscheidung'
+    ? `Der Orchestrator braucht eine Entscheidung. ${d?.ende?.frage ?? ''}`
+    : `Der Lauf ist beendet. Grund: ${grund}.`
+  stimme.sagen(text, { wichtig: true })
+})
+
+bus.abonnieren('freigabe', (d) => {
+  if (d?.decidedAt || d?.decided_at) return
+  stimme.sagen(`Eine Freigabe wartet: ${d?.toolName ?? d?.tool_name ?? 'ein Werkzeug'}.`,
+    { wichtig: true })
+})
+
+bus.abonnieren('ereignis', (e) => {
+  if (e?.kind === 'rate_limit') stimme.sagen(`Achtung, Limit: ${e.summary}`, { wichtig: true })
+  else if (e?.kind === 'error') stimme.sagen(`Fehler bei ${e.agentId}: ${e.summary}`)
+  else if (e?.kind === 'protocol') stimme.sagen(e.summary)
 })
 
 // --- PWA --------------------------------------------------------------------

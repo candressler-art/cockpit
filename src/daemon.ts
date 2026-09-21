@@ -14,6 +14,7 @@ import { DiscordAdapter } from './discord.js'
 import type { CockpitEvent } from './typen.js'
 import { standLesen, type SystemStand } from './system.js'
 import { rollenLaden, rollenListe } from './rollen.js'
+import { sprechenGecacht } from './stimme.js'
 
 const PORT = Number(process.env.COCKPIT_PORT ?? 8765)
 const HOST = process.env.COCKPIT_HOST ?? '127.0.0.1'
@@ -450,6 +451,27 @@ const server = createServer(async (req, res) => {
       }
       const ok = supervisor.agentAbbrechen(runId, agentId)
       return json(ok ? 200 : 404, { ok })
+    }
+
+    if (pfad === '/api/sprechen' && req.method === 'POST') {
+      const k = (await koerperLesen(req)) as Record<string, unknown> | null
+      const text = String(k?.text ?? '').trim()
+      if (!text) return json(400, { fehler: 'text fehlt' })
+      try {
+        const wav = await sprechenGecacht(text)
+        res.writeHead(200, {
+          'content-type': 'audio/wav',
+          'content-length': String(wav.length),
+          'cache-control': 'no-store',
+          ...corsKopf,
+        })
+        return res.end(wav)
+      } catch (e) {
+        // 503 und nicht 500: der Browser soll daran erkennen, dass die
+        // Serverstimme gerade nicht da ist, und auf seine eigene umschalten.
+        // Stumm bleiben waere die schlechteste Antwort.
+        return json(503, { fehler: String(e) })
+      }
     }
 
     if (pfad === '/api/rollen' && req.method === 'GET') {
