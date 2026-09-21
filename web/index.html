@@ -238,6 +238,16 @@
     #chatlese{border-left:0;border-top:1px solid var(--surface0);padding-left:0;padding-top:12px}
     #chatliste{max-height:38vh}
   }
+  /* --- Tab "Vault" -------------------------------------------------------- */
+  #tab-vault{padding:0;display:flex;flex-direction:column;overflow:hidden}
+  .vaultkopf{display:flex;align-items:center;gap:10px;padding:10px 14px;flex:0 0 auto}
+  .vhinweis{font:10px var(--mono);color:var(--overlay)}
+  #vaultbuehne{position:relative;flex:1;min-height:0;background:var(--crust);overflow:hidden}
+  #vaultbuehne canvas{display:block}
+  #vaultlabels{position:absolute;inset:0;pointer-events:none}
+  .vlabel{position:absolute;transform:translate(-50%,-160%);white-space:nowrap;
+    font:9.5px var(--mono);color:var(--subtext);text-shadow:0 0 4px #11111b,0 0 8px #11111b}
+  .vlabel.agent{color:var(--akzent);font-weight:600;font-size:10.5px}
 </style>
 </head>
 <body>

@@ -14,9 +14,11 @@ import * as stimme from './stimme.js'
 import lauf from './tabs/lauf.js'
 import server from './tabs/server.js'
 import chats from './tabs/chats.js'
+import vault from './tabs/vault.js'
 
 tabs.registrieren(lauf)
 tabs.registrieren(chats)
+tabs.registrieren(vault)
 tabs.registrieren(server)
 
 await bus.basisErmitteln()

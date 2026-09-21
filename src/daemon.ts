@@ -16,6 +16,7 @@ import { standLesen, type SystemStand } from './system.js'
 import { rollenLaden, rollenListe } from './rollen.js'
 import { sprechenGecacht } from './stimme.js'
 import { chatsIndizieren, chatsSuchen, chatLesen } from './chats.js'
+import { vaultIndizieren, vaultGraphLesen, vaultBeobachten, vaultDa } from './vault.js'
 import { existsSync } from 'node:fs'
 
 const PORT = Number(process.env.COCKPIT_PORT ?? 8765)
@@ -258,6 +259,8 @@ await rollenLaden()
 // lesen dauert Sekunden -- der Daemon soll deswegen nicht spaeter lauschen.
 // Unveraenderte Dateien werden uebersprungen, spaetere Laeufe sind billig.
 void chatsIndizieren(DB_PFAD).catch((e) => console.warn('[chats] Index fehlgeschlagen:', String(e)))
+void vaultIndizieren().catch((e) => console.warn('[vault] Index fehlgeschlagen:', String(e)))
+vaultBeobachten()
 setInterval(
   () => void chatsIndizieren(DB_PFAD).catch(() => {}),
   10 * 60_000,
@@ -462,6 +465,17 @@ const server = createServer(async (req, res) => {
       }
       const ok = supervisor.agentAbbrechen(runId, agentId)
       return json(ok ? 200 : 404, { ok })
+    }
+
+    if (pfad === '/api/vault/graph' && req.method === 'GET') {
+      const g = vaultGraphLesen()
+      // Agenten dieses Laufs dazu, wenn einer genannt ist: der Tab zeigt
+      // Notizen und Agenten in EINER Szene, und beides aus zwei Anfragen
+      // zusammenzusetzen waere nur Gelegenheit fuer Zwischenstaende, in denen
+      // Kanten auf noch nicht geladene Knoten zeigen.
+      const runId = url.searchParams.get('run')
+      const agenten = runId ? db.agentenLesen(runId) : []
+      return json(200, { ...g, spiegelDa: await vaultDa(), agenten })
     }
 
     if (pfad === '/api/chats' && req.method === 'GET') {
