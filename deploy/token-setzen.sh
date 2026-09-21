@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Nimmt ein bereits erzeugtes OAuth-Token entgegen und legt es auf serverone ab.
+# Nimmt ein bereits erzeugtes OAuth-Token entgegen und legt es auf servertwo ab.
 #
 # Fuer den Fall, dass `claude setup-token` schon separat gelaufen ist und das
 # Token im Terminal steht. Kein `set -e`: jeder Schritt meldet sich selbst.
@@ -7,7 +7,7 @@
 # Das Token wird verborgen eingelesen und ueber stdin uebertragen -- es steht
 # damit weder im Terminalverlauf noch in der Prozessliste des Servers.
 
-SERVER="${COCKPIT_SERVER:-192.168.2.192}"
+SERVER="${COCKPIT_SERVER:-192.168.2.193}"
 KEY="${COCKPIT_SSH_KEY:-$HOME/.ssh/id_ed25519_claude}"
 SSH=(ssh -i "$KEY" -o ConnectTimeout=10 "claude@$SERVER")
 

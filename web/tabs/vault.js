@@ -33,7 +33,7 @@ let renderer = null
 let szene = null
 let kamera = null
 let schleife = null
-let daten = null
+let weiterlaufen = null
 let koerper = []
 let beschriftung = null
 let aufraeumen = []
@@ -272,6 +272,7 @@ export default {
         <span class="vhinweis">ziehen zum Drehen · Rad zum Zoomen</span>
       </div>
       <div id="vaultbuehne"><div id="vaultlabels"></div></div>`
+    let daten
     const buehne = el.querySelector('#vaultbuehne')
     beschriftung = el.querySelector('#vaultlabels')
 
@@ -295,8 +296,12 @@ export default {
 
     let t = 0
     const tick = () => {
+      // Nur weiterlaufen, solange der Tab vorn ist. Vorher lief die Schleife
+      // im Hintergrund durch und verwarf nur das Bild -- auf dem Handy heisst
+      // das Akku fuer nichts. Beim Zurueckkommen startet sichtbar(true) sie
+      // wieder, der eingeschwungene Zustand bleibt erhalten.
+      if (!vorn) { schleife = null; return }
       schleife = requestAnimationFrame(tick)
-      if (!vorn) return
       t++
       // Nach dem Einschwingen nur noch leicht nachrechnen: die Wolke soll
       // atmen, nicht zappeln.
@@ -312,6 +317,7 @@ export default {
       renderer.render(szene, kamera)
       if (t % 4 === 0) beschriftungZeichnen(inhalt)
     }
+    weiterlaufen = () => { if (schleife === null && vorn) tick() }
     tick()
 
     const groesse = () => {
@@ -327,9 +333,10 @@ export default {
 
   sichtbar(an) {
     vorn = an
-    // Die Schleife laeuft weiter, rendert aber nichts: so bleibt der
-    // eingeschwungene Zustand erhalten, ohne im Hintergrund Strom zu ziehen.
     if (an && renderer) {
+      // Die Schleife hat sich beim Ausblenden selbst angehalten -- hier
+      // wieder anwerfen, sonst bliebe das Bild stehen.
+      weiterlaufen?.()
       const b = wurzel.querySelector('#vaultbuehne')
       if (b) {
         renderer.setSize(b.clientWidth || 800, b.clientHeight || 500)
@@ -340,7 +347,10 @@ export default {
   },
 
   unmount() {
+    vorn = false
+    weiterlaufen = null
     if (schleife) cancelAnimationFrame(schleife)
+    schleife = null
     for (const f of aufraeumen) f()
     aufraeumen = []
     renderer?.dispose?.()

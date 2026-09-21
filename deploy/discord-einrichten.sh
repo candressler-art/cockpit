@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Traegt die Discord-Zugangsdaten auf serverone ein und startet den Dienst neu.
+# Traegt die Discord-Zugangsdaten auf servertwo ein und startet den Dienst neu.
 # Kein `set -e`: jeder Schritt meldet sich selbst.
 #
 # Token und IDs werden verborgen eingelesen und ueber stdin uebertragen -- sie
 # stehen damit weder im Terminalverlauf noch in der Prozessliste des Servers.
 
-SERVER="${COCKPIT_SERVER:-192.168.2.192}"
+SERVER="${COCKPIT_SERVER:-192.168.2.193}"
 KEY="${COCKPIT_SSH_KEY:-$HOME/.ssh/id_ed25519_claude}"
 SSH=(ssh -i "$KEY" -o ConnectTimeout=10 "claude@$SERVER")
 

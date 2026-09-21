@@ -75,13 +75,23 @@ export async function rollenLaden(): Promise<void> {
   try {
     dateien = (await readdir(ROLLEN_DIR)).filter((d) => d.endsWith('.md'))
   } catch (e) {
-    console.warn(`[rollen] Verzeichnis ${ROLLEN_DIR} nicht lesbar: ${String(e)}`)
-    return
+    // Frueher nur eine Warnung. Das war falsch: ohne Rollen liefert
+    // rolleLesen() ueberall null, und der Orchestrator setzt dann GAR KEINE
+    // Werkzeugbeschraenkung statt einer restriktiven -- ein Tippfehler im
+    // Pfad haette also still alle Worker entfesselt. Lieber gar nicht
+    // starten als falsch starten.
+    throw new Error(`Rollenverzeichnis ${ROLLEN_DIR} nicht lesbar: ${String(e)}`)
+  }
+  if (dateien.length === 0) {
+    throw new Error(`Rollenverzeichnis ${ROLLEN_DIR} enthaelt keine *.md`)
   }
   for (const d of dateien) {
     const id = d.replace(/\.md$/, '')
     const roh = await readFile(join(ROLLEN_DIR, d), 'utf-8')
     rollen.set(id, zerlegen(id, roh))
+  }
+  if (!rollen.has(VORGABE_ROLLE)) {
+    throw new Error(`Vorgaberolle '${VORGABE_ROLLE}' fehlt in ${ROLLEN_DIR}`)
   }
   console.log(`[rollen] ${rollen.size} geladen: ${[...rollen.keys()].join(', ')}`)
 }

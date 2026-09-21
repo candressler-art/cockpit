@@ -125,7 +125,10 @@ export function orchestratorAntwortLesen(text: string): OrchestratorAntwort {
 
 // --- Worker-Report ----------------------------------------------------------
 
-const REPORT_TYP_MUSTER = /Report-Typ:\s*(ZWISCHENSTAND|FERTIG-MELDUNG)/
+/** Zeilen am Anfang, in denen der Reporttyp stehen darf. */
+const REPORT_TYP_KOPF_ZEILEN = 3
+
+const REPORT_TYP_MUSTER = /^[ \t>*_#-]*Report-Typ:\s*(ZWISCHENSTAND|FERTIG-MELDUNG)/m
 
 /**
  * Wie viele Kopfzeilen nach einem Blocker durchsucht werden.
@@ -151,7 +154,13 @@ const BLOCKER_VERNEINT =
 
 /** Hat der Report seinen Typ deklariert? Ohne das ist es kein echter Report. */
 export function reportTypLesen(report: string): 'ZWISCHENSTAND' | 'FERTIG-MELDUNG' | null {
-  const m = REPORT_TYP_MUSTER.exec(report ?? '')
+  // Nur der Kopf zaehlt. Vorher wurde der ganze Report durchsucht: ein Worker,
+  // der im Fliesstext ueber Reporttypen SCHREIBT ("ich haette fast
+  // Report-Typ: FERTIG-MELDUNG gesetzt"), bekam damit einen Typ zugesprochen,
+  // den er nie deklariert hat. Deklarieren statt raten heisst auch, dass die
+  // Deklaration an ihrem Platz stehen muss.
+  const kopf = (report ?? '').split('\n').slice(0, REPORT_TYP_KOPF_ZEILEN).join('\n')
+  const m = REPORT_TYP_MUSTER.exec(kopf)
   return (m?.[1] as 'ZWISCHENSTAND' | 'FERTIG-MELDUNG' | undefined) ?? null
 }
 

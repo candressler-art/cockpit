@@ -8,7 +8,6 @@
 import { api } from '../bus.js'
 
 let wurzel = null
-let vorn = false
 let suchzeit = null
 let offen = null
 
@@ -124,7 +123,6 @@ export default {
   },
 
   sichtbar(an) {
-    vorn = an
     // Beim Zurueckkommen neu laden: der Index waechst im Hintergrund weiter,
     // waehrend Syncthing neue Sitzungen vom Desktop holt.
     if (an && wurzel) void laden(wurzel.querySelector('#chatsuche')?.value ?? '')

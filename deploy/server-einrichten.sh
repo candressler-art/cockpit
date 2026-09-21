@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Richtet das Cockpit auf serverone ein.
+# Richtet das Cockpit auf servertwo ein.
 #
 # Kein `set -e`: jeder Schritt meldet sich selbst, und ein Fehlschlag soll
 # sagen, woran es lag, statt wortlos abzubrechen.
@@ -9,7 +9,7 @@
 # hier durch. Das Token wird dabei nie angezeigt und landet direkt in einer
 # Datei mit Rechten 600 auf dem Server.
 
-SERVER="${COCKPIT_SERVER:-192.168.2.192}"
+SERVER="${COCKPIT_SERVER:-192.168.2.193}"
 KEY="${COCKPIT_SSH_KEY:-$HOME/.ssh/id_ed25519_claude}"
 SSH=(ssh -i "$KEY" -o ConnectTimeout=10 "claude@$SERVER")
 WURZEL="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -154,11 +154,11 @@ fi
 # --- 7. Tailscale ------------------------------------------------------------
 schritt "7/7  Ueber Tailscale erreichbar machen"
 # serve, nicht funnel: funnel stellt den Dienst ins offene Internet.
-if "${SSH[@]}" 'sudo tailscale serve --bg 8765' >/dev/null 2>&1; then
+if "${SSH[@]}" 'sudo tailscale serve --bg --https=8443 8765' >/dev/null 2>&1; then
   NAME=$("${SSH[@]}" 'tailscale status --json 2>/dev/null | grep -oP "\"DNSName\":\s*\"\K[^\"]+" | head -1' 2>/dev/null | sed 's/\.$//')
   ok "tailscale serve aktiv${NAME:+ -- https://$NAME}"
 else
-  warn "tailscale serve nicht eingerichtet (manuell: sudo tailscale serve --bg 8765)"
+  warn "tailscale serve nicht eingerichtet (manuell: sudo tailscale serve --bg --https=8443 8765)"
 fi
 
 # --- Probe -------------------------------------------------------------------
@@ -187,7 +187,7 @@ if [ "$FEHLER" -eq 0 ]; then
   echo "Fertig, keine Fehler."
   echo
   echo "App gegen den Server starten:"
-  echo "  COCKPIT_DAEMON=${NAME:-serverone.tail9c8a2b.ts.net} cockpit"
+  echo "  COCKPIT_DAEMON=${NAME:-servertwo.tail9c8a2b.ts.net:8443} cockpit-start"
   echo
   echo "Logs ansehen:"
   echo "  ssh -i $KEY claude@$SERVER 'journalctl -u cockpit -f'"

@@ -160,9 +160,16 @@
    * 375px Breite waere eine dritte Spalte nicht lesbar. */
   @media (max-width:820px){
     #app{grid-template-columns:1fr;grid-template-rows:44px 1fr 54px}
-    header{grid-row:1}
+    /* Die Kopfzeile hatte overflow:hidden und ein festes Raster -- auf 375px
+       wurden Laufwahl, Stimme und der rechte Schubladenknopf schlicht
+       abgeschnitten und waren nicht mehr erreichbar. Jetzt scrollt sie
+       waagerecht, und was nur schmueckt, faellt vorher weg. */
+    header{grid-row:1;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;gap:7px}
+    header::-webkit-scrollbar{display:none}
     header h1{display:none}
+    header #budget{display:none}
     header select{max-width:130px}
+    header .spacer{flex:0 0 4px}
     #tableiste{grid-row:3;padding:0;justify-content:space-around;
       border-bottom:0;border-top:1px solid var(--surface0)}
     #tableiste button{flex:1;flex-direction:column;gap:3px;justify-content:center;

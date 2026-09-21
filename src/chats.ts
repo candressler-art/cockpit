@@ -176,6 +176,8 @@ export async function chatsIndizieren(dbPfad: string): Promise<{ gesamt: number;
     bekannt.set(r.session_id, { groesse: r.groesse, mtime: r.mtime })
   }
 
+  const gesehen = new Set<string>()
+
   const einfuegen = h.prepare(
     `INSERT INTO chats (session_id, pfad, titel, cwd, projekt, started_at, ended_at,
                         zuege, git_branch, groesse, mtime)
@@ -196,6 +198,7 @@ export async function chatsIndizieren(dbPfad: string): Promise<{ gesamt: number;
     for (const d of dateien) {
       const voll = join(SPIEGEL, p, d)
       const sessionId = d.replace(/\.jsonl$/, '')
+      gesehen.add(sessionId)
       gesamt++
       let s
       try {
@@ -224,7 +227,17 @@ export async function chatsIndizieren(dbPfad: string): Promise<{ gesamt: number;
       neu++
     }
   }
-  console.log(`[chats] ${gesamt} Sitzungen, ${neu} neu oder geaendert`)
+  // Verschwundene Sitzungen austragen. Ohne das blieben geloeschte Dateien
+  // fuer immer in Liste und Suche stehen und liefen beim Oeffnen in einen
+  // Lesefehler -- der Index waere mit der Zeit ein Friedhof.
+  let weg = 0
+  for (const id of bekannt.keys()) {
+    if (gesehen.has(id)) continue
+    h.prepare('DELETE FROM chats WHERE session_id = ?').run(id)
+    h.prepare('DELETE FROM chats_fts WHERE session_id = ?').run(id)
+    weg++
+  }
+  console.log(`[chats] ${gesamt} Sitzungen, ${neu} neu oder geaendert${weg ? `, ${weg} ausgetragen` : ''}`)
   return { gesamt, neu }
 }
 

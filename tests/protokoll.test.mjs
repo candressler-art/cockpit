@@ -95,6 +95,29 @@ for (const [name, ein, rolle, text] of rollenFaelle) {
   if (!gut) console.log('        ->', JSON.stringify(r))
 }
 
-const gesamt = faelle.length + 1 + blockerFaelle.length + 3 + rollenFaelle.length
+// --- Report-Typ nur im Kopf ---
+// Vorher wurde der ganze Report durchsucht. Ein Worker, der im Fliesstext
+// UEBER Reporttypen schreibt, bekam dadurch einen Typ zugesprochen, den er nie
+// deklariert hat -- und der Orchestrator baute darauf seine Fallwahl.
+const typFaelle = [
+  ['Zeile 1 zaehlt', 'Report-Typ: FERTIG-MELDUNG\nAlles erledigt.', 'FERTIG-MELDUNG'],
+  ['Zeile 3 zaehlt noch', '\n\nReport-Typ: ZWISCHENSTAND\nWeiter geht es.', 'ZWISCHENSTAND'],
+  ['mit Markdown-Fettung', '**Report-Typ: ZWISCHENSTAND**\nText.', 'ZWISCHENSTAND'],
+  ['tief im Text zaehlt nicht',
+   'Report-Typ: ZWISCHENSTAND\nZ2\nZ3\nZ4\nZ5\nIch haette fast Report-Typ: FERTIG-MELDUNG gesetzt.',
+   'ZWISCHENSTAND'],
+  ['nur tief im Text = kein Typ',
+   'Z1\nZ2\nZ3\nZ4\nIrgendwo steht Report-Typ: FERTIG-MELDUNG mitten im Satz.', null],
+  ['gar kein Typ', 'Einfach nur Text ohne Deklaration.', null],
+]
+for (const [name, text, erwartet] of typFaelle) {
+  const r = reportTypLesen(text)
+  const gut = r === erwartet
+  if (gut) ok++
+  console.log(`  ${gut ? 'ok   ' : 'FEHLT'} ${name}`)
+  if (!gut) console.log('        ->', JSON.stringify(r), 'statt', JSON.stringify(erwartet))
+}
+
+const gesamt = faelle.length + 1 + blockerFaelle.length + 3 + rollenFaelle.length + typFaelle.length
 console.log(`\n${ok}/${gesamt} bestanden`)
 process.exit(ok === gesamt ? 0 : 1)

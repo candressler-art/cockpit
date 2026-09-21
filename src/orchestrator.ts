@@ -351,7 +351,18 @@ export class Orchestrator extends EventEmitter {
             // Modell der Rolle schlaegt die Laufvorgabe: ein Rechercheur auf
             // Opus waere Verschwendung, ein Coder auf Haiku ein Rueckschritt.
             model: fach?.modell ?? k.workerModell,
-            ...(fach?.werkzeuge ? { allowedTools: fach.werkzeuge } : {}),
+            // Drei Faelle, und der Unterschied ist wichtig:
+            //   Rolle mit Werkzeugliste  -> genau diese Werkzeuge
+            //   Rolle mit leerem Feld    -> keine Einschraenkung (der Coder)
+            //   gar keine Rolle          -> nur lesen
+            // Der letzte Fall war der Fehler: ohne Rolle wurde allowedTools
+            // weggelassen, was die SDK als "alles erlaubt" liest. Ein
+            // Konfigurationsfehler haette damit still alle Worker entfesselt.
+            ...(fach
+              ? fach.werkzeuge
+                ? { allowedTools: fach.werkzeuge }
+                : {}
+              : { allowedTools: NOTFALL_WERKZEUGE }),
             mcpServers: mcpAufloesen(fach?.mcp),
             maxBudgetUsd: k.maxBudgetUsd,
           })
@@ -525,6 +536,10 @@ import { readFileSync } from 'node:fs'
 import { resolve, relative, isAbsolute } from 'node:path'
 
 const LESE_ZEILEN_MAX = 200
+/** Werkzeuge, wenn keine Fachrolle aufloesbar ist. Bewusst nur lesend. */
+const NOTFALL_WERKZEUGE = ['Read', 'Grep', 'Glob']
+
+const GREP_MUSTER_MAX = 120
 const LESE_TREFFER_MAX = 50
 
 function pfadPruefen(roh: string, cwd: string): string | null {
@@ -559,6 +574,17 @@ function leseZeileAusfuehren(zeile: string, cwd: string): string {
   if (grep) {
     const ziel = pfadPruefen(grep[2]!, cwd)
     if (!ziel) return 'abgelehnt: Pfad ausserhalb des Arbeitsverzeichnisses'
+    // Das Muster kommt aus Modelltext. Ein Ausdruck wie (a+)+$ laesst die
+    // Suche katastrophal zurueckspringen und blockiert die EINE Ereignis-
+    // schleife des Daemons -- damit stuende nicht nur dieser Lauf, sondern
+    // das ganze Cockpit. Laengen- und Zeichendeckel statt einer Analyse:
+    // einfach zu pruefen und fuer Leseanfragen voellig ausreichend.
+    if (grep[1]!.length > GREP_MUSTER_MAX) {
+      return `abgelehnt: Suchmuster laenger als ${GREP_MUSTER_MAX} Zeichen`
+    }
+    if (/(\*|\+|\{\d*,?\d*\})\s*(\)|\])?\s*(\*|\+|\{)/.test(grep[1]!)) {
+      return 'abgelehnt: geschachtelte Wiederholung im Suchmuster'
+    }
     try {
       const muster = new RegExp(grep[1]!, 'i')
       const treffer: string[] = []

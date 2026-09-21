@@ -228,7 +228,7 @@ export class Supervisor extends EventEmitter {
           if (m.is_error === true) fehler = `Lauf endete mit is_error (subtype=${String(m.subtype)})`
         }
       }
-      this.agentAendern(o.runId, o.agentId, {
+      this.endzustandSetzen(o.runId, o.agentId, {
         status: fehler ? 'failed' : 'done',
         endedAt: Date.now(),
         lastError: fehler,
@@ -245,7 +245,7 @@ export class Supervisor extends EventEmitter {
         istLimit ? `Nutzungslimit: ${text.slice(0, 180)}` : `Fehler: ${text.slice(0, 180)}`,
         { fehler: text, istLimit },
       )
-      this.agentAendern(o.runId, o.agentId, {
+      this.endzustandSetzen(o.runId, o.agentId, {
         status: istLimit ? 'waiting_ratelimit' : 'failed',
         endedAt: Date.now(),
         lastError: text,
@@ -423,16 +423,70 @@ export class Supervisor extends EventEmitter {
       .filter((a) => a.runId === runId)
   }
 
+  /**
+   * Endzustand schreiben, aber einen Abbruch nicht ueberschreiben.
+   *
+   * agentAbbrechen setzt 'stopped' synchron; die abgebrochene Schleife in
+   * agentStarten laeuft danach noch aus und wuerde ohne diesen Schutz
+   * unbedingt 'done' oder 'failed' daruebersetzen. Ein gestoppter Lauf stuende
+   * hinterher als erledigt in der Datenbank -- genau die Art stiller
+   * Falschmeldung, gegen die der Nachweis gebaut ist. Fuer
+   * 'waiting_permission' gibt es denselben Schutz schon in
+   * nachrichtVerarbeiten.
+   */
+  private endzustandSetzen(
+    runId: string,
+    agentId: string,
+    aenderung: Partial<AgentState>,
+  ): void {
+    const jetzt = this.agenten.get(this.schluessel(runId, agentId))
+    if (jetzt?.status === 'stopped') return
+    this.agentAendern(runId, agentId, aenderung)
+  }
+
   /** Bricht einen Agenten ab. SIGINT-Semantik: der Turn endet sauber. */
   agentAbbrechen(runId: string, agentId: string): boolean {
     const l = this.laufende.get(this.schluessel(runId, agentId))
     if (!l) return false
     l.abort.abort()
+    // Erst die offenen Freigaben aufloesen, dann abbrechen: ein Agent, der in
+    // freigabeEinholen auf eine Entscheidung wartet, haengt sonst fuer immer
+    // an einem Versprechen, das niemand mehr einloest -- der Abbruch wuerde
+    // ihn gar nicht erreichen.
+    this.freigabenAufloesen(runId, agentId, 'Agent abgebrochen')
     this.agentAendern(runId, agentId, { status: 'stopped', endedAt: Date.now() })
     return true
   }
 
+  /** Loest alle offenen Freigaben eines Agenten (oder Laufs) ablehnend auf. */
+  private freigabenAufloesen(runId: string, agentId: string | null, grund: string): void {
+    for (const [, offen] of [...this.offeneFreigaben]) {
+      const a = offen.anfrage
+      if (a.runId !== runId) continue
+      if (agentId && a.agentId !== agentId) continue
+      offen.aufloesen(false, grund)
+    }
+  }
+
   alleAbbrechen(): void {
-    for (const [, l] of this.laufende) l.abort.abort()
+    for (const [k, l] of this.laufende) {
+      l.abort.abort()
+      const [runId, agentId] = k.split('::')
+      if (runId && agentId) this.freigabenAufloesen(runId, agentId, 'Daemon faehrt herunter')
+    }
+  }
+
+  /**
+   * Zustand eines beendeten Laufs vergessen.
+   *
+   * seq und agenten wuchsen vorher ueber die ganze Prozesslaufzeit: bei einem
+   * Daemon, der wochenlang laeuft, bleibt jeder Agent jedes Laufs im Speicher,
+   * obwohl er nur aus der Datenbank gelesen wird, sobald der Lauf vorbei ist.
+   */
+  laufVergessen(runId: string): void {
+    for (const k of [...this.agenten.keys()]) {
+      if (k.startsWith(`${runId}::`)) this.agenten.delete(k)
+    }
+    this.seq.delete(runId)
   }
 }

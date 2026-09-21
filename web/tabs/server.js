@@ -11,6 +11,12 @@ let wurzel = null
 let letzter = null
 let vorn = false
 
+// Die Hostnamen kommen aus dem Beszel-Hub, also aus fremder Konfiguration.
+// Sie landen per innerHTML in der Seite -- ohne Maskierung waere das eine
+// Einladung, und der Aufwand dagegen ist eine Zeile.
+const esc = (t) =>
+  String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+
 const pz = (v) => (v === null || v === undefined ? '—' : `${Math.round(v)} %`)
 
 function dauer(sek) {
@@ -55,8 +61,8 @@ function karte(h) {
   return `<article class="hostkarte">
     <header class="hostkopf">
       <span class="ampel ${h.status === 'ok' ? 'an' : 'ab'}"></span>
-      <h3>${h.name}</h3>
-      <span class="quelle" title="Woher die Zahlen stammen">${h.quelle}</span>
+      <h3>${esc(h.name)}</h3>
+      <span class="quelle" title="Woher die Zahlen stammen">${esc(h.quelle)}</span>
       <div class="spacer"></div>
       <span class="pill">läuft ${dauer(h.uptimeSek)}</span>
       <span class="pill ${stufe(h.tempC !== null && h.tempC !== undefined ? h.tempC : null)}">${temp}</span>

@@ -103,4 +103,19 @@ export function starten(leistenEl) {
   wechseln(idAusHash())
 }
 
+/**
+ * Alle Tabs abbauen.
+ *
+ * unmount() war vorher ein Versprechen, das der Router nie eingeloest hat --
+ * vault.js raeumt dort seine three.js-Ressourcen und Fensterhorcher auf, und
+ * dieser Code war schlicht tot. Gerufen wird es beim Verlassen der Seite;
+ * ein Tab-Wechsel allein baut nichts ab, weil der eingeschwungene Zustand
+ * beim Zurueckkommen erhalten bleiben soll.
+ */
+export function alleAbbauen() {
+  for (const m of module.values()) {
+    try { m.unmount?.() } catch (e) { console.warn(`Tab '${m.id}' warf beim Abbauen`, e) }
+  }
+}
+
 export const aktivesTab = () => aktiv

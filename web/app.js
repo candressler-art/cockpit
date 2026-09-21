@@ -74,6 +74,11 @@ bus.abonnieren('ereignis', (e) => {
   else if (e?.kind === 'protocol') stimme.sagen(e.summary)
 })
 
+// Beim Verlassen der Seite abbauen -- sonst bleibt die Renderschleife des
+// Vault-Tabs an einem verwaisten Kontext haengen, wenn der Browser die Seite
+// im Zwischenspeicher haelt.
+addEventListener('pagehide', () => tabs.alleAbbauen())
+
 // --- PWA --------------------------------------------------------------------
 // Nur ueber https: im Tauri-Fenster und auf http gibt es keinen Service
 // Worker, und der Registrierungsfehler waere bloss Rauschen in der Konsole.

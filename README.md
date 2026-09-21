@@ -12,18 +12,47 @@ Der Vorgänger `~/projekte/loop/loop.py` treibt seine Worker mit
 Logs rekonstruieren, woran. Das Cockpit liest stattdessen den vollständigen
 Ereignisstrom, schreibt ihn nach SQLite und zeigt ihn live an.
 
-## Start
+## Wo es laeuft
+
+Der Daemon laeuft auf **servertwo** als systemd-Unit `cockpit`, Code unter
+`/opt/cockpit`, Datenbank unter `/var/lib/cockpit/cockpit.db`. Er bindet auf
+`127.0.0.1:8765`; nach aussen kommt er ausschliesslich ueber `tailscale serve`:
+
+    https://servertwo.tail9c8a2b.ts.net:8443
+
+Port 8443 und nicht die Wurzel, weil dort schon ntfy haengt. Es steht bewusst
+kein Port im LAN offen.
+
+Warum servertwo und nicht serverone: serverone traegt Immich mit Postgres,
+Redis und dem ML-Container, servertwo war nahezu leer. Der Preis ist weniger
+Reserve -- 4 Kerne statt 8, 7,5 GB statt 32 -- weshalb `parallelitaet` bei 2
+gedeckelt gehoert.
+
+### Ortlich entwickeln
 
 ```bash
 npm install
 npm run build
-node dist/daemon.js
+COCKPIT_DB=~/.cockpit/cockpit.db node dist/daemon.js
 ```
 
-Dann <http://127.0.0.1:8765> öffnen.
+Dann <http://127.0.0.1:8765> oeffnen.
 
-Der Daemon bindet auf `127.0.0.1`. Nach außen kommt er nur über
-`tailscale serve` — es steht bewusst kein Port im LAN offen.
+### Auf den Server bringen
+
+```bash
+npm run build
+./deploy/server-einrichten.sh
+```
+
+Die Desktop-Huelle (Tauri) zeigt per Vorgabe auf den Server:
+
+```bash
+npx tauri build --no-bundle && ./deploy/installieren-desktop.sh
+```
+
+Sie wird ueber `~/.local/bin/cockpit-start` gestartet -- ein Wrapper, der
+vorher Wispr Flow hochholt, das seinerseits Obsidian nachzieht.
 
 ### Umgebungsvariablen
 
@@ -32,6 +61,13 @@ Der Daemon bindet auf `127.0.0.1`. Nach außen kommt er nur über
 | `COCKPIT_PORT` | `8765` | HTTP- und WebSocket-Port |
 | `COCKPIT_HOST` | `127.0.0.1` | Bindeadresse |
 | `COCKPIT_DB` | `~/.cockpit/cockpit.db` | SQLite-Datei |
+| `COCKPIT_ROLLEN` | `<wurzel>/rollen` | Verzeichnis der Fachrollen |
+| `COCKPIT_VAULT` | `/var/lib/cockpit/vault` | Spiegel des Obsidian-Vaults |
+| `COCKPIT_SESSIONS` | `/var/lib/cockpit/sessions-desktop` | Spiegel der Sessions |
+| `COCKPIT_ORIGIN` | — | zusaetzlich erlaubte Herkunft fuer die API |
+| `BESZEL_URL/USER/PASS` | — | Zugang zum Monitoring-Hub (sonst nur eigener Host) |
+| `PIPER_HOST/PORT` | `127.0.0.1:10200` | Sprachausgabe |
+| `COCKPIT_MCP_BROWSER` | — | ueberschreibt den Browser-MCP-Server |
 
 ## Aufbau
 
@@ -44,7 +80,17 @@ Der Daemon bindet auf `127.0.0.1`. Nach außen kommt er nur über
 | `src/supervisor.ts` | Eine SDK-Session je Agent, Freigabe-Broker, Verbrauchszähler |
 | `src/orchestrator.ts` | Runden, Fallauswertung, Leseanfragen, Stoppbedingungen |
 | `src/daemon.ts` | HTTP, WebSocket, REST |
-| `web/index.html` | Oberfläche: Live-Log, Agentenliste, Freigaben, Auslastung |
+| `src/rollen.ts` | Fachrollen aus `rollen/*.md`: Modell, Werkzeuge, Prompt |
+| `src/mcp.ts` | Katalog der MCP-Server; der Browser laeuft ueber stdio |
+| `src/system.ts` | Auslastung beider Server: Beszel-Hub, `/proc` als Notbehelf |
+| `src/chats.ts` | Index der Claude-Code-Sessions, Volltextsuche ueber FTS5 |
+| `src/vault.ts` | Index des Obsidian-Vaults: Titel, Wikilinks, Tags |
+| `src/stimme.ts` | Sprachausgabe ueber Piper (Wyoming-Protokoll) |
+| `src/konsole.ts` | Befehle mit Freigabepflicht |
+| `web/bus.js` | die eine WebSocket-Verbindung, Abonnements je Nachrichtentyp |
+| `web/tabs.js` | Tab-Registry und Router ueber den URL-Hash |
+| `web/tabs/*.js` | die fuenf Ansichten: Lauf, Chats, Vault, Konsole, Server |
+| `web/index.html` | Geruest, Kopfzeile, Stile |
 
 ## Das Protokoll
 
@@ -82,6 +128,54 @@ Lauf starb an einem Formatfehler, der keiner war.
 Tokenrechnung aus `loop.py` bleibt trotzdem, weil sie den Verbrauch einzelnen
 Agenten zuordnet — das können die Fensterwerte nicht.
 
+## Fachrollen
+
+`AgentRole` in `src/typen.ts` ist die **Stellung** im Lauf (orchestrator,
+worker, chat, subagent) -- daran haengt der Graph mit seinen drei Ebenen. Die
+**Spezialisierung** steht daneben als `AgentState.fachrolle`. Waeren die
+Fachrollen in `AgentRole` gelandet, fielen sie alle in die Worker-Ebene und
+der Graph waere still falsch.
+
+| Rolle | Modell | Werkzeuge | Zweck |
+|---|---|---|---|
+| `orchestrator` | Opus | keine | beauftragt, prueft, entscheidet |
+| `rechercheur` | Sonnet | lesend + Browser | liest, sucht, belegt; aendert nichts |
+| `coder` | Sonnet | alle | aendert Code, weist mit Tests nach |
+| `kommunikator` | Sonnet | lesend | uebersetzt zwischen den Rollen, meldet nach aussen |
+
+Adressiert wird mit einer optionalen ersten Zeile im Auftrag:
+
+    AN-ROLLE: rechercheur
+
+Je Auftrag, nicht je Antwort -- eine Runde darf einen Rechercheur und einen
+Coder gleichzeitig beschaeftigen. Fehlt die Zeile, gilt `coder`; damit laufen
+Auftraege aus der Zeit vor den Fachrollen unveraendert weiter.
+
+## Die Tabs
+
+| Tab | Was er zeigt |
+|---|---|
+| **Lauf** | Live-Log, Agentengraph, Zeitachse, Freigaben -- die urspruengliche Ansicht |
+| **Chats** | die Claude-Code-Sessions vom Desktop, durchsuchbar und lesbar |
+| **Vault** | Notizen und Agenten in einer 3D-Szene (three.js, fest eingelegt) |
+| **Konsole** | Befehle auf dem Server, jeder einzeln freizugeben |
+| **Server** | Auslastung beider Maschinen: CPU, Speicher, Platte, Temperatur |
+
+Vault und Sessions kommen per Syncthing vom Desktop, beide als `receiveonly` --
+der Spiegel schreibt nie zurueck. Details in `deploy/stacks/README.md`.
+
+## Die Konsole hat keine Shell im Netz
+
+Jeder Befehl geht durch denselben Freigabe-Broker wie ein Werkzeugaufruf eines
+Agenten: er wird angefragt, erscheint im Tab, laeuft erst nach einem
+ausdruecklichen Ja und steht danach im selben Nachweis. Ein "immer erlauben"
+gibt es absichtlich nicht -- es wuerde genau das aushoehlen, wofuer der Tab so
+gebaut ist.
+
+Dasselbe gilt fuer den Browser der Agenten: er haengt an der Fachrolle, laeuft
+je Sitzung in einem eigenen Container ueber `docker run --rm -i` und behaelt
+kein Profil.
+
 ## REST
 
 | Endpunkt | Methode | Zweck |
@@ -93,9 +187,20 @@ Agenten zuordnet — das können die Fensterwerte nicht.
 | `/api/freigabe` | POST | Offene Freigabe entscheiden |
 | `/api/abbrechen` | POST | Agent oder ganzen Lauf abbrechen |
 | `/api/gesundheit` | GET | Status und letzter Limitstand |
+| `/api/rollen` | GET | verfuegbare Fachrollen |
+| `/api/system` | GET | Auslastung beider Server |
+| `/api/chats?q=` | GET | Sessions suchen |
+| `/api/chats/<id>` | GET | eine Session als Beitraege |
+| `/api/vault/graph?run=<id>` | GET | Notizen, Verknuepfungen und Agenten |
+| `/api/konsole` | POST | Befehl anfragen (Freigabe noetig) |
+| `/api/sprechen` | POST | Text als WAV; 503, wenn Piper fehlt |
 
 ## Stand
 
-Stufe 1 (Sichtbarkeit) und Stufe 2 (Orchestrator) sind fertig und getestet.
-Offen: Tauri-App, Server-Deployment mit `tailscale serve`, Discord-Anbindung,
-und die Feature-Parität zur Desktop-App.
+Alle geplanten Stufen sind umgesetzt: Umzug auf servertwo, Tab-Geruest und PWA,
+Server-Auslastung, Fachrollen, Vault-Graph, Chat-Verzeichnis, Sprachausgabe,
+Konsole mit Freigabe und der Browser fuer die Agenten.
+
+Nicht verifiziert: ob die PWA sich im Handy-Chrome wirklich installieren laesst
+(der Service Worker scheitert im eingebauten Browser-Fenster), und der
+Kaltstart der Autostart-Kette auf dem Desktop.

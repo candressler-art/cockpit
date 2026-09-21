@@ -213,8 +213,24 @@ interface Klient {
 }
 const klienten = new Set<Klient>()
 
+/**
+ * Ab hier gilt ein Klient als ueberfahren.
+ *
+ * Ein Handy im schlechten Netz nimmt die Ereignisse eines schnellen Laufs
+ * nicht schnell genug ab; der Puffer im Prozess waechst dann unbegrenzt.
+ * Zwei Megabyte sind rund ein Tausendfaches einer normalen Nachricht --
+ * wer so weit hinterherhaengt, hat den Anschluss ohnehin verloren und holt
+ * ihn beim Wiederverbinden per Backfill nach.
+ */
+const MAX_RUECKSTAU = 2 * 1024 * 1024
+
 function senden(k: Klient, typ: string, daten: unknown): void {
-  if (k.sock.readyState === 1) k.sock.send(JSON.stringify({ typ, daten }))
+  if (k.sock.readyState !== 1) return
+  if (k.sock.bufferedAmount > MAX_RUECKSTAU) {
+    console.warn('[cockpit] Klient haengt zurueck, Nachricht verworfen:', typ)
+    return
+  }
+  k.sock.send(JSON.stringify({ typ, daten }))
 }
 
 function verteilen(typ: string, daten: unknown, runId: string | null): void {
@@ -262,6 +278,14 @@ await rollenLaden()
 void chatsIndizieren(DB_PFAD).catch((e) => console.warn('[chats] Index fehlgeschlagen:', String(e)))
 void vaultIndizieren().catch((e) => console.warn('[vault] Index fehlgeschlagen:', String(e)))
 vaultBeobachten()
+// Nachlauf fuer den Fall, dass fs.watch nichts meldet -- auf manchen
+// Dateisystemen (und bei Syncthing, das ueber Umbenennungen schreibt) greift
+// die Beobachtung nicht zuverlaessig. Der Kommentar in vault.ts versprach
+// diesen Zeitgeber schon, es gab ihn nur nicht.
+setInterval(
+  () => void vaultIndizieren().catch(() => {}),
+  15 * 60_000,
+).unref()
 setInterval(
   () => void chatsIndizieren(DB_PFAD).catch(() => {}),
   10 * 60_000,
@@ -318,9 +342,41 @@ const MIME: Record<string, string> = {
   '.ico': 'image/x-icon',
 }
 
+/**
+ * Groesster erlaubter Anfragekoerper.
+ *
+ * Ein Megabyte reicht fuer jeden Prompt, den hier jemand abschickt, und
+ * deckelt zugleich, was eine einzelne Anfrage an Speicher belegen kann. Ohne
+ * Deckel puffert der Daemon alles, was ihm geschickt wird -- im Tailnet kein
+ * Angriff, aber auf einer Maschine mit 7,5 GB, die sich Agenten teilen, ein
+ * unnoetiges Risiko.
+ */
+const MAX_KOERPER = 1024 * 1024
+
 async function koerperLesen(req: import('node:http').IncomingMessage): Promise<unknown> {
   const stuecke: Buffer[] = []
-  for await (const s of req) stuecke.push(s as Buffer)
+  let groesse = 0
+  let zuGross = false
+  for await (const s of req) {
+    const b = s as Buffer
+    groesse += b.length
+    if (groesse > MAX_KOERPER) {
+      // Nichts mehr aufheben, aber weiterlesen statt die Verbindung zu
+      // kappen: ein req.destroy() hier laesst den Aufrufer ohne Antwort
+      // zurueck (der Proxy meldet dann 502), und das sieht nach einem
+      // Serverfehler aus, obwohl die Anfrage schlicht zu gross war.
+      zuGross = true
+      stuecke.length = 0
+      // Wenn selbst das Wegwerfen kein Ende nimmt, ist es kein Versehen mehr.
+      if (groesse > MAX_KOERPER * 8) {
+        req.destroy()
+        return null
+      }
+      continue
+    }
+    stuecke.push(b)
+  }
+  if (zuGross) return null
   if (stuecke.length === 0) return null
   try {
     return JSON.parse(Buffer.concat(stuecke).toString('utf-8'))
@@ -671,13 +727,29 @@ server.listen(PORT, HOST, () => {
   console.log(`[cockpit] laeuft auf http://${HOST}:${PORT}  (DB: ${DB_PFAD})`)
 })
 
+let faehrtHerunter = false
+
+/**
+ * Geordnet herunterfahren.
+ *
+ * alleAbbrechen() bricht die Agenten ab, aber deren Endzustand wird erst
+ * geschrieben, wenn ihre Schleife ausgelaufen ist -- das passiert
+ * asynchron. Vorher stand db.close() direkt dahinter, sodass genau die
+ * Zustandsaenderung verlorenging, die hinterher erklaert haette, warum ein
+ * Lauf endete. Eine Sekunde Nachlauf reicht dafuer; laenger darf es nicht
+ * dauern, weil systemd sonst hart nachhilft.
+ */
 function beenden(signal: string): void {
+  if (faehrtHerunter) return
+  faehrtHerunter = true
   console.log(`[cockpit] ${signal} -- beende Agenten und schliesse DB`)
   void discord?.beenden()
   supervisor.alleAbbrechen()
   server.close()
-  db.close()
-  process.exit(0)
+  setTimeout(() => {
+    db.close()
+    process.exit(0)
+  }, 1000).unref()
 }
 process.on('SIGINT', () => beenden('SIGINT'))
 process.on('SIGTERM', () => beenden('SIGTERM'))

@@ -1,4 +1,4 @@
-# systemd-Unit fuer den Cockpit-Daemon auf serverone.
+# systemd-Unit fuer den Cockpit-Daemon auf servertwo.
 #
 # System-Unit mit User=claude, nicht User-Unit: fuer den Agent-Benutzer ist
 # Linger nicht gesetzt, eine --user-Unit ueberlebt das Abmelden also nicht

@@ -12,7 +12,6 @@
 import { api, abonnieren } from '../bus.js'
 
 let wurzel = null
-let vorn = false
 const eintraege = new Map()
 let cwd = '/opt/cockpit'
 
@@ -159,7 +158,6 @@ export default {
   },
 
   sichtbar(an) {
-    vorn = an
     if (an) {
       nachUnten()
       wurzel?.querySelector('#kbefehl')?.focus()
