@@ -10,13 +10,31 @@
 import { api } from './bus.js'
 import * as sp from './sprachpegel.js'
 
-/** aus | wichtig | alles */
-let stufe = 'aus'
+/**
+ * aus | wichtig | alles -- Vorgabe ist "wichtig", nicht "aus": eine
+ * Sprachausgabe, die man erst manuell anschalten muss, hoert man beim ersten
+ * Start nie, und genau das war der gemeldete Fehler ("kein Ton"). Wer
+ * wirklich Stille will, waehlt das im Kopfzeilenfeld selbst ab -- der
+ * Zustand ist dort immer sichtbar (Symbol + Text), nicht nur hier im Modul.
+ */
+let stufe = 'wichtig'
 let freigegeben = false
 let laeuft = null
 const warteschlange = []
 
 const SCHLUESSEL = 'cockpit.stimme'
+
+/**
+ * In der Tauri-Huelle ist die Geste-Pflicht des Browsers bereits in
+ * main.rs abgeschaltet (media_playback_requires_user_gesture=false) --
+ * die App zeigt ohnehin nur die eigene Oberflaeche, nie eine fremde Seite,
+ * die das ausnutzen koennte. Also muss hier auch nicht mehr auf einen
+ * ersten Klick gewartet werden, sonst bliebe es trotz der Rust-Freigabe
+ * stumm, bis jemand von Hand am Auswahlfeld dreht. Im normalen Browser
+ * (PWA auf dem Handy, Tab am Rechner) gilt die Geste-Pflicht weiter -- dort
+ * bleibt freigegeben bis zum ersten Klick false, wie bisher.
+ */
+if (window.__TAURI__) freigegeben = true
 
 export function stufeLesen() { return stufe }
 
@@ -26,7 +44,10 @@ export function stufeSetzen(neu) {
 }
 
 export function stufeLaden() {
-  try { stufe = localStorage.getItem(SCHLUESSEL) ?? 'aus' } catch { stufe = 'aus' }
+  // Vorgabe hier dieselbe wie oben bei der Modulinitialisierung ('wichtig',
+  // nicht 'aus') -- app.js ruft diese Funktion beim Start und ueberschreibt
+  // sonst genau die Vorgabe, die den Ton ueberhaupt erst hoerbar macht.
+  try { stufe = localStorage.getItem(SCHLUESSEL) ?? 'wichtig' } catch { stufe = 'wichtig' }
   return stufe
 }
 
@@ -43,6 +64,17 @@ export async function freigeben() {
   await sagen('Sprachausgabe ist an.', { erzwingen: true })
 }
 
+/**
+ * Rueckfallstimme des Browsers. Kein Signal fuer den Wissenskern: die
+ * Web Speech API gibt den erzeugten Ton nirgends als AudioNode heraus, den
+ * ein AnalyserNode anzapfen koennte -- anders als bei der Piper-Wiedergabe
+ * gibt es hier also grundsaetzlich nichts Echtes zum Anzeigen. sp.messen()
+ * bekommt waehrenddessen keinen Aufruf mit an dieser Stelle, stand.quelle
+ * bleibt folglich 'still': der Kern zeigt sein normales Atmen weiter statt
+ * eine erfundene Kurve zu bewegen, die nicht zum tatsaechlichen Ton passt.
+ * Ehrlich ruhig ist hier also nicht “nichts implementiert”, sondern die
+ * bewusste Entscheidung gegen eine vorgetaeuschte Reaktion.
+ */
 function browserStimme(text) {
   return new Promise((fertig) => {
     if (!('speechSynthesis' in window)) return fertig()
@@ -65,17 +97,25 @@ async function abspielen(text) {
     const blob = await r.blob()
     const url = URL.createObjectURL(blob)
     const audio = new Audio(url)
-    // Durch den Analyser schleifen, damit die Wellenform und der Kern dem
-    // ECHTEN Pegel folgen und nicht einer nachgebauten Kurve.
-    await sp.aufwecken()
-    sp.ausgabeAnhaengen(audio)
-    await new Promise((fertig) => {
-      audio.onended = fertig
-      audio.onerror = fertig
-      audio.play().catch(fertig)
-    })
-    sp.ausgabeBeendet()
-    URL.revokeObjectURL(url)
+    try {
+      // Durch den Analyser schleifen, damit die Wellenform und der Kern dem
+      // ECHTEN Pegel folgen und nicht einer nachgebauten Kurve.
+      await sp.aufwecken()
+      sp.ausgabeAnhaengen(audio)
+      await new Promise((fertig, fehler) => {
+        audio.onended = fertig
+        // Ein abgelehntes audio.play() (Autoplay-Policy, fehlender Codec/
+        // Sink) MUSS hier als Fehler ankommen, nicht als stilles "fertig" --
+        // sonst faellt der Ton lautlos weg, ohne dass je die Browserstimme
+        // unten einspringt. Genau das war der gemeldete Fehler: kein Ton,
+        // und nirgends eine Spur, warum.
+        audio.onerror = () => fehler(audio.error ?? new Error('Audio-Fehler'))
+        audio.play().catch(fehler)
+      })
+    } finally {
+      sp.ausgabeBeendet()
+      URL.revokeObjectURL(url)
+    }
   } catch (e) {
     console.warn('Serverstimme nicht verfuegbar, nehme die des Browsers:', String(e))
     await browserStimme(text)

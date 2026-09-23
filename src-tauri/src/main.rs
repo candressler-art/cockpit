@@ -149,6 +149,27 @@ fn main() {
                             einstellungen
                                 .set_hardware_acceleration_policy(HardwareAccelerationPolicy::Always);
                             einstellungen.set_enable_webgl(true);
+
+                            // Sprachausgabe (stimme.js): ohne diese Zeile bleibt die
+                            // Piper-Wiedergabe stumm, und zwar OHNE Fehler, den man
+                            // sehen wuerde -- audio.play() liefert ein abgelehntes
+                            // Promise zurueck, stimme.js faengt das inzwischen ab
+                            // (siehe dort), aber besser ist, WebKit gar nicht erst
+                            // danach zu fragen. Diese App ist kein allgemeiner
+                            // Browser mit fremden Seiten, sondern zeigt ausschliesslich
+                            // die eigene Oberflaeche -- die Geste-Pflicht schuetzt hier
+                            // vor niemandem, verhindert aber genau die Benachrichtigungen,
+                            // fuer die die Sprachausgabe gebaut wurde.
+                            einstellungen.set_media_playback_requires_user_gesture(false);
+                            einstellungen.set_enable_webaudio(true);
+                            einstellungen.set_enable_media_stream(true);
+                            einstellungen.set_enable_media(true);
+
+                            // console.log/warn/error auf stdout: ohne das verschwinden
+                            // JS-Fehler (z. B. ein abgelehntes audio.play()) spurlos --
+                            // WebKitGTK zeigt sie sonst nirgends an, auch nicht auf der
+                            // Konsole, von der aus die App gestartet wurde.
+                            einstellungen.set_enable_write_console_messages_to_stdout(true);
                         }
 
                         wv.connect_permission_request(move |webview, anfrage| {
