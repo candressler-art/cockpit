@@ -442,6 +442,22 @@ export class Orchestrator extends EventEmitter {
       }
 
       if (!antwort) return { grund: 'formatfehler', text: 'Orchestrator lieferte keine Antwort' }
+      // Die Schleife oben verlaesst sich nur bei jeder Nicht-Leseanfrage per
+      // `break` -- landet `antwort.fall` hier trotzdem bei 'lesen', wurde das
+      // Leseanfrage-Limit (3) ausgeschoepft, ohne dass der Orchestrator je zu
+      // WEITER/ENTSCHEIDUNG/FERTIG kam. Ohne diese Pruefung liefe der Code
+      // unten so weiter, als waere es Fall A mit leerem NAECHSTER-PROMPT --
+      // die naechste Runde haette dann null Auftraege und der Lauf stuerbe
+      // eine Runde spaeter mit der irrefuehrenden Meldung "Worker lieferte
+      // keinen Report", obwohl gar kein Worker je gestartet wurde.
+      if (antwort.fall === 'lesen') {
+        return {
+          grund: 'formatfehler',
+          text:
+            'Orchestrator hat das Leseanfrage-Limit (3 je Runde) ausgeschoepft, ohne mit ' +
+            'NAECHSTER-PROMPT, ENTSCHEIDUNG-NOETIG oder PROJEKT-FERTIG zu antworten.',
+        }
+      }
 
       verlauf.push({ runde, statusKurz: antwort.statusKurz })
       this.melden(k.runId, 'fall', { runde, fall: antwort.fall, statusKurz: antwort.statusKurz })

@@ -87,5 +87,20 @@ const konfig = (extra = {}) => ({
   pruefe('Abbruch beendet das Warten sofort', ende.grund === 'abgebrochen' && dauer < 3000)
 }
 
+// --- 5. Leseanfrage-Limit ausgeschoepft endet klar, nicht als "kein Report" ---
+{
+  const lese = 'STATUS-KURZ: Sehe nach.\nLESE-ANFRAGE: DATEI foo.txt 1-5'
+  const sup = bauSupervisor([
+    'Report-Typ: ZWISCHENSTAND\nLaeuft.',
+    lese, lese, lese, lese,
+  ])
+  const o = new Orchestrator(sup, db)
+  const ende = await o.fahren(konfig())
+  pruefe(
+    'vier Leseanfragen in Folge enden als formatfehler, nicht als falsches "kein Report"',
+    ende.grund === 'formatfehler' && String(ende.text).includes('Leseanfrage-Limit'),
+  )
+}
+
 console.log(`\n${ok}/${gesamt} bestanden`)
 process.exit(ok === gesamt ? 0 : 1)
