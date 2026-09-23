@@ -237,7 +237,15 @@ export default {
 
     let g
     try {
-      g = await fetch(api('/api/vault/graph')).then((r) => r.json())
+      // /api/vault/graph liefert Agenten nur mit, wenn ein Lauf genannt wird
+      // (siehe Kommentar dort: "Notizen und Agenten in EINER Szene") -- ohne
+      // ?run= war das Feld bisher immer leer, der 3D-Agentenpunkt also nie zu
+      // sehen, bis das erste Live-Ereignis eintraf. Den zuletzt gestarteten
+      // laufenden Auftrag mitgeben, falls es einen gibt.
+      const laeufeR = await fetch(api('/api/laeufe')).then((r) => r.json()).catch(() => null)
+      const laufend = laeufeR?.laeufe?.find((l) => l.status === 'running')
+      const graphPfad = laufend ? `/api/vault/graph?run=${laufend.run_id}` : '/api/vault/graph'
+      g = await fetch(api(graphPfad)).then((r) => r.json())
     } catch (e) {
       buehne.innerHTML = `<div class="leer">Vault nicht abrufbar: ${esc(e)}</div>`
       return
