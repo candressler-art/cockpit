@@ -236,7 +236,8 @@ export function zusatzVerzeichnisDa(): boolean {
 /**
  * Bis wann ein Konto gesperrt gehoert, wenn es gerade ins Limit gelaufen ist.
  * Reine Funktion, damit sich die Prioritaet ohne einen echten Limitfehler
- * pruefen laesst.
+ * pruefen laesst. Gibt einen ms-Zeitstempel zurueck -- denselben Massstab
+ * wie `jetzt` und wie `Date.now()`, gegen das ihn kontoWaehlen() vergleicht.
  *
  * Reihenfolge, wie von Can verlangt:
  *   1. `resetsAt` des BINDENDEN Limits -- das Feld, das rate_limit_event fuer
@@ -253,6 +254,14 @@ export function zusatzVerzeichnisDa(): boolean {
  * alle das Wochenfenster meinen, nur mit einer Modelleinschraenkung oder
  * Overage-Herkunft. 'overage' selbst passt zu keinem der beiden Felder und
  * faellt auf die Vorgabe zurueck.
+ *
+ * Die drei resetsAt-Felder kommen von der SDK in SEKUNDEN seit Epoch, nicht
+ * in ms -- live auf servertwo geprueft: /api/gesundheit lieferte
+ * resetsAt=1790388000 bei einem `jetzt` von rund 1790172898 (Sekunden). Ohne
+ * die Umrechnung waere jede Sperre um den Faktor 1000 zu kurz ausgefallen
+ * und das Konto sofort wieder als frei gegolten -- der worst case: der
+ * Agent haette im selben Atemzug erneut dasselbe Konto gewaehlt und waere
+ * sofort wieder ins Limit gelaufen.
  */
 export function sperrzeitpunktAusLimitstand(
   stand: Pick<LimitStand, 'resetsAt' | 'rateLimitType' | 'fuenfStundenResetsAt' | 'siebenTageResetsAt'> | null,
@@ -260,13 +269,13 @@ export function sperrzeitpunktAusLimitstand(
   vorgabeMs: number,
 ): number {
   if (stand) {
-    if (typeof stand.resetsAt === 'number') return stand.resetsAt
+    if (typeof stand.resetsAt === 'number') return stand.resetsAt * 1000
     const typ = stand.rateLimitType ?? ''
     if (typ.startsWith('seven_day') && typeof stand.siebenTageResetsAt === 'number') {
-      return stand.siebenTageResetsAt
+      return stand.siebenTageResetsAt * 1000
     }
     if (typ === 'five_hour' && typeof stand.fuenfStundenResetsAt === 'number') {
-      return stand.fuenfStundenResetsAt
+      return stand.fuenfStundenResetsAt * 1000
     }
   }
   return jetzt + vorgabeMs

@@ -228,9 +228,13 @@ function limitZeichnen() {
   }
   setz('r-5h', letztesLimit.fuenfStundenAnteil)
   setz('r-7t', letztesLimit.siebenTageAnteil)
+  // Die SDK liefert resetsAt/fuenfStundenResetsAt/siebenTageResetsAt in
+  // Sekunden seit Epoch, nicht in ms -- wie in lauf.js. Ohne die
+  // Umrechnung zeigte diese Stelle eine Reset-Zeit weit in der
+  // Vergangenheit an, obwohl der Reset noch bevorstand.
   const r = letztesLimit.fuenfStundenResetsAt ?? letztesLimit.resetsAt
   wurzel.querySelector('#z-reset').textContent = r
-    ? `zurückgesetzt ${new Date(r).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}`
+    ? `zurückgesetzt ${new Date(r * 1000).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}`
     : ''
 }
 

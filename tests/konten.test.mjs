@@ -84,22 +84,31 @@ const JETZT = 1_000_000
   pruefe('unbekanntes bevorzugtes Konto: faellt auf erstes freies zurueck', r === 'haupt')
 }
 
-// --- 8. sperrzeitpunktAusLimitstand: welches Reset-Feld zaehlt -------------
+// --- 8. sperrzeitpunktAusLimitstand: welches Reset-Feld zaehlt, in ms ------
+//
+// Die SDK liefert resetsAt/fuenfStundenResetsAt/siebenTageResetsAt in
+// SEKUNDEN seit Epoch, nicht in ms -- live auf servertwo geprueft:
+// /api/gesundheit lieferte resetsAt=1790388000 bei einem `jetzt` von rund
+// 1790172898 (Sekunden). Die Tests bilden das nach: `stand.*` steht in
+// Sekunden, `jetzt` und das erwartete Ergebnis in ms, wie Date.now() und wie
+// kontoWaehlen() es vergleicht.
 const VORGABE_MS = 5 * 60 * 60 * 1000
+const JETZT_S = 1_790_172_898
+const JETZT_MS = JETZT_S * 1000
 
 {
-  const r = sperrzeitpunktAusLimitstand(null, JETZT, VORGABE_MS)
-  pruefe('kein Limitstand: Vorgabe ab jetzt', r === JETZT + VORGABE_MS)
+  const r = sperrzeitpunktAusLimitstand(null, JETZT_MS, VORGABE_MS)
+  pruefe('kein Limitstand: Vorgabe ab jetzt', r === JETZT_MS + VORGABE_MS)
 }
 {
   // resetsAt des bindenden Limits geht vor JEDEM anderen Feld -- auch wenn
   // rateLimitType und die Fensterfelder etwas anderes nahelegen wuerden.
   const stand = {
-    resetsAt: JETZT + 999, rateLimitType: 'five_hour',
-    fuenfStundenResetsAt: JETZT + 111, siebenTageResetsAt: JETZT + 222,
+    resetsAt: JETZT_S + 999, rateLimitType: 'five_hour',
+    fuenfStundenResetsAt: JETZT_S + 111, siebenTageResetsAt: JETZT_S + 222,
   }
-  const r = sperrzeitpunktAusLimitstand(stand, JETZT, VORGABE_MS)
-  pruefe('resetsAt des bindenden Limits hat Vorrang', r === JETZT + 999)
+  const r = sperrzeitpunktAusLimitstand(stand, JETZT_MS, VORGABE_MS)
+  pruefe('resetsAt des bindenden Limits hat Vorrang, umgerechnet in ms', r === (JETZT_S + 999) * 1000)
 }
 {
   // Kernfall des gemeldeten Fehlers: Wochenlimit greift, aber es wuerde
@@ -107,36 +116,42 @@ const VORGABE_MS = 5 * 60 * 60 * 1000
   // rateLimitType achtet.
   const stand = {
     resetsAt: undefined, rateLimitType: 'seven_day',
-    fuenfStundenResetsAt: JETZT + 111, siebenTageResetsAt: JETZT + 7 * 86400 * 1000,
+    fuenfStundenResetsAt: JETZT_S + 111, siebenTageResetsAt: JETZT_S + 7 * 86400,
   }
-  const r = sperrzeitpunktAusLimitstand(stand, JETZT, VORGABE_MS)
-  pruefe('seven_day ohne resetsAt: siebenTageResetsAt, nicht fuenfStunden', r === JETZT + 7 * 86400 * 1000)
+  const r = sperrzeitpunktAusLimitstand(stand, JETZT_MS, VORGABE_MS)
+  pruefe(
+    'seven_day ohne resetsAt: siebenTageResetsAt (ms), nicht fuenfStunden',
+    r === (JETZT_S + 7 * 86400) * 1000,
+  )
 }
 {
   // Modell- oder Overage-Varianten des Wochenlimits zaehlen wie seven_day.
   for (const typ of ['seven_day_opus', 'seven_day_sonnet', 'seven_day_overage_included']) {
-    const stand = { resetsAt: undefined, rateLimitType: typ, siebenTageResetsAt: JETZT + 42 }
-    const r = sperrzeitpunktAusLimitstand(stand, JETZT, VORGABE_MS)
-    pruefe(`${typ} zaehlt wie seven_day`, r === JETZT + 42)
+    const stand = { resetsAt: undefined, rateLimitType: typ, siebenTageResetsAt: JETZT_S + 42 }
+    const r = sperrzeitpunktAusLimitstand(stand, JETZT_MS, VORGABE_MS)
+    pruefe(`${typ} zaehlt wie seven_day, in ms`, r === (JETZT_S + 42) * 1000)
   }
 }
 {
-  const stand = { resetsAt: undefined, rateLimitType: 'five_hour', fuenfStundenResetsAt: JETZT + 55 }
-  const r = sperrzeitpunktAusLimitstand(stand, JETZT, VORGABE_MS)
-  pruefe('five_hour ohne resetsAt: fuenfStundenResetsAt', r === JETZT + 55)
+  const stand = { resetsAt: undefined, rateLimitType: 'five_hour', fuenfStundenResetsAt: JETZT_S + 55 }
+  const r = sperrzeitpunktAusLimitstand(stand, JETZT_MS, VORGABE_MS)
+  pruefe('five_hour ohne resetsAt: fuenfStundenResetsAt, in ms', r === (JETZT_S + 55) * 1000)
 }
 {
   // rateLimitType passt zu keinem Fenster (z.B. 'overage') UND kein
   // resetsAt -- Vorgabe, nicht raten.
-  const stand = { resetsAt: undefined, rateLimitType: 'overage', fuenfStundenResetsAt: JETZT + 1, siebenTageResetsAt: JETZT + 2 }
-  const r = sperrzeitpunktAusLimitstand(stand, JETZT, VORGABE_MS)
-  pruefe('unpassender rateLimitType ohne resetsAt: Vorgabe', r === JETZT + VORGABE_MS)
+  const stand = {
+    resetsAt: undefined, rateLimitType: 'overage',
+    fuenfStundenResetsAt: JETZT_S + 1, siebenTageResetsAt: JETZT_S + 2,
+  }
+  const r = sperrzeitpunktAusLimitstand(stand, JETZT_MS, VORGABE_MS)
+  pruefe('unpassender rateLimitType ohne resetsAt: Vorgabe', r === JETZT_MS + VORGABE_MS)
 }
 {
   // rateLimitType passend, aber das zugehoerige Feld fehlt -- auch dann Vorgabe.
   const stand = { resetsAt: undefined, rateLimitType: 'seven_day', siebenTageResetsAt: undefined }
-  const r = sperrzeitpunktAusLimitstand(stand, JETZT, VORGABE_MS)
-  pruefe('passender Typ, aber Feld fehlt: Vorgabe', r === JETZT + VORGABE_MS)
+  const r = sperrzeitpunktAusLimitstand(stand, JETZT_MS, VORGABE_MS)
+  pruefe('passender Typ, aber Feld fehlt: Vorgabe', r === JETZT_MS + VORGABE_MS)
 }
 
 // --- 9. versuchPrompt: Originalauftrag vs. Fortsetzungsprompt --------------
