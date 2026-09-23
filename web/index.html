@@ -225,7 +225,7 @@
   @media (max-width:820px){ #stimmwahl{max-width:52px} }
   /* --- Tab "Chats" --------------------------------------------------------
    * Zwei Spalten (Liste/Leser) im Normalzustand; sobald eine Sitzung offen
-   * ist, legt sich der Fokusmodus (.tabflaeche.fokus) auf ALLEN Breiten ueber
+   * ist, legt sich der Fokusmodus (.tabflaeche.fokus.an) auf ALLEN Breiten ueber
    * die volle Flaeche -- Suchkopf und Liste treten zurueck, der Chat wird zur
    * Spalte aus Kopf/Verlauf/Eingabe. */
   .chatkopf{display:flex;gap:10px;align-items:center;margin-bottom:12px}
@@ -272,16 +272,39 @@
     .chatspalten{grid-template-columns:1fr;grid-template-rows:auto 1fr}
     #chatlese{border-left:0;border-top:1px solid var(--surface0);padding-left:0;padding-top:12px}
     #chatliste{max-height:38vh}
+    /* Ausserhalb des Fokus geht ein Klick auf eine Sitzung ohnehin sofort in
+       den Fokus -- die gestapelte Leseransicht darunter ist auf dem Handy nur
+       noch ein Rest einer VERLASSENEN Sitzung (Knopf "Alle Chats") und
+       braeuchte eine eigene Hoehenrechnung fuer einen Zustand, den kaum
+       jemand sieht. Einfacher und robust: dort ausblenden, die Liste
+       bekommt die volle Flaeche. */
+    .tabflaeche:not(.fokus) #chatlese{display:none}
+    .tabflaeche:not(.fokus) #chatliste{max-height:none}
+    /* Im Fokus zaehlt keine der beiden Zeilen oben: kein Trenner zu einer
+       Liste, die es hier nicht gibt. */
+    .tabflaeche.fokus.an #chatlese{border-top:0;padding-top:0}
   }
   /* Fokusmodus -- gilt auf ALLEN Breiten, nicht nur unter der Handy-Grenze
-     oben. Hoehere Spezifitaet als die Media-Query gewinnt unabhaengig von der
-     Reihenfolge; ein Ueberschreiben von .tabflaeche.an{display:block} braucht
-     trotzdem die spaetere Position im Stylesheet. */
-  .tabflaeche.fokus{padding:12px 16px;display:flex;flex-direction:column;overflow:hidden}
-  .tabflaeche.fokus .chatkopf{display:none}
-  .tabflaeche.fokus .chatspalten{height:100%;grid-template-columns:1fr;overflow:hidden}
-  .tabflaeche.fokus #chatliste{display:none}
-  .tabflaeche.fokus #chatlese{border-left:0;padding-left:0}
+     oben. ALLE Regeln haengen an .an: sonst gewinnt .tabflaeche.fokus (zwei
+     Klassen) mit hoeherer Spezifitaet als .tabflaeche.an{display:block} weiter
+     oben in diesem Stylesheet IMMER, auch wenn ein anderer Tab aktiv ist --
+     der Chat bliebe beim Wechseln ueber dem naechsten Tab stehen. Genau
+     dieser Fehler ist schon einmal bei #tab-zentrale aufgetreten. */
+  .tabflaeche.fokus.an{padding:12px 16px;display:flex;flex-direction:column;overflow:hidden}
+  .tabflaeche.fokus.an .chatkopf{display:none}
+  .tabflaeche.fokus.an .chatspalten{
+    /* flex:1 statt height:100%: der Elternteil ist im Fokus selbst eine
+       Flex-Spalte, keine feste Hoehe -- height:100% rechnete gegen die
+       falsche Basis. grid-template-rows:minmax(0,1fr) UEBERSTIMMT die
+       Media-Query oben (hoehere Spezifitaet, unabhaengig von der
+       Reihenfolge): ohne das rutscht #chatlese, sobald #chatliste per
+       display:none aus dem Grid faellt, allein in die dortige "auto"-Zeile,
+       waechst mit dem Inhalt -- und die Eingabe unten wird abgeschnitten. */
+    flex:1;min-height:0;height:auto;grid-template-columns:1fr;
+    grid-template-rows:minmax(0,1fr);overflow:hidden;
+  }
+  .tabflaeche.fokus.an #chatliste{display:none}
+  .tabflaeche.fokus.an #chatlese{border-left:0;padding-left:0}
   /* --- Tab "Vault" -------------------------------------------------------- */
   #tab-vault{padding:0;display:flex;flex-direction:column;overflow:hidden}
   .v-kopf{display:flex;align-items:center;gap:12px;padding:10px 14px;flex:0 0 auto}

@@ -670,10 +670,13 @@ const server = createServer(async (req, res) => {
       const d = await chatLesen(DB_PFAD, id)
       if (!d) return json(404, { fehler: 'Sitzung unbekannt' })
       const hierVorhanden = Boolean(d.kopf.cwd && existsSync(d.kopf.cwd))
-      const zielCwd = hierVorhanden ? (d.kopf.cwd as string) : (process.env.HOME ?? '/opt/cockpit')
       const bestehend = fortsetzungLesen(DB_PFAD, id)
+      // Wurde schon fortgeschrieben, gilt DEREN cwd -- die steht fest, sobald
+      // der erste Zug lief (fortsetzungVorbereiten), und darf sich hinterher
+      // nicht mehr aendern. Sonst zeigte der Kopf ein anderes Verzeichnis an
+      // als das, in dem tatsaechlich weitergeschrieben wird.
+      const zielCwd = bestehend?.cwd ?? (hierVorhanden ? (d.kopf.cwd as string) : (process.env.HOME ?? '/opt/cockpit'))
       const laufId = bestehend?.laufId ?? `chat-${id}`
-      const fortsetzungCwd = bestehend?.cwd ?? zielCwd
       return json(200, {
         ...d,
         kopf: {
@@ -683,7 +686,7 @@ const server = createServer(async (req, res) => {
           zielCwd,
           fortsetzung: {
             laufId,
-            cwd: fortsetzungCwd,
+            cwd: zielCwd,
             laeuft: chatLaeuft.has(id),
             startSeq: chatLaeuft.get(id) ?? db.letzteSeq(laufId),
           },
