@@ -17,7 +17,10 @@ import { rollenLaden, rollenListe } from './rollen.js'
 import { sprechenGecacht } from './stimme.js'
 import { erkennen } from './hoeren.js'
 import { gespraechAntworten } from './gespraech.js'
-import { chatsIndizieren, chatsSuchen, chatLesen } from './chats.js'
+import {
+  chatsIndizieren, chatsSuchen, chatLesen, chatKopfLesen,
+  fortsetzungLesen, fortsetzungVorbereiten, fortsetzungAktualisieren,
+} from './chats.js'
 import { vaultIndizieren, vaultGraphLesen, vaultBeobachten, vaultDa } from './vault.js'
 import { konsoleBefehl, cwdPruefen } from './konsole.js'
 import { existsSync } from 'node:fs'
@@ -33,6 +36,14 @@ if (verwaist > 0) console.log(`[cockpit] ${verwaist} verwaiste Lauf/Laeufe als a
 
 const supervisor = new Supervisor(db)
 const orchestratoren = new Map<string, Orchestrator>()
+
+/**
+ * Welche Chat-Sitzung gerade weiterschreibt -- sessionId -> startSeq (die
+ * hoechste seq VOR diesem Zug, ab der die Oberflaeche pollt). Verhindert
+ * einen zweiten gleichzeitigen Zug auf dieselbe Sitzung (409) und sagt der
+ * Oberflaeche beim Neuladen, ob sie sofort mitpollen soll.
+ */
+const chatLaeuft = new Map<string, number>()
 
 /**
  * Startet einen Orchestrator-Lauf. Gemeinsam genutzt von HTTP und Discord,
@@ -594,23 +605,89 @@ const server = createServer(async (req, res) => {
       return json(200, { ...g, spiegelDa: await vaultDa(), agenten })
     }
 
+    // Weiterschreiben MUSS vor den beiden GET-Routen unten stehen: sonst
+    // faengt `pfad.startsWith('/api/chats/')` diese POST-Anfrage schon ab
+    // (die Methode ist zwar verschieden, aber der Pfad-Praefix passt).
+    if (pfad.startsWith('/api/chats/') && pfad.endsWith('/weiter') && req.method === 'POST') {
+      const id = decodeURIComponent(pfad.slice('/api/chats/'.length, -'/weiter'.length))
+      const k = (await koerperLesen(req)) as Record<string, unknown> | null
+      const text = String(k?.text ?? '').trim()
+      if (!text) return json(400, { fehler: 'text fehlt' })
+      if (chatLaeuft.has(id)) return json(409, { fehler: 'Diese Sitzung schreibt gerade schon weiter' })
+
+      const kopf = chatKopfLesen(DB_PFAD, id)
+      if (!kopf) return json(404, { fehler: 'Sitzung unbekannt' })
+
+      const f = await fortsetzungVorbereiten(DB_PFAD, id, process.env.HOME ?? '/opt/cockpit')
+      if (!f) return json(404, { fehler: 'Sitzung unbekannt' })
+
+      const startSeq = db.letzteSeq(f.laufId)
+      chatLaeuft.set(id, startSeq)
+      json(202, { laufId: f.laufId, cwd: f.cwd, startSeq })
+
+      // Nicht awaiten: die Antwort ist schon raus, der Zug laeuft weiter und
+      // die Oberflaeche verfolgt ihn per Poll auf /api/lauf/<laufId>.
+      void (async () => {
+        try {
+          const r = await supervisor.agentStarten({
+            runId: f.laufId,
+            agentId: 'chat',
+            role: 'chat',
+            label: `Chat: ${kopf.titel}`.slice(0, 60),
+            prompt: text,
+            cwd: f.cwd,
+            resume: f.aktuelleSession,
+          })
+          const neueSession = supervisor.agentenListe(f.laufId).find((a) => a.agentId === 'chat')?.sessionId
+          if (neueSession) fortsetzungAktualisieren(DB_PFAD, id, neueSession)
+          if (r.fehler) console.warn(`[chats] Weiterschreiben ${id.slice(0, 8)} endete mit Fehler:`, r.fehler)
+        } catch (e) {
+          // Darf den Daemon nicht mitreissen -- ein gestorbener Chat-Zug ist
+          // Sache dieser Sitzung, nicht des ganzen Prozesses.
+          console.warn(`[chats] Weiterschreiben ${id.slice(0, 8)} fehlgeschlagen:`, String(e))
+        } finally {
+          chatLaeuft.delete(id)
+        }
+      })()
+      return
+    }
+
     if (pfad === '/api/chats' && req.method === 'GET') {
       const treffer = chatsSuchen(DB_PFAD, url.searchParams.get('q') ?? '')
-      // Fortsetzbar ist nur, was hier auch ein Arbeitsverzeichnis hat. Das
-      // gehoert in die Liste und nicht in eine Enttaeuschung beim Klick:
-      // die Sessions stammen vom Desktop, dessen Pfade es hier meist nicht gibt.
+      // Fortsetzen geht inzwischen immer -- notfalls im Home-Verzeichnis
+      // statt im urspruenglichen cwd. hierVorhanden sagt der Liste, ob das
+      // Original-Arbeitsverzeichnis auf DIESEM Host existiert (dann laufen
+      // Werkzeuge dort, wo die Sitzung sie erwartet) oder nicht.
       return json(200, {
-        chats: treffer.map((c) => ({ ...c, fortsetzbar: Boolean(c.cwd && existsSync(c.cwd)) })),
+        chats: treffer.map((c) => ({
+          ...c, fortsetzbar: true, hierVorhanden: Boolean(c.cwd && existsSync(c.cwd)),
+        })),
       })
     }
 
     if (pfad.startsWith('/api/chats/') && req.method === 'GET') {
-      const id = pfad.slice('/api/chats/'.length)
+      const id = decodeURIComponent(pfad.slice('/api/chats/'.length))
       const d = await chatLesen(DB_PFAD, id)
       if (!d) return json(404, { fehler: 'Sitzung unbekannt' })
+      const hierVorhanden = Boolean(d.kopf.cwd && existsSync(d.kopf.cwd))
+      const zielCwd = hierVorhanden ? (d.kopf.cwd as string) : (process.env.HOME ?? '/opt/cockpit')
+      const bestehend = fortsetzungLesen(DB_PFAD, id)
+      const laufId = bestehend?.laufId ?? `chat-${id}`
+      const fortsetzungCwd = bestehend?.cwd ?? zielCwd
       return json(200, {
         ...d,
-        kopf: { ...d.kopf, fortsetzbar: Boolean(d.kopf.cwd && existsSync(d.kopf.cwd)) },
+        kopf: {
+          ...d.kopf,
+          fortsetzbar: true,
+          hierVorhanden,
+          zielCwd,
+          fortsetzung: {
+            laufId,
+            cwd: fortsetzungCwd,
+            laeuft: chatLaeuft.has(id),
+            startSeq: chatLaeuft.get(id) ?? db.letzteSeq(laufId),
+          },
+        },
       })
     }
 

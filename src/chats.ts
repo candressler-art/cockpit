@@ -12,8 +12,10 @@
 // Prozess.
 
 import { DatabaseSync } from 'node:sqlite'
-import { readdir, readFile, stat } from 'node:fs/promises'
+import { readdir, readFile, stat, mkdir, copyFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { homedir } from 'node:os'
 
 const SPIEGEL = process.env.COCKPIT_SESSIONS ?? '/var/lib/cockpit/sessions-desktop'
 
@@ -39,7 +41,36 @@ CREATE INDEX IF NOT EXISTS idx_chats_zeit ON chats (started_at DESC);
 CREATE VIRTUAL TABLE IF NOT EXISTS chats_fts USING fts5(
   session_id UNINDEXED, titel, eingaben, tokenize='unicode61'
 );
+-- Welche Sitzung wird gerade auf DIESEM Host fortgeschrieben. lauf_id ist
+-- der Pseudo-Lauf (wie KONSOLE_LAUF/GESPRAECH_LAUF -- keine Zeile in runs),
+-- aktuelle_session die jeweils NEUESTE Session-Id nach einem Resume (die SDK
+-- vergibt bei jedem Zug eine neue). cwd steht fest, sobald das erste Mal
+-- weitergeschrieben wurde, und bleibt es -- ein Wechsel des Zielverzeichnisses
+-- mitten in einer fortgesetzten Sitzung waere kein Fortsetzen mehr.
+CREATE TABLE IF NOT EXISTS chat_fortsetzung (
+  session_id       TEXT PRIMARY KEY,
+  lauf_id          TEXT NOT NULL,
+  aktuelle_session TEXT NOT NULL,
+  cwd              TEXT NOT NULL,
+  geaendert        INTEGER NOT NULL
+);
 `
+
+/**
+ * Wo die Claude-Code-CLI auf DIESEM Host ihre Sitzungen ablegt -- derselbe
+ * Ort, unter dem ein `claude` im Arbeitsverzeichnis `cwd` seine Session-Datei
+ * anlegen wuerde. Ein fortgesetzter Chat schreibt genau dorthin, damit die
+ * CLI (falls jemand die Sitzung auch mal per Hand oeffnet) dieselbe Datei
+ * sieht wie das Cockpit.
+ */
+function projekteVerzeichnis(): string {
+  return join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude'), 'projects')
+}
+
+/** Kodiert einen Pfad wie die CLI: jedes Zeichen ausserhalb [a-zA-Z0-9] wird '-'. */
+function projektSchluessel(cwd: string): string {
+  return cwd.replace(/[^a-zA-Z0-9]/g, '-')
+}
 
 export interface ChatKopf {
   sessionId: string
@@ -285,19 +316,106 @@ export function chatKopfLesen(dbPfad: string, sessionId: string): (ChatKopf & { 
   return { ...zeileZuKopf(r), pfad: String(r.pfad) }
 }
 
-/** Eine Sitzung als Folge lesbarer Beitraege. */
-export async function chatLesen(
-  dbPfad: string, sessionId: string, maxBeitraege = 400,
-): Promise<{ kopf: ChatKopf; beitraege: { rolle: string; ts: number | null; text: string }[] } | null> {
+export interface Fortsetzung {
+  laufId: string
+  aktuelleSession: string
+  cwd: string
+}
+
+/** Zeile aus chat_fortsetzung, oder null, wenn diese Sitzung noch nie fortgeschrieben wurde. */
+export function fortsetzungLesen(dbPfad: string, sessionId: string): Fortsetzung | null {
+  const h = handle(dbPfad)
+  const r = h.prepare('SELECT * FROM chat_fortsetzung WHERE session_id = ?').get(sessionId) as
+    Record<string, unknown> | undefined
+  if (!r) return null
+  return { laufId: String(r.lauf_id), aktuelleSession: String(r.aktuelle_session), cwd: String(r.cwd) }
+}
+
+/**
+ * Macht eine Sitzung fortsetzbar: legt (beim ersten Mal) eine Kopie der
+ * Spiegeldatei an der Stelle an, an der die Claude-Code-CLI sie fuer `cwd`
+ * erwarten wuerde, und traegt die Zuordnung in chat_fortsetzung ein.
+ *
+ * Kopiert wird NUR beim allerersten Mal -- ab dann gehoert die Zieldatei dem
+ * laufenden Chat, und jeder weitere Zug haengt an sie an (die SDK tut das
+ * selbst ueber `resume`). In den Spiegel wird nie geschrieben: der gehoert
+ * Syncthing und dem Desktop, nicht diesem Host.
+ */
+export async function fortsetzungVorbereiten(
+  dbPfad: string, sessionId: string, ersatzCwd: string,
+): Promise<Fortsetzung | null> {
+  const vorhanden = fortsetzungLesen(dbPfad, sessionId)
+  if (vorhanden) return vorhanden
+
   const k = chatKopfLesen(dbPfad, sessionId)
   if (!k) return null
+
+  const cwd = k.cwd && existsSync(k.cwd) ? k.cwd : ersatzCwd
+  const zielVerzeichnis = join(projekteVerzeichnis(), projektSchluessel(cwd))
+  const zielDatei = join(zielVerzeichnis, `${sessionId}.jsonl`)
+
+  if (!existsSync(zielDatei)) {
+    await mkdir(zielVerzeichnis, { recursive: true })
+    await copyFile(k.pfad, zielDatei)
+  }
+
+  const f: Fortsetzung = { laufId: `chat-${sessionId}`, aktuelleSession: sessionId, cwd }
+  const h = handle(dbPfad)
+  h.prepare(
+    `INSERT INTO chat_fortsetzung (session_id, lauf_id, aktuelle_session, cwd, geaendert)
+     VALUES (?,?,?,?,?)
+     ON CONFLICT (session_id) DO NOTHING`,
+  ).run(sessionId, f.laufId, f.aktuelleSession, f.cwd, Date.now())
+
+  return f
+}
+
+/** Nach einem Zug: die SDK vergibt bei `resume` eine neue Session-Id. */
+export function fortsetzungAktualisieren(dbPfad: string, sessionId: string, neueSession: string): void {
+  const h = handle(dbPfad)
+  h.prepare(
+    `UPDATE chat_fortsetzung SET aktuelle_session = ?, geaendert = ? WHERE session_id = ?`,
+  ).run(neueSession, Date.now(), sessionId)
+}
+
+// Eingebettete System-Erinnerungen sind Betriebsrauschen der CLI, kein Teil
+// des Gespraechs -- sie stehen oft mitten in einer Nutzereingabe.
+const SYSTEM_REMINDER_RE = /<system-reminder>[\s\S]*?<\/system-reminder>/g
+
+// Rahmen, den die CLI selbst einstreut (Benachrichtigungen, Slash-Befehle,
+// Unterbrechungen) -- fuer einen Menschen, der die Sitzung nachliest, ist das
+// kein Beitrag, sondern Fuellmaterial.
+const NUTZER_RAUSCH_PRAEFIXE = [
+  '<task-notification', '<command-', '<local-command', 'Caveat:', '[Request interrupted',
+]
+
+/** Eine Sitzung als Folge lesbarer Beitraege, ohne das Betriebsrauschen der CLI. */
+export async function chatLesen(
+  dbPfad: string, sessionId: string, maxBeitraege = 400,
+): Promise<
+  { kopf: ChatKopf; beitraege: { rolle: string; ts: number | null; text: string }[]; gekuerzt: boolean }
+  | null
+> {
+  const k = chatKopfLesen(dbPfad, sessionId)
+  if (!k) return null
+
+  // Wurde schon fortgeschrieben, gilt die Kopie im Projektverzeichnis als
+  // Quelle -- sie traegt die neuen Zuege, der Spiegel weiss nichts davon.
+  let quellPfad = k.pfad
+  const f = fortsetzungLesen(dbPfad, sessionId)
+  if (f) {
+    const kandidat = join(projekteVerzeichnis(), projektSchluessel(f.cwd), `${f.aktuelleSession}.jsonl`)
+    if (existsSync(kandidat)) quellPfad = kandidat
+  }
+
   let roh: string
   try {
-    roh = await readFile(k.pfad, 'utf-8')
+    roh = await readFile(quellPfad, 'utf-8')
   } catch {
-    return { kopf: k, beitraege: [] }
+    return { kopf: k, beitraege: [], gekuerzt: false }
   }
-  const beitraege: { rolle: string; ts: number | null; text: string }[] = []
+
+  const alle: { rolle: string; ts: number | null; text: string }[] = []
   for (const zeile of roh.split('\n')) {
     if (!zeile) continue
     let d: Record<string, unknown>
@@ -306,14 +424,36 @@ export async function chatLesen(
     } catch {
       continue
     }
+    // Nebenzweige (z.B. Kontext eines Subagenten) und reine Metazeilen
+    // gehoeren nicht zum lesbaren Gespraech.
+    if (d.isMeta === true || d.isSidechain === true) continue
     const typ = String(d.type ?? '')
     if (typ !== 'user' && typ !== 'assistant') continue
     const m = d.message as { content?: unknown } | undefined
-    const text = textAus(m?.content).trim()
+    let text = textAus(m?.content).trim()
+    if (typ === 'user' && NUTZER_RAUSCH_PRAEFIXE.some((p) => text.startsWith(p))) continue
+    text = text.replace(SYSTEM_REMINDER_RE, '').trim()
     if (!text) continue
     const ts = d.timestamp ? Date.parse(String(d.timestamp)) : NaN
-    beitraege.push({ rolle: typ, ts: Number.isNaN(ts) ? null : ts, text: text.slice(0, 8000) })
-    if (beitraege.length >= maxBeitraege) break
+    alle.push({ rolle: typ, ts: Number.isNaN(ts) ? null : ts, text: text.slice(0, 8000) })
   }
-  return { kopf: k, beitraege }
+
+  // Aufeinanderfolgende assistant-Beitraege sind in Wahrheit EINE Antwort,
+  // die die CLI ueber mehrere Zuege fortgesetzt hat (siehe supervisor.ts,
+  // Kommentar zu textBloecke) -- als getrennte Sprechblasen saehen sie aus
+  // wie zwei Antworten.
+  const zusammengefasst: { rolle: string; ts: number | null; text: string }[] = []
+  for (const b of alle) {
+    const letzter = zusammengefasst[zusammengefasst.length - 1]
+    if (b.rolle === 'assistant' && letzter?.rolle === 'assistant') {
+      letzter.text = `${letzter.text}\n\n${b.text}`
+      letzter.ts = letzter.ts ?? b.ts
+    } else {
+      zusammengefasst.push({ ...b })
+    }
+  }
+
+  const gekuerzt = zusammengefasst.length > maxBeitraege
+  const beitraege = gekuerzt ? zusammengefasst.slice(-maxBeitraege) : zusammengefasst
+  return { kopf: k, beitraege, gekuerzt }
 }
