@@ -12,7 +12,8 @@ import { readdir, readFile, stat } from 'node:fs/promises'
 import { watch } from 'node:fs'
 import { join, sep } from 'node:path'
 
-const VAULT = process.env.COCKPIT_VAULT ?? '/var/lib/cockpit/vault'
+/** Auch fuer andere Module (z.B. den Chat-Agenten), die denselben Spiegel lesen wollen. */
+export const VAULT = process.env.COCKPIT_VAULT ?? '/var/lib/cockpit/vault'
 
 export interface VaultKnoten {
   id: string

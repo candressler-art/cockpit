@@ -28,6 +28,7 @@ process.env.CLAUDE_CONFIG_DIR = claudeConfig
 const {
   chatsIndizieren, chatLesen, fortsetzungLesen, fortsetzungVorbereiten, fortsetzungAktualisieren,
 } = await import('../dist/chats.js')
+const { vaultZugriffErlaubt } = await import('../dist/vaultZugriff.js')
 
 // --- Kuenstliche Sitzung mit Rauschen anlegen -------------------------------
 //
@@ -192,6 +193,54 @@ let f
   const gelesen = fortsetzungLesen(dbPfad, sessionId)
   pruefe('fortsetzungAktualisieren traegt die neue Session-Id ein', gelesen?.aktuelleSession === neueSession)
   pruefe('laufId und cwd bleiben beim Aktualisieren unveraendert', gelesen?.laufId === f.laufId && gelesen?.cwd === f.cwd)
+}
+
+// --- vaultZugriffErlaubt: automatische Freigabe nur fuer Lesezugriffe -----
+// tatsaechlich UNTERHALB des Vaults -----------------------------------------
+{
+  const vaultWurzel = join(wurzel, 'vault')
+  mkdirSync(vaultWurzel, { recursive: true })
+  const notizPfad = join(vaultWurzel, 'notiz.md')
+  writeFileSync(notizPfad, '# Notiz', 'utf-8')
+  // Nachbarordner mit gleichem Praefix -- OHNE Trenner wuerde ein reiner
+  // startsWith-Vergleich das hier faelschlich als "innerhalb" durchlassen.
+  const nachbarWurzel = vaultWurzel + '-anderes-projekt'
+  mkdirSync(nachbarWurzel, { recursive: true })
+  const nachbarDatei = join(nachbarWurzel, 'geheim.md')
+  writeFileSync(nachbarDatei, 'geheim', 'utf-8')
+
+  pruefe(
+    'Read innerhalb des Vaults erlaubt',
+    vaultZugriffErlaubt('Read', { file_path: notizPfad }, vaultWurzel) === true,
+  )
+  pruefe(
+    'Glob mit path innerhalb des Vaults erlaubt',
+    vaultZugriffErlaubt('Glob', { path: vaultWurzel, pattern: '**/*.md' }, vaultWurzel) === true,
+  )
+  pruefe(
+    'Grep mit path innerhalb des Vaults erlaubt',
+    vaultZugriffErlaubt('Grep', { path: notizPfad, pattern: 'Notiz' }, vaultWurzel) === true,
+  )
+  pruefe(
+    'Nachbarverzeichnis mit gleichem Namenspraefix NICHT erlaubt',
+    vaultZugriffErlaubt('Read', { file_path: nachbarDatei }, vaultWurzel) === false,
+  )
+  pruefe(
+    '..-Ausbruch aus dem Vault NICHT erlaubt',
+    vaultZugriffErlaubt('Read', { file_path: join(vaultWurzel, '..', 'vault-anderes-projekt', 'geheim.md') }, vaultWurzel) === false,
+  )
+  pruefe(
+    'Write-Werkzeug NICHT automatisch erlaubt, auch nicht im Vault',
+    vaultZugriffErlaubt('Write', { file_path: notizPfad, content: 'x' }, vaultWurzel) === false,
+  )
+  pruefe(
+    'Grep ohne path NICHT automatisch erlaubt',
+    vaultZugriffErlaubt('Grep', { pattern: 'Notiz' }, vaultWurzel) === false,
+  )
+  pruefe(
+    'Bash-Werkzeug NICHT automatisch erlaubt',
+    vaultZugriffErlaubt('Bash', { command: `cat ${notizPfad}` }, vaultWurzel) === false,
+  )
 }
 
 console.log(`\n${ok}/${gesamt} bestanden`)

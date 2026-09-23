@@ -21,7 +21,8 @@ import {
   chatsIndizieren, chatsSuchen, chatLesen, chatKopfLesen,
   fortsetzungLesen, fortsetzungVorbereiten, fortsetzungAktualisieren,
 } from './chats.js'
-import { vaultIndizieren, vaultGraphLesen, vaultBeobachten, vaultDa } from './vault.js'
+import { vaultIndizieren, vaultGraphLesen, vaultBeobachten, vaultDa, VAULT } from './vault.js'
+import { vaultZugriffErlaubt } from './vaultZugriff.js'
 import { konsoleBefehl, cwdPruefen } from './konsole.js'
 import { existsSync } from 'node:fs'
 
@@ -637,6 +638,12 @@ const server = createServer(async (req, res) => {
             prompt: text,
             cwd: f.cwd,
             resume: f.aktuelleSession,
+            ...(existsSync(VAULT) ? { zusatzVerzeichnisse: [VAULT] } : {}),
+            systemPromptZusatz:
+              `Cans Obsidian-Vault (persoenliche Notizen, SOPs) liegt nur lesend unter ${VAULT}. ` +
+              'Bei Fragen zu seinem Setup dort mit Grep/Glob/Read nachsehen. Schreiben dort ist ' +
+              'sinnlos -- es ist nur ein Spiegel.',
+            autoErlauben: (toolName, input) => vaultZugriffErlaubt(toolName, input, VAULT),
           })
           const neueSession = supervisor.agentenListe(f.laufId).find((a) => a.agentId === 'chat')?.sessionId
           if (neueSession) fortsetzungAktualisieren(DB_PFAD, id, neueSession)

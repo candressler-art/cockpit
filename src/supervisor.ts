@@ -75,8 +75,23 @@ export interface AgentStartOptionen {
   tools?: string[]
   /** Eigener Systemprompt, ersetzt die Vorgabe der CLI. */
   systemPrompt?: string
+  /**
+   * Ergaenzung zur CLI-Vorgabe statt Ersatz (SDK-Preset 'claude_code' mit
+   * `append`). Wird ignoriert, wenn `systemPrompt` gesetzt ist -- ein
+   * eigener Prompt UND eine Ergaenzung zur Vorgabe schliessen sich aus.
+   */
+  systemPromptZusatz?: string
   /** MCP-Server, die dieser Agent nutzen darf. Leer: keine. */
   mcpServers?: Record<string, McpServerConfig>
+  /** Zusaetzliche Verzeichnisse, die der Agent lesen darf (SDK additionalDirectories). */
+  zusatzVerzeichnisse?: string[]
+  /**
+   * Vor dem Freigabe-Broker gefragt: liefert true, laeuft der Werkzeugaufruf
+   * sofort durch, ohne Rueckfrage. Fuer eng umrissene, ungefaehrliche Faelle
+   * wie einen reinen Lesezugriff im Obsidian-Vault -- alles andere geht
+   * weiter ueber freigabeEinholen.
+   */
+  autoErlauben?: (toolName: string, input: Record<string, unknown>) => boolean
 }
 
 /** Pseudo-Lauf fuer alles, was zu keinem Agentenlauf gehoert. */
@@ -347,7 +362,17 @@ export class Supervisor extends EventEmitter {
           resume: resumeSessionId,
           allowedTools: o.allowedTools,
           ...(o.tools !== undefined ? { tools: o.tools } : {}),
-          ...(o.systemPrompt !== undefined ? { systemPrompt: o.systemPrompt } : {}),
+          ...(o.zusatzVerzeichnisse && o.zusatzVerzeichnisse.length
+            ? { additionalDirectories: o.zusatzVerzeichnisse }
+            : {}),
+          // systemPrompt ersetzt die CLI-Vorgabe komplett -- nur wenn er
+          // FEHLT, kommt eine etwaige Ergaenzung als Preset mit append zum
+          // Zug, sonst liefe sie ins Leere (append haengt am Preset).
+          ...(o.systemPrompt !== undefined
+            ? { systemPrompt: o.systemPrompt }
+            : o.systemPromptZusatz
+              ? { systemPrompt: { type: 'preset' as const, preset: 'claude_code' as const, append: o.systemPromptZusatz } }
+              : {}),
           // Nur was die Fachrolle ausdruecklich nennt. Ein Coder braucht
           // keinen Browser, und ein Werkzeug, das niemand nutzt, ist nur
           // zusaetzliche Angriffsflaeche im Kontext.
@@ -380,8 +405,18 @@ export class Supervisor extends EventEmitter {
                 },
               }
             : {}),
-          canUseTool: (toolName: string, input: Record<string, unknown>) =>
-            this.freigabeEinholen(o.runId, o.agentId, toolName, input),
+          canUseTool: (toolName: string, input: Record<string, unknown>) => {
+            // Vor dem Broker: eng umrissene Faelle (z.B. Lesezugriff im
+            // Vault), die keine Rueckfrage brauchen. Trotzdem protokolliert,
+            // damit im Nachweis steht, WAS automatisch durchlief.
+            if (o.autoErlauben?.(toolName, input)) {
+              this.protokollSchritt(o.runId, o.agentId, `Automatisch erlaubt: ${toolName}`, {
+                toolName, input,
+              })
+              return Promise.resolve({ behavior: 'allow' as const, updatedInput: input })
+            }
+            return this.freigabeEinholen(o.runId, o.agentId, toolName, input)
+          },
         },
       })
 
