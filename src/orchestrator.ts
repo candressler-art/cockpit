@@ -548,7 +548,7 @@ export class Orchestrator extends EventEmitter {
 
 // --- Leseanfragen -----------------------------------------------------------
 
-import { readFileSync } from 'node:fs'
+import { readFileSync, statSync } from 'node:fs'
 import { resolve, relative, isAbsolute } from 'node:path'
 
 const LESE_ZEILEN_MAX = 200
@@ -557,6 +557,16 @@ const NOTFALL_WERKZEUGE = ['Read', 'Grep', 'Glob']
 
 const GREP_MUSTER_MAX = 120
 const LESE_TREFFER_MAX = 50
+/**
+ * Groessendeckel fuer DATEI/GREP. `readFileSync` unten ist synchron und
+ * blockiert damit die EINE Ereignisschleife des Daemons fuer die volle
+ * Lesedauer -- bei einer grossen Datei im Arbeitsverzeichnis (Logdatei,
+ * Datenbankdump, versehentlich mitgelesenes Binaerartefakt) staende damit
+ * nicht nur dieser Lauf, sondern das ganze Cockpit, genau die Gefahrenklasse,
+ * vor der der Regex-Deckel bei GREP unten schon schuetzt -- nur eben fuer die
+ * Dateigroesse statt das Suchmuster.
+ */
+const LESE_DATEI_MAX_BYTES = 2 * 1024 * 1024
 
 function pfadPruefen(roh: string, cwd: string): string | null {
   const bereinigt = roh.replace(/^["'`]|["'`]$/g, '')
@@ -568,11 +578,23 @@ function pfadPruefen(roh: string, cwd: string): string | null {
   return ziel
 }
 
-function leseZeileAusfuehren(zeile: string, cwd: string): string {
+/** true, wenn die Datei den Groessendeckel sprengt oder gar nicht lesbar ist (dann meldet readFileSync den echten Grund). */
+function dateiZuGross(ziel: string): boolean {
+  try {
+    return statSync(ziel).size > LESE_DATEI_MAX_BYTES
+  } catch {
+    return false
+  }
+}
+
+export function leseZeileAusfuehren(zeile: string, cwd: string): string {
   const datei = /^DATEI\s+(\S+)\s+(\d+)-(\d+)\s*$/i.exec(zeile)
   if (datei) {
     const ziel = pfadPruefen(datei[1]!, cwd)
     if (!ziel) return 'abgelehnt: Pfad ausserhalb des Arbeitsverzeichnisses'
+    if (dateiZuGross(ziel)) {
+      return `abgelehnt: Datei groesser als ${LESE_DATEI_MAX_BYTES / (1024 * 1024)} MB`
+    }
     const von = Math.max(1, Number(datei[2]))
     const bis = Math.min(Number(datei[3]), von + LESE_ZEILEN_MAX - 1)
     try {
@@ -590,6 +612,9 @@ function leseZeileAusfuehren(zeile: string, cwd: string): string {
   if (grep) {
     const ziel = pfadPruefen(grep[2]!, cwd)
     if (!ziel) return 'abgelehnt: Pfad ausserhalb des Arbeitsverzeichnisses'
+    if (dateiZuGross(ziel)) {
+      return `abgelehnt: Datei groesser als ${LESE_DATEI_MAX_BYTES / (1024 * 1024)} MB`
+    }
     // Das Muster kommt aus Modelltext. Ein Ausdruck wie (a+)+$ laesst die
     // Suche katastrophal zurueckspringen und blockiert die EINE Ereignis-
     // schleife des Daemons -- damit stuende nicht nur dieser Lauf, sondern
