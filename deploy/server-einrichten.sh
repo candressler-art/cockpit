@@ -139,7 +139,9 @@ fi
 
 # --- 6. Dienst ---------------------------------------------------------------
 schritt "6/7  systemd-Unit"
-if "${SSH[@]}" 'sudo cp /opt/cockpit/deploy/cockpit.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now cockpit' 2>/dev/null; then
+# restart statt enable --now: laeuft der Dienst schon, startet enable --now ihn
+# NICHT neu, und der Daemon arbeitet nach dem Ausrollen mit dem alten Code weiter.
+if "${SSH[@]}" 'sudo cp /opt/cockpit/deploy/cockpit.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable cockpit && sudo systemctl restart cockpit' 2>/dev/null; then
   sleep 3
   if "${SSH[@]}" 'systemctl is-active --quiet cockpit'; then
     ok "cockpit.service laeuft"
