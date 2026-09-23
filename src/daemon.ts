@@ -10,7 +10,7 @@ import { WebSocketServer, type WebSocket } from 'ws'
 import { CockpitDb } from './db.js'
 import { Supervisor } from './supervisor.js'
 import { Orchestrator, type OrchestratorKonfig } from './orchestrator.js'
-import { DiscordAdapter } from './discord.js'
+import { DiscordAdapter, stopZielAufloesen } from './discord.js'
 import type { CockpitEvent } from './typen.js'
 import { standLesen, type SystemStand } from './system.js'
 import { rollenLaden, rollenListe } from './rollen.js'
@@ -179,13 +179,17 @@ if (DISCORD_TOKEN && DISCORD_KANAL) {
   discord.on('stop', ({ runId, durch }: { runId: string | null; durch: string }) => {
     // Eine abgekuerzte Lauf-Id genuegt: in Discord steht nur der Anfang, und
     // niemand tippt eine volle UUID ab.
-    let ziel = runId || letzterLauf?.runId || null
-    if (runId && !orchestratoren.has(runId)) {
-      const treffer = [...orchestratoren.keys()].filter((k) => k.startsWith(runId))
-      ziel = treffer.length === 1 ? treffer[0]! : ziel
-    }
+    const ziel = stopZielAufloesen(runId, [...orchestratoren.keys()], letzterLauf?.runId ?? null)
     if (!ziel) {
-      console.warn(`[discord] !stop ohne Ziel (${durch})`)
+      // War eine (falsche/vertippte/schon beendete) Id angegeben, ist das
+      // eine andere Situation als "gar keine Id" -- beides frueher still zum
+      // selben Fall zusammengefallen, was faelschlich "abgebrochen" loggte,
+      // obwohl gar kein passender Lauf existierte.
+      console.warn(
+        runId
+          ? `[discord] !stop ${runId}: kein passender laufender Auftrag (${durch})`
+          : `[discord] !stop ohne Ziel (${durch})`,
+      )
       return
     }
     orchestratoren.get(ziel)?.abbrechen()

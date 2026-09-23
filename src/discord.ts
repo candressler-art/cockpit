@@ -39,6 +39,42 @@ function kuerzen(s: string, n: number): string {
   return t.length > n ? t.slice(0, n - 1) + '…' : t
 }
 
+/**
+ * Ob eine Nachricht als !stop-Befehl gilt. Nur exakt "!stop" oder mit einem
+ * Leerzeichen danach -- wie bei "!lauf " unten. Ohne diese Grenze wuerde eine
+ * ganz normale Nachricht wie "!stopped working on X" (der Kanal ist nicht
+ * zwangslaeufig nur fuer Befehle da) faelschlich als Abbruch-Befehl gelten.
+ */
+export function istStopBefehl(text: string): boolean {
+  return text === '!stop' || text.startsWith('!stop ')
+}
+
+/**
+ * Loest die in "!stop [id]" angegebene (in Discord meist abgekuerzte)
+ * Lauf-Id zu einer echten, aktuell laufenden runId auf.
+ *
+ * - Keine Angabe -> der zuletzt gestartete Lauf (kann null sein, wenn noch
+ *   nie einer lief).
+ * - Angabe, die exakt einem laufenden Auftrag entspricht -> dieser.
+ * - Angabe, die genau EINEN laufenden Auftrag als Praefix trifft (in
+ *   Discord steht nur der Anfang, niemand tippt eine volle UUID ab) ->
+ *   dieser.
+ * - Angabe ohne oder mit mehrdeutigem Treffer -> null. Bewusst NICHT der
+ *   zuletzt gestartete Lauf: eine explizite, aber falsche/vertippte Id darf
+ *   nie versehentlich einen anderen, noch laufenden Auftrag stoppen als den
+ *   gemeinten.
+ */
+export function stopZielAufloesen(
+  angegebeneId: string | null,
+  laufendeIds: string[],
+  letzteId: string | null,
+): string | null {
+  if (!angegebeneId) return letzteId
+  if (laufendeIds.includes(angegebeneId)) return angegebeneId
+  const treffer = laufendeIds.filter((k) => k.startsWith(angegebeneId))
+  return treffer.length === 1 ? treffer[0]! : null
+}
+
 export interface DiscordKonfig {
   token: string
   /** Kanal, in dem der Bot schreibt. */
@@ -259,7 +295,7 @@ export class DiscordAdapter extends EventEmitter {
       await m.react('🚀').catch(() => {})
     } else if (text === '!status') {
       this.emit('status', { antworten: (s: string) => void m.reply(kuerzen(s, 1900)).catch(() => {}) })
-    } else if (text.startsWith('!stop')) {
+    } else if (istStopBefehl(text)) {
       this.emit('stop', { runId: text.slice(5).trim() || null, durch: `discord:${m.author.username}` })
       await m.react('🛑').catch(() => {})
     }
