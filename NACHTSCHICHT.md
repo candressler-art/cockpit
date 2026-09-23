@@ -2,6 +2,59 @@
 
 ## Fuer Can (Kurzfassung)
 
+- **Durchgang 8:** Prioritaet 2, den bisher offenen Punkt "Zustaende mit
+  aktiven Agenten noch nicht visuell geprueft" (aus Durchgang 5) endlich
+  angegangen -- und dabei zwei echte, zusammenhaengende Bugs gefunden und
+  behoben:
+  1. **Zentrale-Tab: Agenten-Panel blieb nach einem (Neu-)Laden leer, auch
+     wenn laengst ein Auftrag lief.** Das Panel fuellte sich ausschliesslich
+     aus WebSocket-Ereignissen ab dem Verbindungsaufbau; anders als der
+     Lauf-Tab (der `/api/lauf/<id>` beim Mount abfragt) holte die Zentrale
+     nie per REST den aktuellen Stand nach. Wer die Seite laedt oder neu
+     laedt, waehrend ein Orchestrator-Lauf schon eine Weile arbeitet, sah
+     "keine aktiven" bis zum naechsten Live-Ereignis -- ausgerechnet auf der
+     Seite, die laut eigenem Kommentar "den Zustand des ganzen Systems
+     gleichzeitig" zeigen soll. Live nachgewiesen: ein synthetischer Lauf
+     (drei Agenten in unterschiedlichen Zustaenden) direkt in die Test-DB
+     eingetragen -- ohne echten Agentenprozess, nur Datenbankzeilen --, dann
+     mit Playwright NUR die Zentrale geoeffnet, nie den Lauf-Tab besucht: vor
+     dem Fix "keine aktiven", danach sofort alle drei sichtbar. Ein
+     zusaetzlicher Test mit einem echten (an "Not logged in" scheiternden)
+     Lauf bestaetigt, dass sich Erstbefuellung und Live-WS-Pfad sauber
+     mischen (kein Duplikat). Commit "Zentrale: Agenten-Panel zeigt laufende
+     Agenten auch ohne Lauf-Tab-Besuch".
+  2. **Vault-Tab: derselbe Fehler, aber mit schon fertiger, nur nie
+     aufgerufener Serverunterstuetzung.** `/api/vault/graph` liefert laut
+     eigenem Code-Kommentar in `daemon.ts` ("Notizen und Agenten in EINER
+     Szene") Agenten eines Laufs mit -- aber nur, wenn `?run=<id>`
+     mitgegeben wird. `web/tabs/vault.js` rief die Route seit jeher OHNE
+     diesen Parameter auf, das Feld war dadurch immer leer. Fix: vault.js
+     fragt beim Mount zuerst `/api/laeufe` nach einem laufenden Auftrag und
+     haengt dessen `run_id` an. Live verifiziert wie oben (synthetischer
+     Lauf, Playwright, vorher/nachher-Vergleich). Commit "Vault:
+     3D-Agentenanzeige nutzt den vom Server schon vorbereiteten
+     ?run=-Parameter".
+  Zusaetzlich systematisch geprueft (kein weiterer Bug gefunden, siehe
+  "Erledigt" unten fuer Details): Freigabe-Dialog mit echtem, langem Inhalt
+  (Desktop UND mobile Schublade) sieht sauber aus, kein Ueberlauf, `pre`
+  scrollt wie vorgesehen. Tablet-Breite 800px (in der 768-820px-Luecke aus
+  Durchgang 5) durchgetestet -- ein vermeintlicher Fund (Freigaben-Panel
+  "ragt" bei 800px weit ueber den Rand) war ein Mess-Artefakt des eigenen
+  Testskripts (Kinder eines `position:fixed`-Elements erben dessen
+  Unsichtbarkeit, das Skript pruefte das nur fuer das Element selbst, nicht
+  die Vorfahrenkette) -- nach Korrektur des Skripts: kein Ueberlauf. Auch
+  **Fehlerzustaende bei Serverausfall** (letzter offener Punkt aus
+  Durchgang 5) jetzt erstmals visuell/live geprueft: Test-Daemon mitten in
+  einer offenen Browsersitzung beendet (simuliert Netzwerkausfall/Neustart
+  waehrend der Nutzung), alle sechs Tabs durchgeklickt. Kein Absturz, keine
+  unbehandelte Exception (`pageerror`) -- nur erwartete
+  Netzwerk-Konsolenmeldungen. "getrennt — neuer Versuch" erscheint korrekt
+  im Kopf, alte Daten bleiben sichtbar statt einer Fehlerwand (Server-Tab,
+  wie schon in Durchgang 4 als bewusstes Verhalten dokumentiert). Kleiner
+  Schoenheitsfehler, NICHT behoben (siehe "Offene Punkte"): Chats/Vault/
+  Server-Tab zeigen bei einem fehlgeschlagenen ERSTEN Laden die rohe
+  `TypeError: Failed to fetch`-Meldung statt eines deutschen Satzes -- lesbar
+  und nicht irrefuehrend, aber unschoen.
 - **Durchgang 7:** Erster gruendlicher Blick auf `src/orchestrator.ts`
   selbst (vorher nur das aussenrum liegende Speicherleck angeschaut, siehe
   Durchgang 6) -- zwei echte, wenn auch seltene, Robustheitsluecken
@@ -656,6 +709,147 @@ Code gelesen):**
   um 768-820px, genau an der Media-Query-Grenze) nicht gesondert
   geprueft -- nur die zwei in der Aufgabe genannten Eckwerte.
 
+## Erledigt (Durchgang 8)
+
+### Zentrale- und Vault-Tab: Agenten-Panel blieb nach (Neu-)Laden leer, obwohl ein Auftrag lief
+
+**Commits:** "Zentrale: Agenten-Panel zeigt laufende Agenten auch ohne
+Lauf-Tab-Besuch", "Vault: 3D-Agentenanzeige nutzt den vom Server schon
+vorbereiteten ?run=-Parameter".
+
+**Ausgangspunkt:** Der aus Durchgang 5 offene Punkt "Zustaende mit aktiven
+Agenten noch nicht visuell geprueft". Da echte Agentenlaeufe hier nicht
+gestartet werden duerfen (Kontingent) und Fake-Token-Laeufe binnen einer
+Sekunde scheitern, wurde ein neuer Testweg gebraucht: ein synthetischer Lauf
+(ein `run`, drei `agents` in den Zustaenden `thinking`/`tool`/
+`waiting_permission`, zehn `events`, eine offene `permission`) direkt per
+`CockpitDb`-Klasse in die Test-SQLite-Datei eingetragen -- KEIN echter
+Agentenprozess, nur Datenbankzeilen, wie sie ein echter Lauf hinterlassen
+haette. Damit lieferte die echte, laufende Test-API (`GET /api/laeufe`,
+`GET /api/lauf/<id>`) genau die Antworten, die ein echter aktiver Lauf
+liefern wuerde, ohne dass die Nachtschicht-Regeln zu echten Agentenlaeufen
+verletzt wurden.
+
+**Befund 1 (Zentrale):** Mit Playwright NUR die Zentrale geoeffnet (nie den
+Lauf-Tab besucht, wie es beim ersten Start der App oder nach einem Reload
+der Fall waere) -- das Agenten-Panel zeigte "keine aktiven", obwohl der
+synthetische Lauf drei aktive Agenten hatte. Ursache: `zentrale.js` fuellt
+`letzteAgenten` ausschliesslich aus zwei WebSocket-Nachrichtentypen
+(`agenten`, `agent`), beide kommen nur ab dem Zeitpunkt, an dem sie
+eintreffen -- es gibt (anders als beim Lauf-Tab, der `/api/laeufe` +
+`/api/lauf/<id>` explizit beim Mount abfragt) keinen REST-Aufruf, der den
+JETZT schon bestehenden Zustand nachholt. Ein zusaetzlicher Test mit einem
+echten (an "Not logged in" scheiternden) `/api/lauf`-Aufruf zeigte: der
+Live-Pfad selbst funktioniert (das Panel aktualisierte sich innerhalb von
+Millisekunden nach dem echten `agent_start`-Ereignis) -- das Problem war
+ausschliesslich das Fehlen einer Erstbefuellung.
+
+**Fix 1:** `zentrale.js`, `mount()`: nach dem Einrichten der
+WS-Abonnements zusaetzlich `GET /api/laeufe` abfragen, alle Laeufe mit
+`status:'running'` herausfiltern, fuer jeden `GET /api/lauf/<id>` abfragen
+und die Agenten per Upsert (gleiche Logik wie der bestehende `'agent'`-
+Handler) in `letzteAgenten` einspeisen. Bewusst als eigener, kleiner
+try/catch-Block direkt geschrieben (keine Abstraktion mit dem bestehenden
+`'agenten'`-Handler geteilt) -- die paar Zeilen Mapping-Code doppelt zu
+haben war das kleinere Risiko als den schon funktionierenden Live-Pfad beim
+Refactoring versehentlich zu veraendern.
+
+**Befund 2 (Vault):** Derselbe Fehlerklasse, aber mit einer Ueberraschung:
+`GET /api/vault/graph` in `daemon.ts` unterstuetzt bereits einen
+`?run=<id>`-Parameter, der die Agenten dieses Laufs mitliefert -- der
+Code-Kommentar dort sagt sogar ausdruecklich, wozu ("Notizen und Agenten in
+EINER Szene ... aus zwei Anfragen zusammenzusetzen waere nur Gelegenheit
+fuer Zwischenstaende"). `web/tabs/vault.js` ruft die Route aber seit jeher
+OHNE diesen Parameter auf (`fetch(api('/api/vault/graph'))`, kein `?run=`
+irgendwo im Code) -- das serverseitig fertig gebaute Feature wurde nie vom
+Frontend benutzt. Live bestaetigt: `curl .../api/vault/graph` ohne `run`
+liefert immer `"agenten":[]`, mit `?run=<id>` die echten Zeilen.
+
+**Fix 2:** `vault.js`, `mount()`: vor dem eigentlichen Graph-Aufruf zuerst
+`GET /api/laeufe` abfragen (mit `.catch(() => null)`, falls das schon
+fehlschlaegt), den ersten Lauf mit `status:'running'` suchen, und falls
+gefunden dessen `run_id` als `?run=` an die Graph-Anfrage haengen. Schlaegt
+auch das fehl oder gibt es keinen laufenden Auftrag, bleibt das Verhalten
+exakt wie vorher (Graph ohne Agenten).
+
+**Wie getestet:**
+- `npx tsc && npm test`: weiterhin gruen (49/49), beide Aenderungen sind
+  reines `web/*.js` ohne TypeScript-Beruehrung.
+- Live gegen die Testinstanz (Port 8800, dann 8801): synthetischer Lauf wie
+  oben beschrieben eingetragen, mit Playwright verifiziert -- vor dem Fix
+  "keine aktiven" (Zentrale) bzw. "keine Agenten aktiv" (Vault), nach dem
+  Fix sofort alle Agenten sichtbar, beim blossen Laden der jeweiligen Seite,
+  ohne dass ein Live-Ereignis noetig war.
+- Regressionstest: derselbe echte (scheiternde) `/api/lauf`-Aufruf wie oben
+  nochmal nach dem Fix ausgefuehrt -- die neue Erstbefuellung und der
+  bestehende Live-WS-Pfad zeigen den neuen Agenten korrekt zusaetzlich zu
+  den synthetischen, keine Duplikate, keine widerspruechlichen Zustaende.
+- Kompletter Sichttest (alle sechs Tabs, 1280/800/375px, Ueberlauf-Check,
+  Konsolenfehler-Check) nach beiden Fixes erneut durchlaufen: keine neuen
+  Layout-Probleme, keine JS-Fehler.
+
+### Ueberlauf-Check bei 800px (Tablet-Luecke aus Durchgang 5): ein Fund, aber Mess-Artefakt des eigenen Skripts
+
+Das eigene Ueberlauf-Pruefskript (siehe "Testinstanz-Hinweise" unten) meldete
+bei 800px im Lauf-Tab zunaechst einen Treffer: `#freigaben` und seine Kinder
+ragten weit ueber den rechten Rand hinaus (bis `right=1110` bei 800px
+Fensterbreite). Nachgeprueft mit einer direkten `getComputedStyle`-Abfrage:
+`#rechts` (die Freigaben-Schublade) ist bei dieser Breite korrekt
+`position:fixed` mit `transform:translateX(320px)` -- vollstaendig ausserhalb
+des sichtbaren Bereichs, wie von der `@media (max-width:820px)`-Regel in
+`web/index.html` vorgesehen. Das eigene Skript pruefte aber nur, ob das
+Element SELBST `position:fixed` ist (Durchgang-5-Technik), nicht ob ein
+VORFAHRE es ist -- Kinder eines verschobenen `position:fixed`-Elements haben
+selbst `position:static` und wurden faelschlich als ueberlaufend gemeldet,
+obwohl sie (wie ihr Elternelement) unsichtbar sind. Skript korrigiert
+(`inFixedSchublade()`-Helfer, laeuft die Vorfahrenkette hoch), danach kein
+Treffer mehr bei 800px auf keinem der sechs Tabs. Kein Bug im Cockpit selbst,
+nur im eigenen Testwerkzeug -- dokumentiert, damit ein spaeterer Durchgang
+nicht denselben Fund nochmal untersucht.
+
+### Fehlerzustaende bei Serverausfall waehrend der Nutzung -- erstmals live geprueft, kein Absturz
+
+**Aufbau:** Test-Daemon gestartet, Seite im (headless) Browser vollstaendig
+geladen, DANN der Daemon-Prozess ueber seine eigene PID beendet (verifiziert
+per `ps -p <pid> -o cmd` vor dem `kill`, wie in den Testinstanz-Hinweisen
+vorgeschrieben) -- simuliert einen Server, der waehrend der Nutzung wegbricht
+(Netzwerkausfall, Neustart, Absturz), nicht einen von Anfang an unerreichbaren
+Server. Danach alle sechs Tabs durchgeklickt und Konsole/`pageerror`-Ereignisse
+mitgeschnitten.
+
+**Ergebnis:** Keine einzige unbehandelte Exception (`pageerror`), nur
+erwartete Netzwerk-Fehlermeldungen in der Browserkonsole (WebSocket-Reconnect-
+Versuche, fehlgeschlagene `fetch`-Aufrufe). Der Verbindungsstatus in der
+Kopfzeile wechselt korrekt auf "getrennt — neuer Versuch". Tabs mit schon
+vorher geladenen Daten (Zentrale, Lauf) behalten ihren letzten bekannten
+Stand sichtbar, statt einer Fehlerwand -- konsistent mit dem in Durchgang 4
+dokumentierten, bewussten Verhalten des Server-Tabs. Konsole-Tab (holt beim
+Mount nichts vom Server) zeigt unveraendert nur den statischen Warnhinweis,
+keine Fehlermeldung noetig.
+
+**Ein kleiner, nicht behobener Schoenheitsfehler:** Chats-, Vault- und
+Server-Tab zeigen bei einem fehlgeschlagenen ERSTEN Laden (noch nie zuvor
+erfolgreich geladen, dann bricht der Server weg) die rohe
+`TypeError: Failed to fetch`-Meldung (`String(e)` im catch-Zweig) statt
+eines deutschen Satzes wie in `lauf.js` ("Kein Daemon erreichbar auf ...").
+Lesbar und nicht irrefuehrend (kein falscher "leer"-Zustand wie z.B. beim
+Server-Tab-Konten-Panel, siehe naechster Absatz), aber unschoen. Nicht
+behoben -- kleine, risikoarme Verbesserung fuer einen spaeteren Durchgang,
+siehe "Offene Punkte".
+
+**Randbeobachtung, NICHT behoben (bewusst, siehe Durchgang 4):** Das
+Server-Tab-Konten-Panel zeigt bei einem fehlgeschlagenen ERSTEN Laden
+"keine Konten gefunden" -- dieselbe Meldung wie bei tatsaechlich null
+konfigurierten Konten, obwohl die Ursache hier ein Verbindungsfehler ist,
+nicht fehlende Konten. Das ist eine Folge der in Durchgang 4 bereits
+gepruefte und als bewusst akzeptierten Entscheidung, bei einem Ladefehler
+NICHTS zu veraendern (Code-Kommentar in `server.js`: "Ohne Antwort bleibt
+die letzte bekannte Liste stehen statt einer Fehlerwand") -- die
+Kehrseite ist eben dieser eine Randfall (Fehler EXAKT beim allerersten
+Laden, bevor je eine echte Liste stand). Nicht als neuer Fund behandelt,
+nur als bisher unbeobachtete Konsequenz einer schon getroffenen,
+begruendeten Entscheidung notiert.
+
 ## Offene Punkte (Prioritaet 1, noch zu pruefen)
 
 - [ ] **Daemon-Neustart:** `gesperrtBis` und `nutzung` in
@@ -707,13 +901,31 @@ Code gelesen):**
   Playwright/Chromium visuell geprueft (Systembibliotheken waren KEIN
   Problem, Installation lief durch). Kein Bug gefunden, siehe "Erledigt"
   oben fuer Details und die zwei falsch-positiven Funde.
-- [ ] **Fehlerzustaende** (Server/API nicht erreichbar) und Zustaende mit
+- [x] **Fehlerzustaende** (Server/API nicht erreichbar) und Zustaende mit
   echten AKTIVEN Agenten (Freigabe-Dialoge mit echtem Inhalt, laufender
-  Graph, Konsole/Zentrale mit Live-Ereignissen) noch nicht visuell
-  geprueft -- siehe "Nicht geprueft" in Durchgang 5 oben.
-- [ ] Tablet-Breiten um die 768-820px-Media-Query-Grenze nicht gesondert
-  geprueft, nur die zwei Eckwerte 1280px/375px.
+  Graph, Konsole/Zentrale mit Live-Ereignissen): in Durchgang 8 mit
+  Playwright gegen synthetische "aktive" Datenbankzeilen und einen mitten in
+  der Sitzung beendeten Test-Daemon geprueft. Zwei echte Bugs gefunden und
+  behoben (Zentrale- und Vault-Agentenpanel blieben nach Laden leer, siehe
+  Kurzfassung oben). Fehlerzustaende: kein Absturz, aber
+  `TypeError: Failed to fetch` als Rohmeldung in Chats/Vault/Server bei
+  fehlgeschlagenem Erstladen -- kleiner, nicht behobener Schoenheitsfehler,
+  siehe "Offene Punkte" unten.
+- [x] Tablet-Breiten um die 768-820px-Media-Query-Grenze: in Durchgang 8 bei
+  800px geprueft (Zentrale, Lauf, Chats, Vault, Konsole, Server, je mit dem
+  synthetischen aktiven Lauf). Ein vermeintlicher Ueberlauf-Fund war ein
+  Mess-Artefakt des eigenen Testskripts (siehe Kurzfassung oben), kein
+  echter Bug. Nur genau 800px getestet, nicht der ganze 768-820px-Bereich.
 - [ ] `src-tauri/` nicht angefasst -- kein cargo hier verfuegbar.
+- [ ] **Neu, nicht behoben:** Chats-, Vault- und Server-Tab zeigen bei einem
+  fehlgeschlagenen ERSTEN Laden (Server nicht erreichbar, noch nie zuvor
+  erfolgreich geladen) die rohe JS-Fehlermeldung `TypeError: Failed to
+  fetch` statt eines deutschen Satzes wie in `lauf.js`
+  ("Kein Daemon erreichbar auf ..."). Nicht irrefuehrend, nur unschoen --
+  ein spaeterer Durchgang koennte `String(e)` durch eine freundlichere
+  Meldung ersetzen, an allen drei Stellen (`web/tabs/chats.js`,
+  `web/tabs/vault.js`, `web/tabs/server.js`, jeweils im catch-Zweig des
+  initialen Ladens).
 
 ## Offene Punkte (Prioritaet 3 -- Rest des Cockpits)
 
@@ -802,3 +1014,25 @@ Code gelesen):**
   Test-Daemons aus Durchgang 5 (PIDs 679012, 679478, 680325) wurden alle
   sauber ueber die eigene PID beendet, jeweils vorher mit
   `ps -p <pid> -o cmd` gegengeprueft.
+- Durchgang 8: **Wichtig fuer eigene Prozesssuche** -- `pgrep -af 'node
+  dist/daemon.js'` traf diesmal (anders als der in Durchgang 2 dokumentierte
+  Treffer mit dem eigenen `claude -p`-Prompt) auch auf die Bash-Wrapper-
+  Prozesszeile, die den Startbefehl im `eval '...'`-Argument enthaelt --
+  IMMER `ps -p <pid> -o cmd --no-headers` gegenpruefen und nur `kill`, wenn
+  die Ausgabe EXAKT `node dist/daemon.js` ist, nicht nur "enthaelt den
+  Text". `pgrep` selbst reicht als Filter nicht.
+- Durchgang 8: `nachtschicht-bilder/sichttest8.mjs` (alle sechs Tabs,
+  1280/800/375px, Ueberlauf-Check inkl. `inFixedSchublade()`-Korrektur fuer
+  Kinder verschobener `position:fixed`-Elemente, Konsolenfehler-Check),
+  `zentrale_bug.mjs`/`zentrale_live.mjs`/`vault_bug.mjs` (Vorher/Nachher-
+  Tests fuer die beiden Agenten-Panel-Fixes) und `fehlerzustand.mjs`
+  (Server-Ausfall-waehrend-Nutzung-Test, nimmt die Test-PID als Argument)
+  liegen alle unter `nachtschicht-bilder/` (gitignored) und sind
+  wiederverwendbar. Fuer synthetische "aktive" Laufdaten (ohne echten
+  Agentenprozess): `CockpitDb` aus `dist/db.js` direkt importieren,
+  `runAnlegen`/`agentSpeichern`/`ereignisSpeichern`/`freigabeAnlegen`
+  aufrufen -- siehe die eingebetteten Beispiele in den obigen Skripten
+  (die Insert-Skripte selbst wurden nach Gebrauch geloescht, da rein
+  einmalig; das Muster steht in "Erledigt (Durchgang 8)" oben). `cockpit8.db`
+  unter `/tmp/nachtschicht/` sowie `spiegel8/`, `vault8/` (Kopien von
+  `spiegel4`/`vault5`) sind wiederverwendbar liegen geblieben.
