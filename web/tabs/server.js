@@ -1,15 +1,22 @@
 /**
- * Tab "Server" -- Auslastung beider Maschinen.
+ * Tab "Server" -- Auslastung beider Maschinen, und darueber die Konten.
  *
  * Die Zahlen kommen fertig vom Daemon (/api/system, danach live per
  * 'system'-Nachricht). Hier wird nur gezeichnet. Gemessen wird nichts im
  * Browser -- ein Handy im Tailnet kaeme an /proc ohnehin nicht heran.
+ *
+ * Die Konten (/api/konten) haben keinen Live-Kanal -- anders als der
+ * Systemstand gibt es dafuer kein WebSocket-Ereignis, ein Kontowechsel ist
+ * selten genug, dass ein Poll alle paar Sekunden reicht, waehrend der Tab
+ * offen ist.
  */
 import { api, abonnieren } from '../bus.js'
 
 let wurzel = null
 let letzter = null
+let letzteKonten = []
 let vorn = false
+let kontenIntervall = null
 
 // Die Hostnamen kommen aus dem Beszel-Hub, also aus fremder Konfiguration.
 // Sie landen per innerHTML in der Seite -- ohne Maskierung waere das eine
@@ -80,10 +87,89 @@ function karte(h) {
   </article>`
 }
 
+/** Kurztext, wann eine Sperre endet -- oder leer, wenn das Konto frei ist. */
+function resetText(gesperrtBis) {
+  if (!gesperrtBis) return ''
+  const d = new Date(gesperrtBis)
+  const heute = d.toDateString() === new Date().toDateString()
+  const zeit = d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
+  return heute ? `gesperrt bis ${zeit}` : `gesperrt bis ${d.toLocaleDateString('de-DE')} ${zeit}`
+}
+
+function kontoKarte(k) {
+  const gesperrt = Boolean(k.gesperrtBis)
+  // Dieselbe Kartensprache wie die Hosts (.hostkarte, Eckklammern aus
+  // hud.css) -- nicht angemeldet zaehlt wie ein toter Host, gesperrt wie ein
+  // heisser.
+  const kartenzustand = !k.angemeldet ? '' : gesperrt ? 'heiss' : 'ok'
+  return `<article class="hostkarte kontokarte ${kartenzustand}" data-konto="${esc(k.name)}">
+    <header class="hostkopf">
+      <span class="ampel ${k.angemeldet ? 'an' : 'ab'}"></span>
+      <h3>${esc(k.name)}</h3>
+      ${k.abo ? `<span class="quelle" title="Abo">${esc(k.abo)}</span>` : ''}
+      <div class="spacer"></div>
+      ${k.bevorzugt ? '<span class="pill an">bevorzugt</span>' : ''}
+      ${!k.angemeldet
+        ? '<span class="pill ab">nicht angemeldet</span>'
+        : gesperrt
+          ? `<span class="pill heiss">${esc(resetText(k.gesperrtBis))}</span>`
+          : '<span class="pill an">frei</span>'}
+    </header>
+    <div class="kontozeile">
+      <span class="kontoemail" title="${esc(k.email ?? '')}">${esc(k.email ?? '—')}</span>
+      <button class="still knopf-vorzug" data-konto="${esc(k.name)}" ${k.angemeldet ? '' : 'disabled'}>
+        ${k.bevorzugt ? 'Vorzug aufheben' : 'Bevorzugen'}
+      </button>
+    </div>
+  </article>`
+}
+
+async function vorzugSetzen(name, aufheben) {
+  try {
+    await fetch(api('/api/konten'), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: aufheben ? null : name }),
+    })
+  } catch {
+    // Naechster Poll zeigt den wahren Stand -- kein Absturz wegen einer
+    // Anzeige, die sich gleich sowieso wieder korrigiert.
+  }
+  await kontenLaden()
+}
+
+function kontenZeichnen() {
+  const el = wurzel?.querySelector('#kontoliste')
+  if (!el) return
+  if (letzteKonten.length === 0) {
+    el.innerHTML = '<div class="leer">keine Konten gefunden</div>'
+    return
+  }
+  el.innerHTML = letzteKonten.map(kontoKarte).join('')
+  for (const btn of el.querySelectorAll('.knopf-vorzug')) {
+    btn.onclick = () => {
+      const name = btn.dataset.konto
+      const k = letzteKonten.find((x) => x.name === name)
+      void vorzugSetzen(name, Boolean(k?.bevorzugt))
+    }
+  }
+}
+
+async function kontenLaden() {
+  try {
+    const r = await fetch(api('/api/konten')).then((x) => x.json())
+    letzteKonten = r.konten ?? []
+  } catch {
+    // Ohne Antwort bleibt die letzte bekannte Liste stehen statt einer
+    // Fehlerwand -- die Serverkarten darunter sind das Wichtigere auf diesem Tab.
+  }
+  kontenZeichnen()
+}
+
 function zeichnen() {
   if (!wurzel || !vorn) return
   if (!letzter) {
-    wurzel.innerHTML = '<div class="leer">Werte werden geholt…</div>'
+    wurzel.querySelector('#hostliste').innerHTML = '<div class="leer">Werte werden geholt…</div>'
     return
   }
   const hinweis = letzter.beszelEingerichtet
@@ -91,7 +177,8 @@ function zeichnen() {
     : `<div class="hinweis">Nur der eigene Host wird gemessen. Für den zweiten Server
        fehlt die Beszel-Anmeldung: <code>BESZEL_URL</code>, <code>BESZEL_USER</code> und
        <code>BESZEL_PASS</code> in <code>/etc/cockpit/umgebung</code> eintragen.</div>`
-  wurzel.innerHTML = hinweis + `<div class="hostliste">${letzter.hosts.map(karte).join('')}</div>`
+  wurzel.querySelector('#hostliste').innerHTML =
+    hinweis + `<div class="hostliste">${letzter.hosts.map(karte).join('')}</div>`
 }
 
 export default {
@@ -101,7 +188,11 @@ export default {
 
   mount(el) {
     wurzel = el
-    el.innerHTML = '<div class="leer">Werte werden geholt…</div>'
+    el.innerHTML = `
+      <h2>Konten</h2>
+      <div id="kontoliste" class="kontoliste"><div class="leer">Konten werden geholt…</div></div>
+      <h2>Auslastung</h2>
+      <div id="hostliste"><div class="leer">Werte werden geholt…</div></div>`
     // Live-Strom: der Daemon schickt alle 20 s von selbst.
     abonnieren('system', (d) => { letzter = d; zeichnen() })
     // Und einmal sofort holen, damit der Tab nicht 20 s leer bleibt.
@@ -109,12 +200,22 @@ export default {
       .then((r) => r.json())
       .then((d) => { letzter = d; zeichnen() })
       .catch((e) => {
-        el.innerHTML = `<div class="leer">Auslastung nicht abrufbar: ${String(e)}</div>`
+        wurzel.querySelector('#hostliste').innerHTML =
+          `<div class="leer">Auslastung nicht abrufbar: ${String(e)}</div>`
       })
+
+    void kontenLaden()
+    // Kein Live-Kanal fuer Konten -- gepollt, aber nur solange der Tab offen
+    // war (siehe sichtbar()), damit ein Hintergrundtab nicht mitzaehlt.
+    if (kontenIntervall) clearInterval(kontenIntervall)
+    kontenIntervall = setInterval(() => { if (vorn) void kontenLaden() }, 15_000)
   },
 
   sichtbar(an) {
     vorn = an
-    if (an) zeichnen()
+    if (an) {
+      zeichnen()
+      void kontenLaden()
+    }
   },
 }

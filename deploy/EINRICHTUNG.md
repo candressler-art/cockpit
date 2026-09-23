@@ -104,3 +104,34 @@ curl -s https://servertwo.tail9c8a2b.ts.net:8443/api/gesundheit
 
 Der dritte Test ist der eigentliche: ein Lauf starten, den Rechner zuklappen,
 und vom Handy aus eine Freigabe erteilen.
+
+## Zweites Konto
+
+Laeuft das Hauptkonto ins Nutzungslimit, wechselt das Cockpit automatisch auf
+ein zweites Claude-Code-Abo, wenn eines eingerichtet ist -- derselbe Agent
+laeuft per `resume` mit dem neuen Konto weiter, ohne dass jemand eingreifen
+muss.
+
+```bash
+./deploy/konto-hinzufuegen.sh zweit
+```
+
+Der Name (`zweit`) ist frei waehlbar und wird zum Verzeichnisnamen unter
+`/home/claude/.claude-konten/` auf dem Server. Das Skript legt das Verzeichnis
+an, verlinkt `projects/` auf das des Hauptkontos (fuer `resume` ueber
+Kontogrenzen hinweg) und startet danach dieselbe interaktive Anmeldung wie in
+Schritt 2 -- die Anmeldeseite oeffnet sich im Browser, den angezeigten CODE
+ins Terminal einfuegen. Am Ende prueft es `claude auth status` fuer das neue
+Konto und warnt, falls dieselbe E-Mail wie ein schon vorhandenes Konto
+angemeldet wurde.
+
+Kein Neustart des Daemons noetig: `/api/konten` liest die Kontenliste bei
+jedem Aufruf neu von der Platte. Im Server-Tab erscheint das neue Konto direkt
+mit Anmeldestatus, Abo und E-Mail; dort laesst sich auch ein bevorzugtes Konto
+setzen (`POST /api/konten {"name": "zweit"}`, `null` hebt die Bevorzugung
+wieder auf).
+
+Ist ein Konto im Limit, sperrt das Cockpit es bis zum gemessenen (oder
+geschaetzten) Reset-Zeitpunkt und probiert automatisch das naechste freie
+Konto -- erst wenn wirklich alle Konten gesperrt sind, wartet ein Lauf wie
+bisher. Der Wechsel steht als Protokollzeile im Lauf-Log.

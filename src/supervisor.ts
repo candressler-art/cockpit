@@ -10,6 +10,7 @@ import { EventEmitter } from 'node:events'
 import { query, USAGE_LIMIT_ERROR_PREFIXES, type McpServerConfig } from '@anthropic-ai/claude-agent-sdk'
 import type { CockpitDb } from './db.js'
 import { einordnen } from './normalisieren.js'
+import { KontenVerwaltung, HAUPT_KONTO, type Konto, type KontoMitZustand } from './konten.js'
 import {
   limitStandLesen,
   tokensWiegen,
@@ -20,6 +21,14 @@ import {
   type LimitStand,
   type PermissionRequest,
 } from './typen.js'
+
+/**
+ * Vorhaltezeit fuer eine Kontosperre, wenn der genaue Reset-Zeitpunkt noch
+ * nicht bekannt ist (das erste rate_limit_event dieses Prozesses kam noch
+ * nicht durch). Fuenf Stunden ist das kuerzere der beiden Nutzungsfenster --
+ * lieber zu vorsichtig gesperrt als ein Konto, das gleich wieder anlaeuft.
+ */
+const KONTO_SPERRE_VORGABE_MS = 5 * 60 * 60 * 1000
 
 /** Statuswechsel, den ein Ereignis am Agenten ausloest. */
 const STATUS_JE_KIND: Partial<Record<CockpitEvent['kind'], AgentStatus>> = {
@@ -67,10 +76,23 @@ export class Supervisor extends EventEmitter {
     string,
     { aufloesen: (erlaubt: boolean, grund: string | null) => void; anfrage: PermissionRequest }
   >()
+  private konten = new KontenVerwaltung()
 
   constructor(db: CockpitDb) {
     super()
     this.db = db
+  }
+
+  /** Alle bekannten Konten mit Sperr- und Vorzugsstatus, fuer /api/konten. */
+  kontenListe(): KontoMitZustand[] {
+    return this.konten.alleMitZustand()
+  }
+
+  /** Setzt das bevorzugte Konto. null hebt die Bevorzugung auf. */
+  bevorzugtesKontoSetzen(name: string | null): boolean {
+    if (name !== null && !this.konten.konto(name)) return false
+    this.konten.bevorzugtesKontoSetzen(name)
+    return true
   }
 
   private naechsteSeq(runId: string): number {
@@ -168,9 +190,9 @@ export class Supervisor extends EventEmitter {
     const abort = new AbortController()
     this.laufende.set(k, { abort })
 
-    let ergebnis: string | null = null
-    let fehler: string | null = null
-    // Alle Assistant-Textbloecke des Laufs, in Reihenfolge.
+    // Alle Assistant-Textbloecke des Laufs, in Reihenfolge -- ueber ALLE
+    // Kontowechsel hinweg, denn resume setzt dieselbe Session fort und der
+    // neue Versuch liefert nur noch die neuen Bloecke.
     //
     // Warum nicht einfach `result`: ueberschreitet eine Antwort die
     // Ausgabegrenze, setzt die CLI sie in einem weiteren Turn fort, und
@@ -182,6 +204,69 @@ export class Supervisor extends EventEmitter {
     // Formatfehler. Wer den Strom liest, hat das Problem nicht.
     const textBloecke: string[] = []
 
+    // Konto waehlen: bevorzugt, sonst das erste freie. Kein Konto nutzbar
+    // (z.B. lokale Entwicklung ohne erkannte Anmeldung) -> null, und dann
+    // bleibt env unten weg -- der Subprozess erbt process.env unveraendert,
+    // exakt das Verhalten von vor den Konten.
+    let konto = this.konten.waehlen()
+    const versuchteKonten = new Set<string>()
+    let resumeSessionId = o.resume
+    let ergebnis: string | null = null
+    let fehler: string | null = null
+
+    try {
+      // Ein Agent darf hier mehrfach ansetzen: laeuft das gewaehlte Konto ins
+      // Limit, wird es bis zum gemessenen (oder geschaetzten) Reset gesperrt
+      // und der Agent macht per resume mit dem naechsten freien Konto weiter,
+      // statt in waiting_ratelimit zu parken. versuchteKonten verhindert
+      // dabei einen Doppelwechsel: jedes Konto wird je Limitfehler-Zyklus
+      // hoechstens einmal versucht, sonst waere ein Ringschluss moeglich,
+      // wenn zwei Konten sich gegenseitig knapp vor dem Reset ablehnen.
+      while (true) {
+        if (konto) versuchteKonten.add(konto.name)
+        const versuch = await this.einzelnerVersuch(o, abort, textBloecke, konto, resumeSessionId)
+        ergebnis = versuch.ergebnis
+        fehler = versuch.fehler
+
+        if (!versuch.istLimit || !konto) break
+
+        const reset = this.limitStand?.fuenfStundenResetsAt ?? Date.now() + KONTO_SPERRE_VORGABE_MS
+        this.konten.sperren(konto.name, reset)
+        const naechstes = this.konten.waehlen(versuchteKonten)
+        if (!naechstes) break // alle Konten gesperrt -- altes Wartevehalten bleibt
+
+        resumeSessionId = this.agenten.get(k)?.sessionId ?? resumeSessionId
+        this.melden(
+          o.runId, o.agentId, 'protocol',
+          `Kontowechsel: ${konto.name} im Limit, weiter mit ${naechstes.name}`,
+          { von: konto.name, nach: naechstes.name, gesperrtBis: reset },
+        )
+        this.agentAendern(o.runId, o.agentId, { status: 'starting' })
+        konto = naechstes
+      }
+    } finally {
+      this.laufende.delete(k)
+    }
+
+    return { ergebnis, volltext: textBloecke.join('\n'), fehler }
+  }
+
+  /**
+   * Ein einzelner Versuch, den Agenten laufen zu lassen -- mit genau einem
+   * Konto. agentStarten ruft das ggf. mehrfach auf, wenn ein Konto ins Limit
+   * laeuft.
+   */
+  private async einzelnerVersuch(
+    o: AgentStartOptionen,
+    abort: AbortController,
+    textBloecke: string[],
+    konto: Konto | null,
+    resumeSessionId: string | undefined,
+  ): Promise<{ ergebnis: string | null; fehler: string | null; istLimit: boolean }> {
+    let ergebnis: string | null = null
+    let fehler: string | null = null
+    let istLimit = false
+
     try {
       const lauf = query({
         prompt: o.prompt,
@@ -191,7 +276,7 @@ export class Supervisor extends EventEmitter {
           model: o.model,
           maxTurns: o.maxTurns,
           maxBudgetUsd: o.maxBudgetUsd,
-          resume: o.resume,
+          resume: resumeSessionId,
           allowedTools: o.allowedTools,
           // Nur was die Fachrolle ausdruecklich nennt. Ein Coder braucht
           // keinen Browser, und ein Werkzeug, das niemand nutzt, ist nur
@@ -204,6 +289,27 @@ export class Supervisor extends EventEmitter {
           // Token-Deltas brauchen wir nicht: parent_tool_use_id ist dort immer
           // null, sie sind keinem Subagenten zuordenbar.
           includePartialMessages: false,
+          // CLAUDE_CONFIG_DIR nur fuer ein ZUSATZkonto explizit setzen. Fuer
+          // 'haupt' bleibt env absichtlich weg: der Subprozess erbt
+          // process.env unveraendert, genau wie vor den Konten -- das ist
+          // die einzige Stelle, an der ein CLAUDE_CODE_OAUTH_TOKEN aus
+          // /etc/cockpit/umgebung (die dokumentierte Alternative zur
+          // Datei-Anmeldung) noch wirken kann. Ein Zusatzkonto dagegen
+          // bekommt sein eigenes CLAUDE_CONFIG_DIR UND verliert
+          // CLAUDE_CODE_OAUTH_TOKEN/ANTHROPIC_API_KEY aus der geerbten
+          // Umgebung -- sonst wuerde jeder Aufruf ueber das Zusatzkonto
+          // gegen dessen API-Schluessel statt gegen sein Abo abgerechnet,
+          // falls einer der beiden zufaellig im Prozess des Daemons steht.
+          ...(konto && konto.name !== HAUPT_KONTO
+            ? {
+                env: {
+                  ...process.env,
+                  CLAUDE_CONFIG_DIR: konto.configDir,
+                  CLAUDE_CODE_OAUTH_TOKEN: undefined,
+                  ANTHROPIC_API_KEY: undefined,
+                },
+              }
+            : {}),
           canUseTool: (toolName: string, input: Record<string, unknown>) =>
             this.freigabeEinholen(o.runId, o.agentId, toolName, input),
         },
@@ -238,23 +344,23 @@ export class Supervisor extends EventEmitter {
       // Ein Ratenlimit ist kein Absturz, sondern ein Wartezustand -- die
       // Unterscheidung macht den Unterschied zwischen "Lauf ist tot" und
       // "Lauf schlaeft", und genau die war in loop.py die haeufigste Fehldiagnose.
-      const istLimit = USAGE_LIMIT_ERROR_PREFIXES.some((p) => text.includes(p))
+      istLimit = USAGE_LIMIT_ERROR_PREFIXES.some((p) => text.includes(p))
       fehler = text
       this.melden(
         o.runId, o.agentId, istLimit ? 'rate_limit' : 'error',
-        istLimit ? `Nutzungslimit: ${text.slice(0, 180)}` : `Fehler: ${text.slice(0, 180)}`,
-        { fehler: text, istLimit },
+        istLimit
+          ? `Nutzungslimit${konto ? ` (${konto.name})` : ''}: ${text.slice(0, 180)}`
+          : `Fehler: ${text.slice(0, 180)}`,
+        { fehler: text, istLimit, konto: konto?.name ?? null },
       )
       this.endzustandSetzen(o.runId, o.agentId, {
         status: istLimit ? 'waiting_ratelimit' : 'failed',
         endedAt: Date.now(),
         lastError: text,
       })
-    } finally {
-      this.laufende.delete(k)
     }
 
-    return { ergebnis, volltext: textBloecke.join('\n'), fehler }
+    return { ergebnis, fehler, istLimit }
   }
 
   private nachrichtVerarbeiten(runId: string, agentId: string, m: Record<string, unknown>): void {

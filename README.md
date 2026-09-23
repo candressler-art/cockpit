@@ -54,6 +54,38 @@ npx tauri build --no-bundle && ./deploy/installieren-desktop.sh
 Sie wird ueber `~/.local/bin/cockpit-start` gestartet -- ein Wrapper, der
 vorher Wispr Flow hochholt, das seinerseits Obsidian nachzieht.
 
+#### Die Huelle buendelt die Oberflaeche nicht mehr
+
+`src-tauri/src/main.rs` laedt `web/` nicht mehr zur Bauzeit ein (kein
+`frontendDist "../web"` mehr). Das Fenster oeffnet stattdessen direkt die
+Adresse aus `COCKPIT_DAEMON` (`WebviewUrl::External`) -- dieselbe Quelle, die
+auch der Browser sieht. Frueher gab es zwei Kopien der Oberflaeche: die
+gebuendelte in der installierten Binary und die aktuelle, die der Daemon
+selbst ausliefert. Beide liefen auseinander, weil ein Aendern von `web/`
+keinen Neubau der Huelle nach sich zog.
+
+Praktische Folge: **`npx tauri build` ist nur noch noetig, wenn sich
+`src-tauri/` selbst aendert** (Fenstergroesse, Mikrofon-Freigabe, WebGL-
+Einstellungen etc.). Aenderungen an `web/` wirken sofort, sobald der Daemon
+neu gestartet ist -- kein Neubuendeln, kein `installieren-desktop.sh` noetig.
+
+Gebuendelt (`frontendDist`, jetzt `web-huelle/`) ist nur noch eine winzige
+Ersatzseite `offline.html`: sie erscheint, wenn `main.rs` beim Start keinen
+TCP-Connect zum Daemon hinbekommt, zeigt "Server nicht erreichbar" und
+probiert selbst alle paar Sekunden weiter (per `fetch(..., {mode:'no-cors'})`,
+damit eine fehlende `COCKPIT_ORIGIN`-Freigabe den Test nicht verfaelscht),
+bis sie auf die Daemon-URL weiterleitet.
+
+Mikrofon (`web/sprachpegel.js`, `getUserMedia`) erteilt WebKitGTK nicht von
+selbst -- `main.rs` behandelt das `permission-request`-Signal der rohen
+`webkit2gtk::WebView` (per `with_webview`) und erlaubt Medien- und
+Benachrichtigungsanfragen ausschliesslich fuer die Herkunft des Daemons.
+Dieselbe Stelle setzt `HardwareAccelerationPolicy::Always` und
+`enable_webgl(true)`, weil `WEBKIT_DISABLE_DMABUF_RENDERER=1` (noetig gegen
+das leere Fenster unter Wayland/Hyprland) WebKit sonst die Grundlage nimmt,
+von sich aus einen beschleunigten Kontext fuer three.js im Vault-Tab
+anzulegen.
+
 ### Umgebungsvariablen
 
 | Variable | Voreinstellung | Bedeutung |
@@ -68,6 +100,7 @@ vorher Wispr Flow hochholt, das seinerseits Obsidian nachzieht.
 | `BESZEL_URL/USER/PASS` | — | Zugang zum Monitoring-Hub (sonst nur eigener Host) |
 | `PIPER_HOST/PORT` | `127.0.0.1:10200` | Sprachausgabe |
 | `COCKPIT_MCP_BROWSER` | — | ueberschreibt den Browser-MCP-Server |
+| `COCKPIT_KONTEN_DIR` | `~/.claude-konten` | Verzeichnis der Zusatzkonten (siehe unten) |
 
 ## Aufbau
 
@@ -87,6 +120,7 @@ vorher Wispr Flow hochholt, das seinerseits Obsidian nachzieht.
 | `src/vault.ts` | Index des Obsidian-Vaults: Titel, Wikilinks, Tags |
 | `src/stimme.ts` | Sprachausgabe ueber Piper (Wyoming-Protokoll) |
 | `src/konsole.ts` | Befehle mit Freigabepflicht |
+| `src/konten.ts` | mehrere Claude-Code-Konten: Erkennung, Wahl, Sperrung bei Limit |
 | `web/bus.js` | die eine WebSocket-Verbindung, Abonnements je Nachrichtentyp |
 | `web/tabs.js` | Tab-Registry und Router ueber den URL-Hash |
 | `web/tabs/*.js` | die fuenf Ansichten: Lauf, Chats, Vault, Konsole, Server |
@@ -127,6 +161,29 @@ Lauf starb an einem Formatfehler, der keiner war.
 `rate_limit_event` den echten Stand der Nutzungsfenster. Die gewichtete
 Tokenrechnung aus `loop.py` bleibt trotzdem, weil sie den Verbrauch einzelnen
 Agenten zuordnet — das können die Fensterwerte nicht.
+
+## Mehrere Konten
+
+Ein Konto ist nichts weiter als ein eigenes `CLAUDE_CONFIG_DIR`: eigene
+`.credentials.json`, eigenes `.claude.json`, eigenes `projects/`. Das
+Hauptkonto (`haupt`) ist `/home/claude/.claude`, unveraendert. Zusatzkonten
+legt `deploy/konto-hinzufuegen.sh <name>` unter `COCKPIT_KONTEN_DIR` an
+(Vorgabe `~/.claude-konten/<name>/`) und verlinkt deren `projects/` auf das
+des Hauptkontos, damit `resume` eine Session auch nach einem Kontowechsel
+wiederfindet -- der Projektschluessel unter `projects/` haengt am
+Arbeitsverzeichnis, nicht am Konto.
+
+`src/konten.ts` scannt dieses Verzeichnis bei jedem Zugriff neu (kein
+Zwischenspeicher), damit ein frisch angemeldetes Konto ohne Neustart des
+Daemons auftaucht. Nur ein Konto mit gueltiger `.credentials.json` gilt als
+nutzbar. Der Supervisor waehlt je Agentenstart das bevorzugte Konto, sonst das
+erste freie; laeuft ein Konto in ein Nutzungslimit, wird es bis zum
+gemessenen oder geschaetzten Reset gesperrt und der Agent macht per `resume`
+mit dem naechsten freien Konto weiter, statt in `waiting_ratelimit` zu parken
+-- sichtbar als Protokollzeile im Lauf-Log. Erst wenn alle Konten gesperrt
+sind, gilt das alte Warteverhalten. `GET /api/konten` und `POST /api/konten`
+lesen bzw. setzen den Vorzug; der Server-Tab zeigt die Konten mit Ampel, Abo
+und Sperrstatus.
 
 ## Fachrollen
 
@@ -188,6 +245,8 @@ kein Profil.
 | `/api/abbrechen` | POST | Agent oder ganzen Lauf abbrechen |
 | `/api/gesundheit` | GET | Status und letzter Limitstand |
 | `/api/rollen` | GET | verfuegbare Fachrollen |
+| `/api/konten` | GET | bekannte Konten mit Anmelde-, Sperr- und Vorzugsstatus |
+| `/api/konten` | POST | bevorzugtes Konto setzen (`name`, `null` hebt es auf) |
 | `/api/system` | GET | Auslastung beider Server |
 | `/api/chats?q=` | GET | Sessions suchen |
 | `/api/chats/<id>` | GET | eine Session als Beitraege |

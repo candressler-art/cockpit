@@ -215,6 +215,12 @@
   .hinweis{border:1px solid var(--surface0);border-left:3px solid var(--werkzeug);
     border-radius:6px;padding:9px 12px;margin-bottom:14px;font-size:12px;color:var(--subtext)}
   .hinweis code{font:11px/1 var(--mono);background:var(--crust);padding:2px 5px;border-radius:3px}
+  /* Konten -- dieselbe Kartensprache wie die Hosts (.hostkarte, siehe hud.css
+     fuer die Eckklammern), nur mit einer Zeile statt Ringen. */
+  .kontoliste{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));margin-bottom:18px}
+  .kontokarte{padding:10px 14px}
+  .kontozeile{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .kontoemail{font-size:11px;color:var(--subtext);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
   #stimmwahl{flex:0 0 auto;max-width:130px}
   @media (max-width:820px){ #stimmwahl{max-width:52px} }
   /* --- Tab "Chats" -------------------------------------------------------- */

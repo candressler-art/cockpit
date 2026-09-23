@@ -596,6 +596,18 @@ const server = createServer(async (req, res) => {
       return json(200, { rollen: rollenListe() })
     }
 
+    if (pfad === '/api/konten' && req.method === 'GET') {
+      return json(200, { konten: supervisor.kontenListe() })
+    }
+
+    if (pfad === '/api/konten' && req.method === 'POST') {
+      const k = (await koerperLesen(req)) as Record<string, unknown> | null
+      // Leerstring oder fehlendes Feld heben die Bevorzugung auf.
+      const name = k?.name ? String(k.name) : null
+      const ok = supervisor.bevorzugtesKontoSetzen(name)
+      return json(ok ? 200 : 404, { ok, konten: supervisor.kontenListe() })
+    }
+
     if (pfad === '/api/system' && req.method === 'GET') {
       // Den gepollten Stand ausliefern, nicht neu messen: sonst kaeme bei
       // jedem Neuladen der Seite eine CPU-Differenz ueber Millisekunden heraus.
