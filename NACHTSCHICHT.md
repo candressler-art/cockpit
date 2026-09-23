@@ -2,6 +2,41 @@
 
 ## Fuer Can (Kurzfassung)
 
+- **Durchgang 6, wichtigster Fund:** Ein echtes Speicherleck in Prioritaet 3
+  (Daemon-Robustheit) -- genau die Art Fehler, vor der ein eigener
+  Code-Kommentar schon warnte, aber der Fix dazu war nie verdrahtet.
+  `Supervisor.laufVergessen()` (`src/supervisor.ts`) existiert extra dafuer,
+  dass `agenten`- und `seq`-Map nicht ueber die ganze Prozesslaufzeit wachsen
+  ("bei einem Daemon, der wochenlang laeuft"), wurde aber **von nirgends im
+  Code aufgerufen** -- weder bei einem Orchestrator-Lauf noch bei einem
+  einfachen Chat-Lauf ueber `POST /api/lauf`. Beide bekommen bei jedem
+  Aufruf eine frische `runId` (anders als Chat-Fortsetzen/Konsole/Gespraech,
+  die eine feste `runId` je Sitzung wiederverwenden und denselben Map-Eintrag
+  ueberschreiben statt neue anzuhaeufen) -- jeder je gestartete Agent jedes
+  je gelaufenen Auftrags blieb dadurch fuer immer im Speicher. Behoben:
+  `supervisor.laufVergessen(runId)` jetzt in `daemon.ts` an beiden Stellen
+  aufgerufen, nachdem der Lauf wirklich zu Ende ist (`.finally()`, nach allen
+  Stellen, die noch lesend auf die Live-Agentenliste zugreifen). **Live
+  verifiziert** (siehe "Wie getestet" unten): ohne den Fix blieb nach einem
+  Testlauf ein Eintrag fuer immer stehen, mit dem Fix ist er nach
+  `laufVergessen` weg -- UND beide betroffenen HTTP-Routen (`/api/lauf`,
+  `/api/orchestrator`) laufen mit dem Fix unveraendert bis zum sauberen
+  `failed`-Endzustand durch, keine Regression.
+- **Weiterer Blick auf Prioritaet 3** (Vault, Konsole, Sprachausgabe/
+  -eingabe, Fachrollen, Sprachgespraech): `src/vault.ts`, `src/vaultZugriff.ts`,
+  `src/konsole.ts`, `src/rollen.ts`, `src/gespraech.ts`, `src/hoeren.ts`,
+  `src/stimme.ts` gegengelesen. Kein weiterer Fehler gefunden -- Details
+  unten unter "Erledigt (Durchgang 6)", inklusive der Stellen, die ich
+  gezielt auf Fehlerklassen wie falsche Fehlerbehandlung bei `maxBuffer`/
+  Timeout in der Konsole ueberprueft habe (per echtem Node-Experiment, nicht
+  nur Codelesen).
+- **Kleinere, bewusst nicht behobene Beobachtung:** Chat-Sitzungen
+  (`src/chats.ts`, `chat-<sessionId>` als Pseudo-`runId`) haben denselben
+  "eine `runId` bleibt fuer immer im Speicher"-Charakter wie das behobene
+  Leck, sind aber viel kleiner (ein Eintrag pro je ERSTELLTER Chat-Sitzung,
+  nicht pro Turn/Wechsel -- weiteres Fortschreiben ueberschreibt denselben
+  Map-Eintrag). Nicht angefasst: mit sehr vielen Chats ueber Monate waere das
+  trotzdem ein langsames Wachstum. Siehe "Offene Punkte" unten.
 - **Durchgang 5:** Prioritaet 2 (Desktop-App/Oberflaeche) zum ersten Mal
   angeschaut -- bisher hatte kein Durchgang dort angefangen. Playwright +
   Chromium liessen sich in dieser Umgebung doch installieren (kein
@@ -336,6 +371,148 @@ Nutzungsringe (`ring()`) vertragen `null` (noch nie gemessen) sichtbar
 anders als `0`. Nur Code gelesen, nicht visuell im Browser geprueft (siehe
 Prioritaet-2-Luecke).
 
+## Erledigt (Durchgang 6)
+
+### Speicherleck: `laufVergessen()` war nie verdrahtet
+
+**Commit:** "Daemon: laufVergessen() nach Orchestrator- und Einzellauf
+aufrufen" (siehe `git log`).
+
+**Befund:** `src/supervisor.ts`, `laufVergessen(runId)` loescht alle
+Eintraege in `this.agenten` (und `this.seq`) fuer eine `runId` -- der
+Kommentar direkt daneben sagt ausdruecklich, wozu: "seq und agenten wuchsen
+vorher ueber die ganze Prozesslaufzeit ... bei einem Daemon, der wochenlang
+laeuft, bleibt jeder Agent jedes Laufs im Speicher". Trotzdem rief KEINE
+Stelle im Code diese Funktion je auf (`grep -rn laufVergessen src/`
+zeigte nur die Definition selbst). Betroffen sind zwei Stellen in
+`daemon.ts`:
+- `orchestratorLaufStarten()`: jeder `POST /api/orchestrator`-Aufruf legt
+  eine neue `randomUUID()` als `runId` an; der Orchestrator-Agent selbst und
+  jeder Worker landen darunter in `this.agenten` und blieben dort auch nach
+  `orch.fahren(...)` fertig war.
+- `POST /api/lauf` (einfacher Einzelagenten-Lauf ohne Orchestrator, genutzt
+  von `web/tabs/lauf.js`): ebenfalls eine frische `runId` je Aufruf, derselbe
+  Effekt fuer den einen `chat`-Agenten.
+
+Zum Vergleich: Chat-Fortsetzen, Konsole (`KONSOLE_LAUF`) und Sprachgespraech
+(`GESPRAECH_LAUF`) nutzen dagegen eine FESTE `runId` je Sitzung wieder --
+jeder neue Aufruf ueberschreibt denselben Map-Eintrag (`agentAendern`/`set`
+mit demselben Schluessel), es waechst dort nichts. Nur die beiden
+"jeder Aufruf eine neue runId"-Pfade waren betroffen.
+
+**Auswirkung in der Praxis:** Bei Cans tatsaechlicher Nutzung (Orchestrator-
+Auftraege mit mehreren Workern, ueber Wochen/Monate) waechst
+`this.agenten` unbegrenzt weiter -- jeder Agent jedes je gelaufenen Auftrags
+bleibt fuer immer im Prozessspeicher, obwohl er nach Laufende nur noch aus
+der Datenbank gelesen wird (`GET /api/lauf/<id>` liest bereits `db.agentenLesen()`,
+NIE die Live-Map -- das Verhalten der Oberflaeche war also nie falsch,
+nur der Speicherverbrauch stieg unbemerkt). Bei einem Daemon, der laut
+README "wochenlang" durchlaufen soll, ist das genau das schleichende
+Problem, vor dem der Code-Kommentar warnt.
+
+**Fix:** `supervisor.laufVergessen(runId)` in `daemon.ts` an beiden Stellen
+in ein `.finally()` gehaengt, das erst nach `db.runBeenden(...)` und nach
+jeder Stelle greift, die noch lesend auf `supervisor.agentenListe(runId)`
+zugreift (z.B. die `weightedTokens`-Summe fuer die Discord-Endnachricht) --
+also garantiert erst, wenn der Lauf wirklich zu Ende ist und niemand mehr
+die Live-Ansicht braucht. `GET /api/lauf/<id>`, `GET /api/vault/graph?run=`
+und `/api/abbrechen` lesen ohnehin aus der DB bzw. betreffen nur noch
+laufende Agenten -- keine dieser Stellen haette nach dem Aufraeumen anders
+reagiert als bei einem Lauf, der nie gestartet wurde (leere Liste), was fuer
+einen bereits beendeten Lauf ohnehin das richtige Verhalten ist.
+
+**Wie getestet:**
+- `npx tsc && npm test`: weiterhin 49/49 gruen, keine Regression.
+- Live, direkt gegen `dist/supervisor.js` (Skript in `/tmp/nachtschicht/`,
+  nicht committet -- passt zur Konvention dieses Repos, dass `agentStarten()`
+  die echte CLI aufruft und deshalb nicht in die automatisierte `npm
+  test`-Suite gehoert, siehe `tests/chats.test.mjs`, das genau deswegen
+  nie `Supervisor` importiert): `Supervisor` mit dem Fake-Konto `haupt`
+  (`CLAUDE_CONFIG_DIR=/tmp/nachtschicht/claude`) einen Agenten unter einer
+  frischen `runId` starten lassen (schlaegt sofort mit dem erwarteten
+  "Not logged in" fehl, siehe Durchgang-2-Fund). Ergebnis: vor
+  `laufVergessen()` `agentenListe(runId).length === 1`, danach `=== 0` --
+  genau der Beweis fuer das Leck und den Fix.
+- Live gegen die volle Testinstanz (Port 8798, derselbe Aufbau wie in den
+  Vorgaengern): `POST /api/lauf` UND `POST /api/orchestrator` (mit
+  `maxRunden:1`) je einmal ausgeloest. Beide enden weiterhin sauber als
+  `status:'failed'` in der `runs`-Tabelle (per SQLite direkt gelesen, nicht
+  ueber eine eigene API-Route -- es gibt keine `GET /api/laeufe/<id>/status`,
+  nur `agenten`/`ereignisse`/`freigaben` in `GET /api/lauf/<id>`), keine
+  Exception im Daemon-Log, keine unbehandelte Promise-Ablehnung. Bestaetigt:
+  die neue `.finally()`-Verdrahtung aendert am Aussenverhalten nichts,
+  ausser dass der Speicher jetzt tatsaechlich wieder frei wird.
+- Testdaemon (PID 682161) danach sauber ueber die eigene PID beendet,
+  Skript und temporaere DB-Dateien aus `/tmp/nachtschicht/` wieder entfernt.
+
+### Vault (`src/vault.ts`, `src/vaultZugriff.ts`) -- gegengelesen, kein Fehler gefunden
+
+Kein einziger automatisierter Test existierte bisher fuer `vault.ts`
+(`vaultZugriff.ts` hatte schon Tests in `chats.test.mjs`, siehe Durchgang-2/3-
+Arbeit an `autoErlauben`). Gegengelesen:
+- Die WIKILINK-Regex deckt `[[Ziel]]`, `[[Ziel|Text]]`, `[[Ziel#Abschnitt]]`
+  und die Kombination korrekt ab (alle drei optionalen Gruppen unabhaengig
+  voneinander).
+- Selbstverweise (`nach === von`) werden weder als Kante noch als "lose"
+  gezaehlt -- konsistent mit der Absicht, nur echte Verweise zwischen
+  verschiedenen Notizen zu zeigen.
+- Mehrfachverweise auf dieselbe Notiz werden ueber `JSON.stringify([von,
+  nach])` in einem Set entdoppelt -- korrekt, auch wenn `von`/`nach` nie
+  Zeichen enthalten, die das verfaelschen koennten (beides sind interne
+  Datei-Ids ohne Nutzereingabe).
+- `fs.watch(VAULT, {recursive:true}, ...)`: die Dokumentation warnt, `recursive`
+  sei nur unter macOS/Windows verlaesslich -- per echtem Experiment auf
+  dieser Maschine (Node 22, Linux) nachgeprueft: funktioniert (eine
+  verschachtelte Dateiaenderung loeste zuverlaessig ein `rename`-Ereignis
+  aus). Kein Fehler, aber falls ein spaeterer Node-Versions-Wechsel das
+  je aendern sollte: der Daemon holt den Graphen ohnehin per Zeitgeber
+  regelmaessig nach (siehe Kommentar in `vaultBeobachten()`), also waere
+  ein Ausfall der Beobachtung nicht katastrophal, nur traeger.
+
+### Konsole (`src/konsole.ts`) -- Fehlerbehandlung bei Timeout/maxBuffer per echtem Experiment nachgeprueft
+
+Zwei Zweige in der `execFile`-Callback-Behandlung (`konsoleBefehl`) sahen auf
+den ersten Blick nach einer moeglichen Verwechslung aus: ein durch `timeout`
+abgebrochener Befehl UND ein Befehl, dessen Ausgabe `maxBuffer` (256 KiB)
+sprengt, fuehren beide dazu, dass der Kindprozess per SIGKILL beendet wird --
+faelschlich als "Timeout" (`grund: 'abgebrochen nach Xs'`) angezeigt zu
+bekommen, waere fuer den Nutzer irreführend gewesen. Per echtem Node-
+Experiment (nicht nur Codelesen) nachgeprueft, was Node in beiden Faellen
+tatsaechlich liefert:
+- Bei `timeout`: `error.killed === true`.
+- Bei `maxBuffer`-Ueberschreitung: `error.killed === undefined` (falsy),
+  `error.message === 'stdout maxBuffer length exceeded'`, `exitCode === null`.
+
+Der Code prueft `killed` zuerst und faellt sonst auf `exitCode === null` mit
+`fehler.message` zurueck -- landet bei `maxBuffer` also korrekt im zweiten
+Zweig mit der zutreffenden Meldung, nicht im ersten mit der falschen. Kein
+Fehler, nur durch das Experiment jetzt sicher statt vermutet.
+
+### Fachrollen (`src/rollen.ts`), Sprachgespraech (`src/gespraech.ts`), Sprachausgabe/-eingabe (`src/hoeren.ts`, `src/stimme.ts`) -- gegengelesen, kein Fehler gefunden
+
+- `rollen.ts`: laedt beim Start aus `rollen/*.md`, wirft beim kleinsten
+  Problem (Verzeichnis fehlt, keine Vorgaberolle `coder`) einen echten
+  Startfehler statt einer stillen Warnung -- bewusst so gebaut (siehe
+  Kommentar: sonst wuerde ein Tippfehler im Pfad alle Worker unbemerkt von
+  jeder Werkzeugbeschraenkung befreien). Kein Fehler gefunden.
+- `gespraech.ts`: `sessionId` fuer die naechste Gespraechsrunde kommt aus
+  `supervisor.agentenListe(GESPRAECH_LAUF).find(...)` -- das funktioniert nur
+  zuverlaessig, WEIL `GESPRAECH_LAUF` (wie `KONSOLE_LAUF`) eine feste `runId`
+  ist und der Agent nach Laufende (anders als beim jetzt gefixten Leck) nie
+  aus der Map entfernt wird. Waere `laufVergessen()` hier je versehentlich
+  aufgerufen worden, waere jedes Sprachgespraech nach der ersten Runde ohne
+  Gedaechtnis gewesen -- deshalb der Fix in diesem Durchgang bewusst NUR an
+  den beiden Stellen mit frischer `runId` pro Aufruf, nicht generisch nach
+  jedem `agentStarten()`.
+- `hoeren.ts`/`stimme.ts`: TCP-Verbindung zu Whisper/Piper, Timeout- und
+  Fehlerpfade (`sock.on('error'/'close')`, `fertig`-Wache gegen
+  Doppelaufloesung) wirken sorgfaeltig gebaut und sind bereits indirekt durch
+  `tests/wyoming.test.mjs`/`tests/wav.test.mjs`/`tests/audio.test.mjs`
+  abgedeckt (die tieferliegenden Protokoll-/Resampling-Funktionen, die diese
+  beiden Module nutzen). Ein echter Whisper/Piper-Container stand in dieser
+  Nachtschicht nicht zur Verfuegung, also nicht live gegen einen echten
+  Dienst getestet -- nur gegengelesen, kein Fehler gefunden.
+
 ## Erledigt (Durchgang 5)
 
 ### Prioritaet 2 (Desktop-App/Oberflaeche) -- erstmals visuell geprueft, kein Bug gefunden
@@ -502,9 +679,28 @@ Code gelesen):**
 
 ## Offene Punkte (Prioritaet 3 -- Rest des Cockpits)
 
-- [ ] Vault, Konsole, Orchestrator/Laeufe, Sprachausgabe/-eingabe: noch
-  nicht angeschaut in dieser Nachtschicht (weder Durchgang 1 noch 2, soweit
-  rekonstruierbar).
+- [x] **Daemon-Robustheit -- Speicherleck:** in Durchgang 6 gefunden und
+  behoben (`laufVergessen()` war nie verdrahtet, siehe "Erledigt" oben).
+  Live verifiziert, kein automatisierter Test (passt nicht zur Konvention
+  dieses Repos, echte SDK-Aufrufe aus `npm test` herauszuhalten).
+- [ ] **Kleines, verbleibendes Wachstum bei Chat-Sitzungen:** jede neu
+  ERSTELLTE Chat-Sitzung (`chat-<sessionId>` als Pseudo-`runId` in
+  `chats.ts`) bekommt einen dauerhaften Eintrag in `supervisor.agenten`, der
+  nie entfernt wird (weiteres Fortschreiben derselben Sitzung ueberschreibt
+  ihn nur, entfernt ihn nicht). Viel kleiner als das behobene Leck (ein
+  Eintrag pro Chat, nicht pro Lauf/Worker), aber ueber Monate mit vielen
+  Chats trotzdem ein langsames Wachstum. Nicht angefasst: unklar, ob Can
+  das je stoert, und ein Fix braeuchte eine Entscheidung, WANN eine
+  Chat-Sitzung als "verworfen" gilt (nie geloescht in der DB, jederzeit
+  wieder fortsetzbar) -- eher eine Produktentscheidung als ein klarer Bug.
+- [x] Vault (`src/vault.ts`, `src/vaultZugriff.ts`), Konsole
+  (`src/konsole.ts`), Sprachausgabe/-eingabe (`src/hoeren.ts`,
+  `src/stimme.ts`), Fachrollen (`src/rollen.ts`), Sprachgespraech
+  (`src/gespraech.ts`): in Durchgang 6 erstmals gegengelesen (vorher noch
+  nie angeschaut), kein weiterer Fehler gefunden. Details siehe "Erledigt
+  (Durchgang 6)" oben. Orchestrator/Laeufe (`src/orchestrator.ts`) selbst
+  (nicht nur das Speicherleck aussen drum) noch NICHT gegengelesen --
+  naechster Kandidat fuer einen kommenden Durchgang.
 
 ## Testinstanz-Hinweise fuer den naechsten Durchgang
 
