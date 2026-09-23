@@ -517,6 +517,30 @@ export default {
     if (kontenIntervall) clearInterval(kontenIntervall)
     kontenIntervall = setInterval(() => { if (vorn) void kontenLaden() }, 15_000)
 
+    // Erstbefuellung des Agenten-Panels: die obigen abonnieren()-Aufrufe
+    // zeigen nur, was ab JETZT passiert. Laeuft schon ein Auftrag, wenn diese
+    // Seite (neu) geladen wird -- der Normalfall bei einem Reload waehrend
+    // eines laengeren Orchestrator-Laufs --, bliebe die Karte sonst bis zum
+    // naechsten Ereignis leer, obwohl laengst etwas laeuft. Anders als der
+    // Lauf-Tab (der /api/lauf/<id> beim Mount abfragt) hatte Zentrale bisher
+    // ueberhaupt keinen REST-Weg fuer den aktuellen Stand.
+    try {
+      const { laeufe } = await fetch(api('/api/laeufe')).then((r) => r.json())
+      for (const l of (laeufe ?? []).filter((x) => x.status === 'running')) {
+        const d = await fetch(api(`/api/lauf/${l.run_id}`)).then((r) => r.json())
+        for (const a of d.agenten ?? []) {
+          const neu = {
+            agentId: a.agent_id, label: a.label, status: a.status, role: a.role,
+            fachrolle: a.fachrolle, weightedTokens: a.weighted_tokens,
+          }
+          const i = letzteAgenten.findIndex((x) => x.agentId === neu.agentId)
+          if (i >= 0) letzteAgenten[i] = neu
+          else letzteAgenten.push(neu)
+        }
+      }
+      agentenZeichnen()
+    } catch { /* kein Beinbruch: die Karte bleibt leer, bis das erste Live-Ereignis kommt */ }
+
     // Die verfuegbaren Fachrollen anzeigen: ohne sie zu kennen schreibt
     // niemand eine AN-ROLLE-Zeile.
     try {
