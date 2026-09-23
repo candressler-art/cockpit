@@ -13,6 +13,7 @@
 
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
+import type { LimitStand } from './typen.js'
 
 export interface Konto {
   name: string
@@ -230,4 +231,73 @@ export class KontenVerwaltung {
 /** Ob COCKPIT_KONTEN_DIR (oder die Vorgabe) ueberhaupt existiert -- nur fuer Diagnose. */
 export function zusatzVerzeichnisDa(): boolean {
   return existsSync(zusatzVerzeichnis())
+}
+
+/**
+ * Bis wann ein Konto gesperrt gehoert, wenn es gerade ins Limit gelaufen ist.
+ * Reine Funktion, damit sich die Prioritaet ohne einen echten Limitfehler
+ * pruefen laesst.
+ *
+ * Reihenfolge, wie von Can verlangt:
+ *   1. `resetsAt` des BINDENDEN Limits -- das Feld, das rate_limit_event fuer
+ *      genau den Status traegt, der gerade die Ablehnung ausgeloest hat.
+ *   2. Sonst passend zu `rateLimitType`: 'seven_day*' nimmt siebenTageResetsAt,
+ *      'five_hour' nimmt fuenfStundenResetsAt -- vorher stand hier immer
+ *      fuenfStundenResetsAt, auch wenn in Wahrheit das Wochenfenster griff,
+ *      und das Konto galt dann Stunden zu frueh wieder als frei.
+ *   3. Sonst die Vorgabe (`vorgabeMs` ab `jetzt`) -- lieber zu vorsichtig
+ *      gesperrt als ein Konto, das gleich wieder ins selbe Limit laeuft.
+ *
+ * Vorsicht bei 'seven_day_opus', 'seven_day_sonnet' und
+ * 'seven_day_overage_included': die zaehlen hier wie 'seven_day', weil sie
+ * alle das Wochenfenster meinen, nur mit einer Modelleinschraenkung oder
+ * Overage-Herkunft. 'overage' selbst passt zu keinem der beiden Felder und
+ * faellt auf die Vorgabe zurueck.
+ */
+export function sperrzeitpunktAusLimitstand(
+  stand: Pick<LimitStand, 'resetsAt' | 'rateLimitType' | 'fuenfStundenResetsAt' | 'siebenTageResetsAt'> | null,
+  jetzt: number,
+  vorgabeMs: number,
+): number {
+  if (stand) {
+    if (typeof stand.resetsAt === 'number') return stand.resetsAt
+    const typ = stand.rateLimitType ?? ''
+    if (typ.startsWith('seven_day') && typeof stand.siebenTageResetsAt === 'number') {
+      return stand.siebenTageResetsAt
+    }
+    if (typ === 'five_hour' && typeof stand.fuenfStundenResetsAt === 'number') {
+      return stand.fuenfStundenResetsAt
+    }
+  }
+  return jetzt + vorgabeMs
+}
+
+/**
+ * Kurzer Fortsetzungsprompt nach einem Kontowechsel mitten im Lauf.
+ *
+ * `resume` haengt an dieselbe Session an -- schickt man dort den kompletten
+ * Originalauftrag noch einmal, steht er zweimal in der Konversation, einmal
+ * schon (teilweise) bearbeitet, einmal als vermeintlich neuer Auftrag.
+ */
+export const KONTOWECHSEL_FORTSETZUNGSPROMPT =
+  'Du wurdest durch ein Nutzungslimit unterbrochen. Mach genau dort weiter, wo du aufgehoert hast.'
+
+/**
+ * Waehlt Prompt fuer einen (Wieder-)Versuch. Reine Funktion, damit sich der
+ * Kern ohne SDK-Aufruf testen laesst.
+ *
+ * Ein Kontowechsel MIT bekannter sessionId bekommt den kurzen
+ * Fortsetzungsprompt -- resume traegt schon die ganze bisherige Konversation,
+ * der Originalauftrag stuende sonst doppelt drin. Ohne sessionId (der
+ * allererste Versuch ist schon ins Limit gelaufen, bevor ueberhaupt eine
+ * Session entstand) bleibt nur der Originalprompt: es gibt nichts, wovon
+ * "genau dort weiter" sprechen koennte.
+ */
+export function versuchPrompt(
+  originalPrompt: string,
+  resumeSessionId: string | undefined,
+  istKontowechsel: boolean,
+): string {
+  if (istKontowechsel && resumeSessionId) return KONTOWECHSEL_FORTSETZUNGSPROMPT
+  return originalPrompt
 }

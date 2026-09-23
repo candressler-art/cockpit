@@ -10,7 +10,14 @@ import { EventEmitter } from 'node:events'
 import { query, USAGE_LIMIT_ERROR_PREFIXES, type McpServerConfig } from '@anthropic-ai/claude-agent-sdk'
 import type { CockpitDb } from './db.js'
 import { einordnen } from './normalisieren.js'
-import { KontenVerwaltung, HAUPT_KONTO, type Konto, type KontoMitZustand } from './konten.js'
+import {
+  KontenVerwaltung,
+  HAUPT_KONTO,
+  sperrzeitpunktAusLimitstand,
+  versuchPrompt,
+  type Konto,
+  type KontoMitZustand,
+} from './konten.js'
 import {
   limitStandLesen,
   tokensWiegen,
@@ -70,8 +77,21 @@ export class Supervisor extends EventEmitter {
   private seq = new Map<string, number>()
   private agenten = new Map<string, AgentState>()
   private laufende = new Map<string, { abort: AbortController }>()
-  /** Letzter gemessener Limitstand des Kontos. Gilt kontoweit, nicht je Lauf. */
+  /**
+   * Letzter gemessener Limitstand -- ueber ALLE Konten hinweg, vom zuletzt
+   * aktiven. Bleibt so fuer /api/gesundheit, das laut Vorgabe kompatibel
+   * bleiben soll und keinen Kontonamen erwartet.
+   */
   private limitStand: LimitStand | null = null
+  /**
+   * Derselbe Stand, aber je Konto -- daraus entscheidet sich, WIE LANGE ein
+   * Konto beim Wechsel gesperrt wird. this.limitStand allein reicht dafuer
+   * nicht: laeuft Konto A ins Limit und der Agent macht mit Konto B weiter,
+   * ueberschreibt dessen naechstes rate_limit_event denselben gemeinsamen
+   * Stand -- und A wuerde bei einem spaeteren Wechsel mit B's Reset-Zeit
+   * gesperrt, nicht mit seiner eigenen.
+   */
+  private limitStandJeKonto = new Map<string, LimitStand>()
   private offeneFreigaben = new Map<
     string,
     { aufloesen: (erlaubt: boolean, grund: string | null) => void; anfrage: PermissionRequest }
@@ -211,6 +231,11 @@ export class Supervisor extends EventEmitter {
     let konto = this.konten.waehlen()
     const versuchteKonten = new Set<string>()
     let resumeSessionId = o.resume
+    // Nur ab dem ZWEITEN Versuch (also nach einem echten Kontowechsel) geht
+    // der kurze Fortsetzungsprompt raus statt o.prompt -- der allererste
+    // Versuch bekommt immer den echten Auftrag, ob mit oder ohne aeusseres
+    // o.resume.
+    let istKontowechsel = false
     let ergebnis: string | null = null
     let fehler: string | null = null
 
@@ -224,24 +249,36 @@ export class Supervisor extends EventEmitter {
       // wenn zwei Konten sich gegenseitig knapp vor dem Reset ablehnen.
       while (true) {
         if (konto) versuchteKonten.add(konto.name)
-        const versuch = await this.einzelnerVersuch(o, abort, textBloecke, konto, resumeSessionId)
+        const versuch = await this.einzelnerVersuch(
+          o, abort, textBloecke, konto, resumeSessionId, istKontowechsel,
+        )
         ergebnis = versuch.ergebnis
         fehler = versuch.fehler
 
         if (!versuch.istLimit || !konto) break
 
-        const reset = this.limitStand?.fuenfStundenResetsAt ?? Date.now() + KONTO_SPERRE_VORGABE_MS
+        // Sperrzeit aus dem LIMITSTAND DIESES KONTOS, nicht aus dem
+        // zuletzt gesehenen ueberhaupt -- der koennte laengst von einem
+        // anderen Konto ueberschrieben sein. Und passend zum Fenster, das
+        // wirklich griff (5h/7d), nicht immer 5h.
+        const standDesKontos = this.limitStandJeKonto.get(konto.name) ?? null
+        const reset = sperrzeitpunktAusLimitstand(standDesKontos, Date.now(), KONTO_SPERRE_VORGABE_MS)
         this.konten.sperren(konto.name, reset)
         const naechstes = this.konten.waehlen(versuchteKonten)
         if (!naechstes) break // alle Konten gesperrt -- altes Wartevehalten bleibt
 
         resumeSessionId = this.agenten.get(k)?.sessionId ?? resumeSessionId
+        istKontowechsel = true
         this.melden(
           o.runId, o.agentId, 'protocol',
           `Kontowechsel: ${konto.name} im Limit, weiter mit ${naechstes.name}`,
           { von: konto.name, nach: naechstes.name, gesperrtBis: reset },
         )
-        this.agentAendern(o.runId, o.agentId, { status: 'starting' })
+        // endedAt/lastError zuruecksetzen -- einzelnerVersuch hat sie gerade
+        // erst gesetzt (Endzustand des misslungenen Versuchs), und ohne das
+        // stuende der Agent in der Oberflaeche als beendet da, obwohl er
+        // gleich mit dem naechsten Konto weitermacht.
+        this.agentAendern(o.runId, o.agentId, { status: 'starting', endedAt: null, lastError: null })
         konto = naechstes
       }
     } finally {
@@ -262,6 +299,7 @@ export class Supervisor extends EventEmitter {
     textBloecke: string[],
     konto: Konto | null,
     resumeSessionId: string | undefined,
+    istKontowechsel: boolean,
   ): Promise<{ ergebnis: string | null; fehler: string | null; istLimit: boolean }> {
     let ergebnis: string | null = null
     let fehler: string | null = null
@@ -269,7 +307,11 @@ export class Supervisor extends EventEmitter {
 
     try {
       const lauf = query({
-        prompt: o.prompt,
+        // Nach einem Kontowechsel MIT bekannter sessionId ersetzt der kurze
+        // Fortsetzungsprompt den Originalauftrag -- der steckt schon in der
+        // Session, die resume mitbringt. Ohne sessionId (Limit schon vor der
+        // ersten Nachricht) bleibt es beim Originalauftrag.
+        prompt: versuchPrompt(o.prompt, resumeSessionId, istKontowechsel),
         options: {
           cwd: o.cwd,
           abortController: abort,
@@ -316,7 +358,7 @@ export class Supervisor extends EventEmitter {
       })
 
       for await (const nachricht of lauf) {
-        this.nachrichtVerarbeiten(o.runId, o.agentId, nachricht as Record<string, unknown>)
+        this.nachrichtVerarbeiten(o.runId, o.agentId, nachricht as Record<string, unknown>, konto?.name ?? null)
         const m = nachricht as Record<string, unknown>
         if (m.type === 'assistant') {
           const inhalt = ((m.message as Record<string, unknown>)?.content ?? []) as Record<
@@ -331,11 +373,41 @@ export class Supervisor extends EventEmitter {
         }
         if (m.type === 'result') {
           ergebnis = typeof m.result === 'string' ? m.result : null
-          if (m.is_error === true) fehler = `Lauf endete mit is_error (subtype=${String(m.subtype)})`
+          if (m.is_error === true) {
+            // Der Fehlertext steckt je nach Subtype an verschiedenen
+            // Stellen: bei subtype 'success' (ja, auch MIT is_error:true --
+            // so dokumentiert das SDK selbst: "success" traegt im Fehlerfall
+            // den Fehlertext in `result`) im `result`-Feld, bei den eigenen
+            // Fehler-Subtypes (error_during_execution, error_max_turns, ...)
+            // in `errors`, weil es dort gar kein `result`-Feld gibt.
+            //
+            // Vorher wurde ein Nutzungslimit nur erkannt, wenn die SDK es
+            // als geworfene Exception lieferte (catch-Zweig unten). Kommt es
+            // stattdessen als ganz normale `result`-Nachricht mit
+            // is_error:true durch, fiel es bisher unter das allgemeine
+            // "Lauf endete mit is_error" und landete als 'failed' statt als
+            // Limit -- kein Kontowechsel, kein Warten, einfach ein
+            // gescheiterter Agent.
+            const text =
+              typeof m.result === 'string' && m.result
+                ? m.result
+                : Array.isArray(m.errors)
+                  ? m.errors.filter((x): x is string => typeof x === 'string').join('; ')
+                  : ''
+            istLimit = USAGE_LIMIT_ERROR_PREFIXES.some((p) => text.includes(p))
+            fehler = istLimit ? text : `Lauf endete mit is_error (subtype=${String(m.subtype)})`
+          }
         }
       }
+      if (istLimit) {
+        this.melden(
+          o.runId, o.agentId, 'rate_limit',
+          `Nutzungslimit${konto ? ` (${konto.name})` : ''}: ${(fehler ?? '').slice(0, 180)}`,
+          { fehler, istLimit, konto: konto?.name ?? null, quelle: 'result' },
+        )
+      }
       this.endzustandSetzen(o.runId, o.agentId, {
-        status: fehler ? 'failed' : 'done',
+        status: istLimit ? 'waiting_ratelimit' : fehler ? 'failed' : 'done',
         endedAt: Date.now(),
         lastError: fehler,
       })
@@ -363,7 +435,12 @@ export class Supervisor extends EventEmitter {
     return { ergebnis, fehler, istLimit }
   }
 
-  private nachrichtVerarbeiten(runId: string, agentId: string, m: Record<string, unknown>): void {
+  private nachrichtVerarbeiten(
+    runId: string,
+    agentId: string,
+    m: Record<string, unknown>,
+    kontoName: string | null = null,
+  ): void {
     const z = einordnen(m)
     if (!z) return
 
@@ -395,7 +472,11 @@ export class Supervisor extends EventEmitter {
     if (m.type === 'rate_limit_event') {
       const stand = limitStandLesen(m)
       if (stand) {
+        // Kontoweit fuer /api/gesundheit (zuletzt aktives Konto, wie
+        // bisher) UND je Konto, damit eine spaetere Sperre den RICHTIGEN
+        // Reset-Zeitpunkt bekommt.
         this.limitStand = stand
+        if (kontoName) this.limitStandJeKonto.set(kontoName, stand)
         this.emit('limit', stand)
       }
     }

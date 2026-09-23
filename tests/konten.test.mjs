@@ -1,6 +1,11 @@
 // Testet die Kontowahl gegen das gebaute Modul.
 // Vorher `npm run build`, danach `node tests/konten.test.mjs`.
-import { kontoWaehlen } from '../dist/konten.js'
+import {
+  kontoWaehlen,
+  sperrzeitpunktAusLimitstand,
+  versuchPrompt,
+  KONTOWECHSEL_FORTSETZUNGSPROMPT,
+} from '../dist/konten.js'
 
 let ok = 0, gesamt = 0
 const pruefe = (name, bedingung) => {
@@ -77,6 +82,79 @@ const JETZT = 1_000_000
   const gesperrt = new Map([['haupt', null], ['zweit', null], ['dritt', null]])
   const r = kontoWaehlen(konten, gesperrt, 'unbekannt', JETZT)
   pruefe('unbekanntes bevorzugtes Konto: faellt auf erstes freies zurueck', r === 'haupt')
+}
+
+// --- 8. sperrzeitpunktAusLimitstand: welches Reset-Feld zaehlt -------------
+const VORGABE_MS = 5 * 60 * 60 * 1000
+
+{
+  const r = sperrzeitpunktAusLimitstand(null, JETZT, VORGABE_MS)
+  pruefe('kein Limitstand: Vorgabe ab jetzt', r === JETZT + VORGABE_MS)
+}
+{
+  // resetsAt des bindenden Limits geht vor JEDEM anderen Feld -- auch wenn
+  // rateLimitType und die Fensterfelder etwas anderes nahelegen wuerden.
+  const stand = {
+    resetsAt: JETZT + 999, rateLimitType: 'five_hour',
+    fuenfStundenResetsAt: JETZT + 111, siebenTageResetsAt: JETZT + 222,
+  }
+  const r = sperrzeitpunktAusLimitstand(stand, JETZT, VORGABE_MS)
+  pruefe('resetsAt des bindenden Limits hat Vorrang', r === JETZT + 999)
+}
+{
+  // Kernfall des gemeldeten Fehlers: Wochenlimit greift, aber es wuerde
+  // faelschlich fuenfStundenResetsAt genommen, wenn man nicht auf
+  // rateLimitType achtet.
+  const stand = {
+    resetsAt: undefined, rateLimitType: 'seven_day',
+    fuenfStundenResetsAt: JETZT + 111, siebenTageResetsAt: JETZT + 7 * 86400 * 1000,
+  }
+  const r = sperrzeitpunktAusLimitstand(stand, JETZT, VORGABE_MS)
+  pruefe('seven_day ohne resetsAt: siebenTageResetsAt, nicht fuenfStunden', r === JETZT + 7 * 86400 * 1000)
+}
+{
+  // Modell- oder Overage-Varianten des Wochenlimits zaehlen wie seven_day.
+  for (const typ of ['seven_day_opus', 'seven_day_sonnet', 'seven_day_overage_included']) {
+    const stand = { resetsAt: undefined, rateLimitType: typ, siebenTageResetsAt: JETZT + 42 }
+    const r = sperrzeitpunktAusLimitstand(stand, JETZT, VORGABE_MS)
+    pruefe(`${typ} zaehlt wie seven_day`, r === JETZT + 42)
+  }
+}
+{
+  const stand = { resetsAt: undefined, rateLimitType: 'five_hour', fuenfStundenResetsAt: JETZT + 55 }
+  const r = sperrzeitpunktAusLimitstand(stand, JETZT, VORGABE_MS)
+  pruefe('five_hour ohne resetsAt: fuenfStundenResetsAt', r === JETZT + 55)
+}
+{
+  // rateLimitType passt zu keinem Fenster (z.B. 'overage') UND kein
+  // resetsAt -- Vorgabe, nicht raten.
+  const stand = { resetsAt: undefined, rateLimitType: 'overage', fuenfStundenResetsAt: JETZT + 1, siebenTageResetsAt: JETZT + 2 }
+  const r = sperrzeitpunktAusLimitstand(stand, JETZT, VORGABE_MS)
+  pruefe('unpassender rateLimitType ohne resetsAt: Vorgabe', r === JETZT + VORGABE_MS)
+}
+{
+  // rateLimitType passend, aber das zugehoerige Feld fehlt -- auch dann Vorgabe.
+  const stand = { resetsAt: undefined, rateLimitType: 'seven_day', siebenTageResetsAt: undefined }
+  const r = sperrzeitpunktAusLimitstand(stand, JETZT, VORGABE_MS)
+  pruefe('passender Typ, aber Feld fehlt: Vorgabe', r === JETZT + VORGABE_MS)
+}
+
+// --- 9. versuchPrompt: Originalauftrag vs. Fortsetzungsprompt --------------
+{
+  const r = versuchPrompt('Mach X.', 'sess-123', false)
+  pruefe('kein Kontowechsel: Originalprompt, trotz sessionId', r === 'Mach X.')
+}
+{
+  const r = versuchPrompt('Mach X.', undefined, false)
+  pruefe('kein Kontowechsel, keine sessionId: Originalprompt', r === 'Mach X.')
+}
+{
+  const r = versuchPrompt('Mach X.', 'sess-123', true)
+  pruefe('Kontowechsel MIT sessionId: Fortsetzungsprompt', r === KONTOWECHSEL_FORTSETZUNGSPROMPT)
+}
+{
+  const r = versuchPrompt('Mach X.', undefined, true)
+  pruefe('Kontowechsel OHNE sessionId: bleibt beim Originalprompt', r === 'Mach X.')
 }
 
 console.log(`\n${ok}/${gesamt} bestanden`)
