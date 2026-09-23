@@ -342,7 +342,12 @@ async function pollSchritt() {
   freigabenZeichnen(r.freigaben ?? [])
 
   const agent = (r.agenten ?? []).map(umbenennen).find((a) => a.agentId === 'chat')
-  const endzustand = agent && ['done', 'failed', 'stopped'].includes(agent.status)
+  // waiting_ratelimit gehoert hier dazu: sind ALLE Konten gesperrt, bleibt der
+  // Chat-Agent genau in diesem Status stehen (keine automatische Wiederaufnahme,
+  // siehe supervisor.ts/agentStarten) -- ohne den Status hier waere das ein
+  // Endzustand, den der Poll nie erkennt: Eingabe bleibt fuer immer gesperrt,
+  // die Arbeitsanzeige laeuft weiter, und der Fehlertext kommt nie an.
+  const endzustand = agent && ['done', 'failed', 'stopped', 'waiting_ratelimit'].includes(agent.status)
   if (!endzustand) return
 
   pollGanzStoppen()
