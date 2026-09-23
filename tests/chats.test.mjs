@@ -103,6 +103,46 @@ await chatsIndizieren(dbPfad)
   pruefe('nicht gekuerzt bei nur zwei Beitraegen', d?.gekuerzt === false)
 }
 
+// --- chatLesen: synthetische "No response requested." nach einem Limit-
+// Abbruch weglassen (servertwo-Fund: steht nach jedem Nutzungslimit-Abbruch
+// im Verlauf und ist kein echter Beitrag) -------------------------------
+{
+  const sessionId2 = randomUUID()
+  mkdirSync(join(spiegel, projektOrdner), { recursive: true })
+  const spiegelDatei2 = join(spiegel, projektOrdner, `${sessionId2}.jsonl`)
+  const zeilen2 = [
+    JSON.stringify({
+      type: 'user', timestamp: zeit(0), cwd: desktopCwd,
+      message: { content: 'Frage vor dem Limit' },
+    }),
+    // Genau diese Zeile traegt die CLI nach einem Limit-Abbruch synthetisch
+    // nach -- kein echter Beitrag, muss weg.
+    JSON.stringify({
+      type: 'assistant', timestamp: zeit(1000),
+      message: { content: [{ type: 'text', text: 'No response requested.' }] },
+    }),
+    // Aehnlicher, aber NICHT identischer Text -- exakter Vergleich, soll bleiben.
+    JSON.stringify({
+      type: 'assistant', timestamp: zeit(1500),
+      message: { content: [{ type: 'text', text: 'No response requested. Aber hier noch mehr.' }] },
+    }),
+  ]
+  writeFileSync(spiegelDatei2, zeilen2.join('\n') + '\n', 'utf-8')
+  await chatsIndizieren(dbPfad)
+
+  const d = await chatLesen(dbPfad, sessionId2)
+  pruefe('zweite Sitzung gefunden', d !== null)
+  pruefe(
+    'exakte "No response requested." nicht im Verlauf',
+    !d?.beitraege.some((b) => b.text === 'No response requested.'),
+  )
+  pruefe(
+    'aehnlicher, aber nicht identischer Text bleibt (exakter Vergleich)',
+    d?.beitraege.some((b) => b.text.includes('No response requested. Aber hier noch mehr.')),
+  )
+  pruefe('genau zwei Beitraege (Frage + die nicht-synthetische Antwort)', d?.beitraege.length === 2)
+}
+
 // --- fortsetzungVorbereiten: Kopie an richtiger Stelle, Spiegel unveraendert ---
 const ersatzCwd = join(wurzel, 'ersatz-cwd')
 mkdirSync(ersatzCwd, { recursive: true })

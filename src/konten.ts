@@ -301,12 +301,29 @@ export const KONTOWECHSEL_FORTSETZUNGSPROMPT =
  * allererste Versuch ist schon ins Limit gelaufen, bevor ueberhaupt eine
  * Session entstand) bleibt nur der Originalprompt: es gibt nichts, wovon
  * "genau dort weiter" sprechen koennte.
+ *
+ * `schonGeantwortet` ist die dritte Bedingung, noetig seit einem Fund auf
+ * servertwo: bei einem Chat-Zug mit einer von AUSSEN mitgegebenen
+ * resumeSessionId (echtes SDK-resume einer alten Sitzung, siehe
+ * chats.ts/daemon.ts) ist resumeSessionId schon beim ALLERERSTEN Versuch
+ * gesetzt. Laeuft das Hauptkonto dort sofort ins Limit, waren
+ * istKontowechsel und resumeSessionId beide wahr, obwohl der Agent in DIESEM
+ * agentStarten-Aufruf noch keine einzige Zeile geantwortet hat -- der kurze
+ * Fortsetzungsprompt ("Mach genau dort weiter") ging an ein Modell, das gar
+ * nichts angefangen hatte, und antwortete folgerichtig mit "Es gibt keine
+ * laufende Aufgabe". Ohne `schonGeantwortet` bekaeme man das bei JEDER
+ * Chatnachricht, solange das Hauptkonto im Limit ist. Der Aufrufer bildet
+ * "schon geantwortet" aus dem bisher gesammelten Text OHNE die Limitmeldung
+ * selbst (siehe supervisor.ts) -- sonst wuerde ein Konto, das direkt mit der
+ * Limitmeldung als Antworttext scheitert, faelschlich als "hat schon
+ * geantwortet" durchgehen.
  */
 export function versuchPrompt(
   originalPrompt: string,
   resumeSessionId: string | undefined,
   istKontowechsel: boolean,
+  schonGeantwortet = false,
 ): string {
-  if (istKontowechsel && resumeSessionId) return KONTOWECHSEL_FORTSETZUNGSPROMPT
+  if (istKontowechsel && resumeSessionId && schonGeantwortet) return KONTOWECHSEL_FORTSETZUNGSPROMPT
   return originalPrompt
 }

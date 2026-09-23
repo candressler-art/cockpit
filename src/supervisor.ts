@@ -259,8 +259,19 @@ export class Supervisor extends EventEmitter {
       // wenn zwei Konten sich gegenseitig knapp vor dem Reset ablehnen.
       while (true) {
         if (konto) versuchteKonten.add(konto.name)
+        // "Schon geantwortet" heisst: es steht ein Textblock in textBloecke,
+        // der NICHT selbst nur die Limitmeldung ist. Ohne den Ausschluss
+        // wuerde ein Konto, das direkt mit "You've hit your session limit"
+        // als Antworttext scheitert (sichtbar als ganz normaler
+        // Assistant-Textblock, bevor die 'result'-Nachricht ihn als Limit
+        // einordnet), faelschlich als "hat schon gearbeitet" durchgehen --
+        // versuchPrompt() schickte dann den kurzen Fortsetzungsprompt an ein
+        // Modell, das noch gar nichts angefangen hatte (siehe konten.ts).
+        const schonGeantwortet = textBloecke.some(
+          (t) => !USAGE_LIMIT_ERROR_PREFIXES.some((p) => t.includes(p)),
+        )
         const versuch = await this.einzelnerVersuch(
-          o, abort, textBloecke, konto, resumeSessionId, istKontowechsel,
+          o, abort, textBloecke, konto, resumeSessionId, istKontowechsel, schonGeantwortet,
         )
         ergebnis = versuch.ergebnis
         fehler = versuch.fehler
@@ -310,6 +321,7 @@ export class Supervisor extends EventEmitter {
     konto: Konto | null,
     resumeSessionId: string | undefined,
     istKontowechsel: boolean,
+    schonGeantwortet: boolean,
   ): Promise<{ ergebnis: string | null; fehler: string | null; istLimit: boolean }> {
     let ergebnis: string | null = null
     let fehler: string | null = null
@@ -317,11 +329,15 @@ export class Supervisor extends EventEmitter {
 
     try {
       const lauf = query({
-        // Nach einem Kontowechsel MIT bekannter sessionId ersetzt der kurze
-        // Fortsetzungsprompt den Originalauftrag -- der steckt schon in der
-        // Session, die resume mitbringt. Ohne sessionId (Limit schon vor der
-        // ersten Nachricht) bleibt es beim Originalauftrag.
-        prompt: versuchPrompt(o.prompt, resumeSessionId, istKontowechsel),
+        // Nach einem Kontowechsel MIT bekannter sessionId UND bereits
+        // erhaltener (echter) Antwort ersetzt der kurze Fortsetzungsprompt
+        // den Originalauftrag -- der steckt schon in der Session, die resume
+        // mitbringt. Ohne sessionId (Limit schon vor der ersten Nachricht)
+        // oder ohne schonGeantwortet (resumeSessionId kam von AUSSEN, z.B.
+        // ein Chat-Zug ueber eine alte Sitzung, und das erste Konto ist
+        // sofort ins Limit gelaufen, bevor der Agent in DIESEM Aufruf
+        // ueberhaupt etwas beigetragen hat) bleibt es beim Originalauftrag.
+        prompt: versuchPrompt(o.prompt, resumeSessionId, istKontowechsel, schonGeantwortet),
         options: {
           cwd: o.cwd,
           abortController: abort,

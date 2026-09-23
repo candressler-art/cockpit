@@ -155,6 +155,16 @@ const JETZT_MS = JETZT_S * 1000
 }
 
 // --- 9. versuchPrompt: Originalauftrag vs. Fortsetzungsprompt --------------
+//
+// Dritte Bedingung `schonGeantwortet` kam nach einem Fund auf servertwo dazu:
+// bei einem Chat-Zug mit einer von AUSSEN mitgegebenen resumeSessionId (SDK-
+// resume einer alten Sitzung) ist resumeSessionId schon beim ALLERERSTEN
+// Versuch gesetzt. Lief das Hauptkonto dort sofort ins Limit, waren
+// istKontowechsel und resumeSessionId beide wahr, obwohl der Agent in DIESEM
+// Aufruf noch gar nichts beigetragen hatte -- der kurze Fortsetzungsprompt
+// ging an ein Modell ohne begonnene Arbeit und antwortete mit "Es gibt keine
+// laufende Aufgabe". schonGeantwortet=false (die Vorgabe) haelt genau diesen
+// Fall jetzt beim Originalprompt.
 {
   const r = versuchPrompt('Mach X.', 'sess-123', false)
   pruefe('kein Kontowechsel: Originalprompt, trotz sessionId', r === 'Mach X.')
@@ -164,12 +174,29 @@ const JETZT_MS = JETZT_S * 1000
   pruefe('kein Kontowechsel, keine sessionId: Originalprompt', r === 'Mach X.')
 }
 {
-  const r = versuchPrompt('Mach X.', 'sess-123', true)
-  pruefe('Kontowechsel MIT sessionId: Fortsetzungsprompt', r === KONTOWECHSEL_FORTSETZUNGSPROMPT)
+  const r = versuchPrompt('Mach X.', 'sess-123', true, true)
+  pruefe('Kontowechsel + sessionId + schon geantwortet: Fortsetzungsprompt', r === KONTOWECHSEL_FORTSETZUNGSPROMPT)
 }
 {
-  const r = versuchPrompt('Mach X.', undefined, true)
-  pruefe('Kontowechsel OHNE sessionId: bleibt beim Originalprompt', r === 'Mach X.')
+  const r = versuchPrompt('Mach X.', undefined, true, true)
+  pruefe('Kontowechsel OHNE sessionId: bleibt beim Originalprompt, trotz schon geantwortet', r === 'Mach X.')
+}
+{
+  // Der servertwo-Fund: resumeSessionId kam von aussen (echtes Chat-resume),
+  // das erste Konto lief SOFORT ins Limit -- der Agent hat in diesem
+  // agentStarten-Aufruf noch nichts geantwortet.
+  const r = versuchPrompt('Mach X.', 'sess-123', true, false)
+  pruefe(
+    'Kontowechsel + sessionId von aussen, aber NICHT geantwortet: Originalprompt (servertwo-Fund)',
+    r === 'Mach X.',
+  )
+}
+{
+  // Ohne vierten Parameter gilt dieselbe Vorgabe wie explizit false --
+  // Aufrufer, die den Fall vor diesem Fix noch nicht kannten, bekommen also
+  // sicherheitshalber den Originalprompt statt versehentlich den kurzen.
+  const r = versuchPrompt('Mach X.', 'sess-123', true)
+  pruefe('schonGeantwortet weggelassen: faellt sicher auf Originalprompt zurueck', r === 'Mach X.')
 }
 
 console.log(`\n${ok}/${gesamt} bestanden`)

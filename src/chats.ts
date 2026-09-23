@@ -389,6 +389,13 @@ const NUTZER_RAUSCH_PRAEFIXE = [
   '<task-notification', '<command-', '<local-command', 'Caveat:', '[Request interrupted',
 ]
 
+// Synthetischer Assistant-Zug der CLI, kein echter Beitrag: steht nach jedem
+// Nutzungslimit-Abbruch im Verlauf (die Session wurde mitten im Zug beendet,
+// die CLI traegt diese Zeile nach, damit die Datei einen formal gueltigen
+// Abschluss hat). Exakter Vergleich nach trim -- eine Antwort, die zufaellig
+// denselben Satz als Teil von etwas Laengerem enthaelt, soll bleiben.
+const CLI_SYNTHETISCHE_ANTWORT = 'No response requested.'
+
 /** Eine Sitzung als Folge lesbarer Beitraege, ohne das Betriebsrauschen der CLI. */
 export async function chatLesen(
   dbPfad: string, sessionId: string, maxBeitraege = 400,
@@ -434,6 +441,7 @@ export async function chatLesen(
     if (typ === 'user' && NUTZER_RAUSCH_PRAEFIXE.some((p) => text.startsWith(p))) continue
     text = text.replace(SYSTEM_REMINDER_RE, '').trim()
     if (!text) continue
+    if (typ === 'assistant' && text === CLI_SYNTHETISCHE_ANTWORT) continue
     const ts = d.timestamp ? Date.parse(String(d.timestamp)) : NaN
     alle.push({ rolle: typ, ts: Number.isNaN(ts) ? null : ts, text: text.slice(0, 8000) })
   }
