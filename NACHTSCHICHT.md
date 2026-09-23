@@ -2,6 +2,26 @@
 
 ## Fuer Can (Kurzfassung)
 
+- **Durchgang 3, wichtigster Fund:** Ein Datenschutz-Bug in `emailLesen()`
+  (`src/konten.ts`) liess eine isolierte Testinstanz (eigenes
+  `CLAUDE_CONFIG_DIR`, wie in dieser Nachtschicht vorgeschrieben) fuer ein
+  Test-Hauptkonto ohne eigene E-Mail still auf die ECHTE
+  `/home/.../.claude.json` ausweichen -- ich habe live in meiner eigenen
+  Testinstanz Deine echte E-Mail-Adresse aus `/api/konten` zurueckbekommen,
+  obwohl ich extra ein eigenes `CLAUDE_CONFIG_DIR` gesetzt hatte. Behoben:
+  der Home-Fallback greift jetzt nur noch, wenn `CLAUDE_CONFIG_DIR`
+  tatsaechlich NICHT gesetzt ist (Commit "Konten: Hauptkonto-E-Mail nicht
+  mehr aus dem echten Home lesen..."). Das betrifft vermutlich auch jede
+  andere isolierte Instanz (z.B. eine zweite Cockpit-Installation), nicht
+  nur meine Nachtschicht-Testinstanz.
+- **Alle Konten gesperrt** end-to-end durchgetestet (siehe unten): Der Lauf
+  endet sauber als `failed` mit klarer Fehlermeldung, haengt NICHT. Es gibt
+  aber KEINE automatische Wiederaufnahme, sobald ein Konto wieder frei waere
+  -- das ist eine bewusste Nicht-Entscheidung von mir, siehe "Entscheidung
+  fuer Can" unten, keine automatische Fix-Anwendung.
+- **Vorzug setzen/aufheben** end-to-end verifiziert: funktioniert korrekt in
+  allen drei Faellen (setzen, aufheben mit `null`, unbekannter Kontoname ->
+  404 ohne Seiteneffekt).
 - **Durchgang 1** hat offenbar nichts committet und keine Notizen hinterlassen
   -- nur einen Test-Daemon auf Port 8798 (PID 663997, seit 21:11 gelaufen,
   mit Fake-Konten `zweit`/`zweit-test`/`dritt` unter `/tmp/nachtschicht`).
@@ -109,16 +129,61 @@ ich nicht eigenmaechtig treffen wollte.
   echten, per Skript angelegten Konten teilen sie sich `projects/`, `resume`
   findet die Session dort wieder.
 
+## Erledigt (Durchgang 3)
+
+### Datenschutz-Bug: Home-E-Mail-Fallback ignorierte gesetztes CLAUDE_CONFIG_DIR
+
+Siehe Kurzfassung oben und Commit "Konten: Hauptkonto-E-Mail nicht mehr aus
+dem echten Home lesen...". Unit-Test in `tests/konten.test.mjs`, Abschnitt
+16 (`emailLesen` jetzt exportiert, drei Faelle: mit gesetztem
+`CLAUDE_CONFIG_DIR` kein Fallback, ohne gesetztes greift der Fallback wie
+frueher, Zusatzkonto (`istHaupt=false`) nutzt den Fallback nie). Zusaetzlich
+live in der Testinstanz nachvollzogen: vor dem Fix lieferte `/api/konten`
+fuer `haupt` `email:"candressler@gmail.com"` (Deine echte Adresse aus
+`/home/claude/.claude.json`), obwohl die Testinstanz ihr eigenes
+`CLAUDE_CONFIG_DIR=/tmp/nachtschicht/claude` hatte, dessen eigene
+`.claude.json` gar keine E-Mail enthaelt. Nach dem Fix: `email:null` fuer
+`haupt` in der Testinstanz, unveraendertes Verhalten auf dem echten Server
+(dort ist `CLAUDE_CONFIG_DIR` ja nicht gesetzt, der Fallback bleibt aktiv).
+
+### Alle Konten gesperrt -- end-to-end verifiziert
+
+**Aufbau:** In der Testinstanz allen vier Fake-Konten (`haupt`, `dritt`,
+`zweit`, `zweit-test`) einen `projects/`-Symlink auf
+`/tmp/nachtschicht/claude/projects` gegeben (wie `konto-hinzufuegen.sh` es
+fuer echte Zusatzkonten tut, siehe README) -- vorher hatten die Fake-Konten
+keinen gemeinsamen `projects/`, weshalb ein Kontowechsel-Versuch immer an
+"No conversation found" statt am eigentlich zu testenden Verhalten scheiterte
+(siehe Durchgang-2-Notiz weiter unten). Mit dem Symlink lief `POST /api/lauf`
+zweimal hintereinander durch: erster Lauf sperrte `haupt` (Anmeldefehler,
+5 Stunden), zweiter Lauf wechselte sauber `dritt` -> `zweit` -> `zweit-test`
+(alle mit demselben Fake-Token, alle scheitern am selben synthetischen
+"Not logged in"), bis auch das letzte Konto gesperrt war.
+
+**Ergebnis:** Kein Haenger. Der Agent-Status wird `waiting_ratelimit`, der
+Lauf-Status wird sauber `failed` mit `last_error`/`stop_reason` = der letzten
+Fehlermeldung (siehe `daemon.ts`, `ende.grund === 'fehler'` -> `status =
+'failed'`). Das Ereignisprotokoll zeigt jeden einzelnen Wechselversuch
+nachvollziehbar (`rate_limit` + `protocol`-Eintrag je Konto).
+
+**Entscheidung fuer Can:** Es gibt danach KEINE automatische Wiederaufnahme.
+Sind irgendwann wieder Konten frei (Reset nach 5h/7d, oder Can meldet ein
+Konto manuell neu an), bleibt der Lauf trotzdem `failed` -- Can muss ihn von
+Hand neu anstossen (`/api/lauf`, beim Orchestrator-Lauf ohne den bisherigen
+Rundenverlauf). Es gibt aktuell auch keinen Mechanismus im Code, der das
+anders vorsaehe (kein Scheduler/Retry-Timer fuer fehlgeschlagene Laeufe,
+`grund: 'fehler'` ist ueberall ein Endzustand, genau wie Formatfehler oder
+Budget-Ueberschreitung). Ich habe das bewusst NICHT automatisiert: ein Lauf,
+der stundenlang blockierend auf einen Reset wartet (oder ein Timer, der ihn
+Stunden spaeter von selbst neu startet), ist eine groessere Verhaltensaenderung
+mit eigenen Tradeoffs (belegt der wartende Lauf Ressourcen? was, wenn Can den
+Auftrag in der Zwischenzeit gar nicht mehr will? wie sichtbar ist "wartet
+noch" vs. "ist tot"?) -- eher eine Produktentscheidung als ein Bugfix. Die
+konservative Wahl war, das Verhalten zu pruefen und zu dokumentieren statt
+etwas Neues zu bauen.
+
 ## Offene Punkte (Prioritaet 1, noch zu pruefen)
 
-- [ ] **Alle Konten gesperrt:** `kontoWaehlen()` gibt dann `null` zurueck,
-  der Agent bleibt (laut Code-Lesen) im alten Wartezustand
-  `waiting_ratelimit` haengen, OHNE automatischen Wechsel. Noch nicht
-  end-to-end mit allen Fake-Konten gleichzeitig gesperrt durchgetestet --
-  nur die Unit-Tests in `konten.test.mjs` (Abschnitt 3) decken die reine
-  Auswahlfunktion ab. Insbesondere: Weckt danach je ein Poll (10 Minuten)
-  oder ein manueller Wiederholungsversuch den Agenten wieder auf, oder bleibt
-  er fuer immer haengen, bis Can eingreift?
 - [ ] **Daemon-Neustart:** `gesperrtBis` und `nutzung` in
   `KontenVerwaltung` sind reiner In-Memory-Zustand (`new Map()`, kein
   Laden/Speichern). Nach einem Neustart gelten alle Konten wieder als frei
@@ -143,10 +208,13 @@ ich nicht eigenmaechtig treffen wollte.
 - [ ] **Anzeige in allen Zustaenden** (Server-Tab, Zentrale): noch nicht
   gegen echtes HTML/CSS geprueft (gehoert eigentlich zu Prioritaet 2, aber
   inhaltlich an Prioritaet 1 gekoppelt).
-- [ ] **Vorzug setzen/aufheben:** `POST /api/konten` mit `name` und mit
-  `null` bisher nur per curl gegen die Testinstanz angetestet (Vorzug setzen
-  hat funktioniert, siehe oben). Aufheben (`null`) noch nicht verifiziert,
-  ebenso wenig die Fehlerantwort bei einem unbekannten Kontonamen.
+- [x] **Vorzug setzen/aufheben:** in Durchgang 3 end-to-end gegen die
+  Testinstanz verifiziert -- `POST /api/konten {"name":"zweit"}` setzt den
+  Vorzug (`modus` wechselt auf `manuell`, `bevorzugt:true` nur bei `zweit`),
+  `{"name":null}` hebt ihn sauber wieder auf (`modus` zurueck auf
+  `ausgeglichen`, kein Konto mehr `bevorzugt:true`), ein unbekannter Name
+  liefert `404` mit `ok:false` OHNE den bisherigen Vorzugszustand zu
+  veraendern. Kein Fehler gefunden.
 
 ## Offene Punkte (Prioritaet 2 -- Desktop-App/Oberflaeche)
 
@@ -167,17 +235,21 @@ ich nicht eigenmaechtig treffen wollte.
 
 ## Testinstanz-Hinweise fuer den naechsten Durchgang
 
-- Fake-Konten liegen bereits unter `/tmp/nachtschicht/konten/{zweit,dritt}`
-  und `zweit-test` (letzteres von Durchgang 1 uebrig, Inhalt nicht
-  verifiziert aber vermutlich derselbe Attrappen-Aufbau). Wiederverwendbar.
-- **Fuer einen Test, der einen ECHTEN Kontowechsel-Erfolg zeigt** (nicht nur
-  "Wechsel wird versucht"): den Fake-Konten fehlt der `projects/`-Symlink
-  aufs Hauptkonto, den `deploy/konto-hinzufuegen.sh` fuer echte Zusatzkonten
-  anlegt (siehe README). Ohne den scheitert jeder Kontowechsel-Versuch mit
-  `resume` an "No conversation found", auch wenn das Zielkonto an sich
-  laeuft. Um einen VOLLSTAENDIGEN Erfolgsfall zu simulieren, muesste man das
-  nachbauen -- fuer den hier behobenen Bug war es nicht noetig (der Fehler
-  lag VOR dem ersten Versuch, ueberhaupt zu wechseln).
+- Fake-Konten liegen bereits unter `/tmp/nachtschicht/konten/{zweit,dritt,
+  zweit-test}`. Seit Durchgang 3 haben ALLE DREI einen `projects/`-Symlink
+  auf `/tmp/nachtschicht/claude/projects` (das Hauptkonto der Testinstanz,
+  Attrappe wie in `konto-hinzufuegen.sh` fuer echte Zusatzkonten
+  beschrieben) -- damit teilen sie sich Sessions mit `haupt`, und ein
+  `resume` nach einem Kontowechsel scheitert nicht mehr an "No conversation
+  found". Wiederverwendbar, nichts weiter noetig.
+- Achtung bei wiederholten Testlaeufen in derselben Instanz: `sperren()` ist
+  In-Memory und ueberlebt keinen Neustart, ABER die 5-Stunden-Sperre aus
+  einem fruehen Testlauf gilt fuer den Rest desselben Prozesses weiter --
+  wer gezielt EIN bestimmtes Konto als "frei" testen will, startet am besten
+  eine frische Instanz statt sich auf den Zustand vom letzten Testlauf zu
+  verlassen (ist mir in Durchgang 3 selbst passiert: `haupt` war im zweiten
+  Testlauf noch vom ersten gesperrt, war aber genau das, was den
+  "alle Konten gesperrt am Ende"-Fall dann sauber zeigte).
 - Vor dem Beenden immer pruefen, ob genau die eigene Test-Daemon-PID
   getroffen wird -- `pgrep -af 'dist/daemon.js'` matcht auch die eigene
   `claude -p`-Prozesszeile (der komplette Nachtschicht-Prompt steht in deren
