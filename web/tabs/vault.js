@@ -12,7 +12,7 @@
  * desselben Bildes nebeneinander zu pflegen waere der sichere Weg, dass eine
  * davon veraltet.
  */
-import { api, abonnieren } from '../bus.js'
+import { api, abonnieren, ladefehlerText } from '../bus.js'
 import { Wissenskern } from '../kern.js'
 import * as sp from '../sprachpegel.js'
 
@@ -247,7 +247,7 @@ export default {
       const graphPfad = laufend ? `/api/vault/graph?run=${laufend.run_id}` : '/api/vault/graph'
       g = await fetch(api(graphPfad)).then((r) => r.json())
     } catch (e) {
-      buehne.innerHTML = `<div class="leer">Vault nicht abrufbar: ${esc(e)}</div>`
+      buehne.innerHTML = `<div class="leer">Vault nicht abrufbar: ${esc(ladefehlerText(e))}</div>`
       return
     }
     if (!g?.spiegelDa) {

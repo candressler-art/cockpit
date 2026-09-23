@@ -10,7 +10,7 @@
  * selten genug, dass ein Poll alle paar Sekunden reicht, waehrend der Tab
  * offen ist.
  */
-import { api, abonnieren } from '../bus.js'
+import { api, abonnieren, ladefehlerText } from '../bus.js'
 
 let wurzel = null
 let letzter = null
@@ -235,7 +235,7 @@ export default {
       .then((d) => { letzter = d; zeichnen() })
       .catch((e) => {
         wurzel.querySelector('#hostliste').innerHTML =
-          `<div class="leer">Auslastung nicht abrufbar: ${String(e)}</div>`
+          `<div class="leer">Auslastung nicht abrufbar: ${ladefehlerText(e)}</div>`
       })
 
     void kontenLaden()

@@ -60,6 +60,19 @@ export const api = (pfad) => `${schema()}://${hostOhneSchema()}${pfad}`
 export const wsUrl = () => `${schema(true)}://${hostOhneSchema()}/ws`
 export const basis = () => BASIS
 
+/**
+ * Lesbare Fehlermeldung fuer einen fehlgeschlagenen ersten Ladeversuch
+ * (fetch() in Chats/Vault/Server-Tab). Ein nicht erreichbarer Daemon liefert
+ * im Browser immer einen TypeError ("Failed to fetch") -- den zeigten die
+ * drei Tabs bisher roh an (`String(e)`), was zwar lesbar, aber unschoen und
+ * uneinheitlich mit der Meldung im Lauf-Tab war. Alles andere (z.B. ein
+ * Fehler beim JSON-Parsen einer 500-Antwort) bleibt ein echter, unerwarteter
+ * Fehler und wird weiterhin roh gezeigt, statt ihn hinter derselben Meldung
+ * zu verstecken.
+ */
+export const ladefehlerText = (e) =>
+  e instanceof TypeError ? `Kein Daemon erreichbar auf ${basis()}.` : String(e)
+
 /** Auf einen Nachrichtentyp horchen. Gibt die Abmeldefunktion zurueck. */
 export function abonnieren(typ, fn) {
   if (!horcher.has(typ)) horcher.set(typ, new Set())

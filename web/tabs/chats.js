@@ -14,7 +14,7 @@
  * filtert je Klient nach EINER runId, aber diese Ansicht kann jederzeit die
  * Sitzung wechseln.
  */
-import { api } from '../bus.js'
+import { api, ladefehlerText } from '../bus.js'
 
 let wurzel = null
 let suchzeit = null
@@ -117,7 +117,7 @@ async function laden(q = '') {
       b.onclick = () => void oeffnen(b.dataset.id)
     }
   } catch (e) {
-    liste.innerHTML = `<div class="leer">Liste nicht abrufbar: ${esc(e)}</div>`
+    liste.innerHTML = `<div class="leer">Liste nicht abrufbar: ${esc(ladefehlerText(e))}</div>`
   }
 }
 
@@ -170,7 +170,7 @@ async function oeffnen(id) {
     }
   } catch (e) {
     if (offen !== id) return
-    lese.innerHTML = `<div class="leer">Sitzung nicht lesbar: ${esc(e)}</div>`
+    lese.innerHTML = `<div class="leer">Sitzung nicht lesbar: ${esc(ladefehlerText(e))}</div>`
   }
 }
 
