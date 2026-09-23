@@ -445,6 +445,44 @@ export function sperrzeitpunktAusLimitstand(
 }
 
 /**
+ * Fehlertexte, bei denen nicht der Auftrag das Problem ist, sondern das
+ * KONTO -- ein Kontowechsel kann den Agenten trotzdem zu Ende bringen, genau
+ * wie bei einem Nutzungslimit. Bislang nur "Not logged in", der Text, den
+ * die CLI liefert, wenn .credentials.json einen kaputten oder abgelaufenen
+ * accessToken enthaelt (kontenLesen() prueft nur, ob das Feld vorhanden und
+ * nicht leer ist -- ob das Token noch GUELTIG ist, zeigt sich erst beim
+ * echten Versuch). Live gegen die Testinstanz mit einem absichtlich
+ * ungueltigen Attrappe-Token geprueft (curl gegen /api/lauf): ohne diese
+ * Erkennung lief der Agent auf einen `result` mit is_error:true, das nicht zu
+ * USAGE_LIMIT_ERROR_PREFIXES passte, und der ganze Lauf starb als 'failed' --
+ * obwohl andere Konten frei gewesen waeren. `istKontoFehlertext()` ergaenzt
+ * die SDK-Konstante USAGE_LIMIT_ERROR_PREFIXES (die nur Nutzungslimits
+ * kennt) um diesen Fall.
+ */
+export const KONTO_AUTH_FEHLER_PRAEFIXE = ['Not logged in'] as const
+
+/**
+ * Ob ein Fehlertext ein KONTOPROBLEM ist (Limit oder Anmeldung) -- in beiden
+ * Faellen soll agentStarten() mit dem naechsten Konto weitermachen statt den
+ * Lauf sterben zu lassen. `praefixeLimit` kommt vom Aufrufer (SDK-Konstante
+ * USAGE_LIMIT_ERROR_PREFIXES), damit dieses Modul die SDK nicht importieren
+ * muss.
+ */
+export function istKontoFehlertext(text: string, praefixeLimit: readonly string[]): boolean {
+  return praefixeLimit.some((p) => text.includes(p)) ||
+    KONTO_AUTH_FEHLER_PRAEFIXE.some((p) => text.includes(p))
+}
+
+/**
+ * Anzeige-Label fuer einen Kontofehlertext -- unterscheidet Nutzungslimit von
+ * Anmeldefehler, damit das Protokoll nicht "Nutzungslimit" meldet, wo in
+ * Wahrheit ein abgelaufenes Token die Ursache war.
+ */
+export function kontoFehlerLabel(text: string, praefixeLimit: readonly string[]): string {
+  return praefixeLimit.some((p) => text.includes(p)) ? 'Nutzungslimit' : 'Anmeldefehler'
+}
+
+/**
  * Kurzer Fortsetzungsprompt nach einem Kontowechsel mitten im Lauf.
  *
  * `resume` haengt an dieselbe Session an -- schickt man dort den kompletten

@@ -6,6 +6,9 @@ import {
   versuchPrompt,
   KONTOWECHSEL_FORTSETZUNGSPROMPT,
   BALANCING_HYSTERESE,
+  istKontoFehlertext,
+  kontoFehlerLabel,
+  KONTO_AUTH_FEHLER_PRAEFIXE,
 } from '../dist/konten.js'
 import { nutzungAusAntwort } from '../dist/kontenNutzung.js'
 
@@ -301,6 +304,46 @@ const JETZT_MS = JETZT_S * 1000
   // sicherheitshalber den Originalprompt statt versehentlich den kurzen.
   const r = versuchPrompt('Mach X.', 'sess-123', true)
   pruefe('schonGeantwortet weggelassen: faellt sicher auf Originalprompt zurueck', r === 'Mach X.')
+}
+
+// --- 15. istKontoFehlertext/kontoFehlerLabel: Anmeldefehler wie Limit behandeln --
+//
+// Fund auf der Testinstanz (Durchgang 2): ein Konto mit kaputtem/abgelaufenem
+// Token liefert "Not logged in · Please run /login" als `result` mit is_error:true.
+// Das passt zu keinem USAGE_LIMIT_ERROR_PREFIXES-Eintrag -- ohne diese
+// Erkennung starb der ganze Lauf als 'failed', obwohl ein anderes Konto frei
+// gewesen waere. Live gegen die Testinstanz mit einem absichtlich
+// ungueltigen Attrappe-Token bestaetigt (POST /api/lauf).
+const SDK_LIMIT_PRAEFIXE = ["You've hit your", "You've reached your"]
+{
+  pruefe(
+    'Nutzungslimit-Text zaehlt als Kontofehler',
+    istKontoFehlertext("You've hit your usage limit", SDK_LIMIT_PRAEFIXE) === true,
+  )
+  pruefe(
+    'Anmeldefehler-Text zaehlt als Kontofehler',
+    istKontoFehlertext('Not logged in · Please run /login', SDK_LIMIT_PRAEFIXE) === true,
+  )
+  pruefe(
+    'anderer Fehlertext zaehlt NICHT als Kontofehler',
+    istKontoFehlertext('Lauf endete mit is_error (subtype=error_max_turns)', SDK_LIMIT_PRAEFIXE) === false,
+  )
+}
+{
+  pruefe(
+    'Label fuer Nutzungslimit',
+    kontoFehlerLabel("You've hit your usage limit", SDK_LIMIT_PRAEFIXE) === 'Nutzungslimit',
+  )
+  pruefe(
+    'Label fuer Anmeldefehler',
+    kontoFehlerLabel('Not logged in · Please run /login', SDK_LIMIT_PRAEFIXE) === 'Anmeldefehler',
+  )
+}
+{
+  pruefe(
+    'KONTO_AUTH_FEHLER_PRAEFIXE enthaelt den beobachteten Text',
+    KONTO_AUTH_FEHLER_PRAEFIXE.some((p) => 'Not logged in · Please run /login'.includes(p)),
+  )
 }
 
 // --- /api/oauth/usage: Prozent + ISO-Zeit, NICHT die rate_limit_info-Form ---

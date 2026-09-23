@@ -16,6 +16,8 @@ import {
   kontenLesen,
   sperrzeitpunktAusLimitstand,
   versuchPrompt,
+  istKontoFehlertext,
+  kontoFehlerLabel,
   type Konto,
   type KontenUebersicht,
 } from './konten.js'
@@ -297,7 +299,7 @@ export class Supervisor extends EventEmitter {
         // versuchPrompt() schickte dann den kurzen Fortsetzungsprompt an ein
         // Modell, das noch gar nichts angefangen hatte (siehe konten.ts).
         const schonGeantwortet = textBloecke.some(
-          (t) => !USAGE_LIMIT_ERROR_PREFIXES.some((p) => t.includes(p)),
+          (t) => !istKontoFehlertext(t, USAGE_LIMIT_ERROR_PREFIXES),
         )
         const versuch = await this.einzelnerVersuch(
           o, abort, textBloecke, konto, resumeSessionId, istKontowechsel, schonGeantwortet,
@@ -321,7 +323,7 @@ export class Supervisor extends EventEmitter {
         istKontowechsel = true
         this.melden(
           o.runId, o.agentId, 'protocol',
-          `Kontowechsel: ${konto.name} im Limit, weiter mit ${naechstes.name}`,
+          `Kontowechsel: ${konto.name} nicht nutzbar (${kontoFehlerLabel(fehler ?? '', USAGE_LIMIT_ERROR_PREFIXES)}), weiter mit ${naechstes.name}`,
           { von: konto.name, nach: naechstes.name, gesperrtBis: reset },
         )
         // endedAt/lastError zuruecksetzen -- einzelnerVersuch hat sie gerade
@@ -465,13 +467,18 @@ export class Supervisor extends EventEmitter {
             // "Lauf endete mit is_error" und landete als 'failed' statt als
             // Limit -- kein Kontowechsel, kein Warten, einfach ein
             // gescheiterter Agent.
+            //
+            // istKontoFehlertext() erkennt hier zusaetzlich einen kaputten
+            // Login ("Not logged in", siehe konten.ts) -- ohne das lief ein
+            // abgelaufenes Token auf genau denselben toten Lauf hinaus, nur
+            // eben ohne Nutzungslimit-Text.
             const text =
               typeof m.result === 'string' && m.result
                 ? m.result
                 : Array.isArray(m.errors)
                   ? m.errors.filter((x): x is string => typeof x === 'string').join('; ')
                   : ''
-            istLimit = USAGE_LIMIT_ERROR_PREFIXES.some((p) => text.includes(p))
+            istLimit = istKontoFehlertext(text, USAGE_LIMIT_ERROR_PREFIXES)
             fehler = istLimit ? text : `Lauf endete mit is_error (subtype=${String(m.subtype)})`
           }
         }
@@ -479,7 +486,7 @@ export class Supervisor extends EventEmitter {
       if (istLimit) {
         this.melden(
           o.runId, o.agentId, 'rate_limit',
-          `Nutzungslimit${konto ? ` (${konto.name})` : ''}: ${(fehler ?? '').slice(0, 180)}`,
+          `${kontoFehlerLabel(fehler ?? '', USAGE_LIMIT_ERROR_PREFIXES)}${konto ? ` (${konto.name})` : ''}: ${(fehler ?? '').slice(0, 180)}`,
           { fehler, istLimit, konto: konto?.name ?? null, quelle: 'result' },
         )
       }
@@ -493,12 +500,14 @@ export class Supervisor extends EventEmitter {
       // Ein Ratenlimit ist kein Absturz, sondern ein Wartezustand -- die
       // Unterscheidung macht den Unterschied zwischen "Lauf ist tot" und
       // "Lauf schlaeft", und genau die war in loop.py die haeufigste Fehldiagnose.
-      istLimit = USAGE_LIMIT_ERROR_PREFIXES.some((p) => text.includes(p))
+      // Ein Anmeldefehler (istKontoFehlertext) zaehlt hier bewusst genauso --
+      // beide sind ein Kontoproblem, kein Auftragsproblem.
+      istLimit = istKontoFehlertext(text, USAGE_LIMIT_ERROR_PREFIXES)
       fehler = text
       this.melden(
         o.runId, o.agentId, istLimit ? 'rate_limit' : 'error',
         istLimit
-          ? `Nutzungslimit${konto ? ` (${konto.name})` : ''}: ${text.slice(0, 180)}`
+          ? `${kontoFehlerLabel(text, USAGE_LIMIT_ERROR_PREFIXES)}${konto ? ` (${konto.name})` : ''}: ${text.slice(0, 180)}`
           : `Fehler: ${text.slice(0, 180)}`,
         { fehler: text, istLimit, konto: konto?.name ?? null },
       )
