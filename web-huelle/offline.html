@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>Cockpit</title>
+<style>
+  :root {
+    --base:#1e1e2e; --mantle:#181825; --text:#cdd6f4; --subtext:#a6adc8;
+    --overlay:#6c7086; --akzent:#89b4fa; --fehler:#f38ba8;
+    --mono:"JetBrains Mono","Fira Code",ui-monospace,monospace;
+    --sans:Inter,system-ui,-apple-system,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{
+    display:flex;align-items:center;justify-content:center;
+    background:var(--base);color:var(--text);font:15px/1.5 var(--sans);
+  }
+  .karte{
+    text-align:center;padding:32px 40px;border:1px solid var(--mantle);
+    border-radius:12px;background:var(--mantle);max-width:420px;
+  }
+  .punkt{
+    width:10px;height:10px;border-radius:50%;background:var(--fehler);
+    margin:0 auto 16px;animation:puls 1.4s infinite;
+  }
+  @keyframes puls{0%,100%{opacity:1}50%{opacity:.35}}
+  h1{font-size:16px;margin:0 0 8px;font-weight:600}
+  p{color:var(--subtext);margin:4px 0}
+  .ziel{font:12px/1.4 var(--mono);color:var(--overlay);margin-top:14px;word-break:break-all}
+  .stand{font:12px/1.4 var(--mono);color:var(--akzent);margin-top:10px}
+</style>
+</head>
+<body>
+  <div class="karte">
+    <div class="punkt"></div>
+    <h1>Server nicht erreichbar</h1>
+    <p>Der Cockpit-Daemon antwortet nicht. Es wird alle paar Sekunden
+       erneut versucht -- bei Erfolg wird automatisch weitergeleitet.</p>
+    <div class="ziel" id="ziel">wird ermittelt&hellip;</div>
+    <div class="stand" id="stand"></div>
+  </div>
+
+<script>
+  // Gebuendelte Ersatzseite fuer den Fall, dass der Daemon beim Start der
+  // Desktop-Huelle nicht erreichbar ist. Absichtlich eigenstaendig und ohne
+  // Abhaengigkeit von web/bus.js -- diese Seite lebt in einem eigenen,
+  // getrennten frontendDist (web-huelle/) und wird nur geladen, wenn main.rs
+  // seinen Erreichbarkeitstest gegen den Daemon nicht besteht.
+  //
+  // Die eigentliche Oberflaeche (web/) buendeln wir hier bewusst NICHT --
+  // genau zwei Kopien der UI (gebuendelt vs. vom Daemon ausgeliefert) waren
+  // der Ausgangsfehler, den diese Umstellung beheben sollte.
+
+  const standEl = document.getElementById('stand')
+  const zielEl = document.getElementById('ziel')
+
+  async function daemonAdresse() {
+    const tauri = window.__TAURI__
+    if (tauri?.core?.invoke) {
+      try {
+        const adresse = await tauri.core.invoke('daemon_basis')
+        if (adresse) return adresse
+      } catch (e) {
+        console.warn('daemon_basis nicht erreichbar', e)
+      }
+    }
+    return '127.0.0.1:8765'
+  }
+
+  // Gleiche Regel wie web/bus.js::schema(): lokal -> http, sonst https
+  // (tailscale serve laesst ausschliesslich TLS durch).
+  function schema(basis) {
+    return /^(localhost|127\.0\.0\.1|\[::1\])(:|$)/.test(basis) ? 'http' : 'https'
+  }
+
+  // Nur ob ueberhaupt eine Antwort kommt zaehlt, nicht deren Inhalt --
+  // 'no-cors' liefert absichtlich eine undurchsichtige Antwort, schlaegt
+  // aber genauso fehl wie ein normaler Fetch, wenn die Verbindung nicht
+  // zustande kommt. Damit blockt eine fehlende CORS-Freigabe des Daemons
+  // (COCKPIT_ORIGIN) diesen Test nicht faelschlich dauerhaft.
+  async function erreichbar(url) {
+    try {
+      await fetch(url, { mode: 'no-cors', cache: 'no-store', signal: AbortSignal.timeout(3000) })
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  ;(async () => {
+    const basis = await daemonAdresse()
+    const url = `${schema(basis)}://${basis}/`
+    zielEl.textContent = basis
+
+    let versuch = 0
+    const schleife = async () => {
+      versuch += 1
+      standEl.textContent = `Versuch ${versuch} …`
+      if (await erreichbar(url)) {
+        standEl.textContent = 'Verbunden -- leite weiter …'
+        location.href = url
+        return
+      }
+      setTimeout(schleife, 4000)
+    }
+    schleife()
+  })()
+</script>
+</body>
+</html>

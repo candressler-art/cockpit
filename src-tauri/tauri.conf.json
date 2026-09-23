@@ -4,21 +4,10 @@
   "version": "0.1.0",
   "identifier": "de.buergermiteis.cockpit",
   "build": {
-    "frontendDist": "../web"
+    "frontendDist": "../web-huelle"
   },
   "app": {
-    "windows": [
-      {
-        "title": "Cockpit",
-        "width": 1440,
-        "height": 900,
-        "minWidth": 900,
-        "minHeight": 600,
-        "resizable": true,
-        "decorations": true,
-        "theme": "Dark"
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": null
     },

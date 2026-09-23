@@ -4,6 +4,11 @@
 #
 # Kein `set -e`: jeder Schritt meldet sich selbst, und ein fehlender
 # Icon-Pfad soll nicht die ganze Installation abbrechen.
+#
+# Neu bauen (naechster Abschnitt) muss nur noch, wer src-tauri/ selbst
+# aendert. Die Oberflaeche (web/) laedt die installierte Binary zur Laufzeit
+# direkt vom Daemon -- eine Aenderung an web/ wirkt, sobald der Daemon neu
+# gestartet ist, ganz ohne diesen Schritt hier.
 
 WURZEL="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BINAER="$WURZEL/src-tauri/target/release/cockpit"
@@ -36,7 +41,8 @@ fi
 
 # Der Startereintrag traegt die Daemon-Adresse fest ein. Ohne sie zeigt die App
 # auf 127.0.0.1:8765, und wer keinen lokalen Daemon laufen hat, sieht beim
-# Klick aufs Icon nur "Kein Daemon erreichbar". Andere Adresse waehlen:
+# Klick aufs Icon nur die gebuendelte Ersatzseite ("Server nicht erreichbar",
+# web-huelle/offline.html). Andere Adresse waehlen:
 #   COCKPIT_DAEMON=127.0.0.1:8765 ./deploy/installieren-desktop.sh
 ADRESSE="${COCKPIT_DAEMON:-servertwo.tail9c8a2b.ts.net:8443}"
 sed "s|@ADRESSE@|$ADRESSE|" "$WURZEL/deploy/cockpit.desktop" \
