@@ -2,6 +2,66 @@
 
 ## Fuer Can (Kurzfassung)
 
+- **Durchgang 10 (Start):** Bei Durchgangsbeginn lag bereits fertiger,
+  getesteter, aber nie committeter Code im Arbeitsverzeichnis (9 geaenderte
+  Dateien + eine neue Testdatei, kein Log-Eintrag dazu -- vermutlich
+  Durchgang 9, dem der Kontext ausging, bevor er committen und dokumentieren
+  konnte). Ich habe den Code gegengelesen, `npx tsc && npm test` liefen gruen
+  (63/63 in
+  konten.test.mjs, neue 9/9 in db.test.mjs), und dann in zwei sauberen,
+  inhaltlich passenden Commits nachgetragen, da die Arbeit fuer sich stand
+  und beide der bisher offenen Punkte direkt schliesst:
+  1. **Konten-Persistenz:** `gesperrtBis` und der manuelle Vorzug in
+     `KontenVerwaltung` waren reiner In-Memory-Zustand -- nach einem
+     Daemon-Neustart wurde ein eigentlich noch gesperrtes Konto sofort
+     wieder probiert (der aus Durchgang 2 offene Punkt aus der Aufgabenliste:
+     "Sperren und Messungen sind nur im Speicher -- persistieren?"). Jetzt in
+     zwei neuen SQLite-Tabellen (`konten_sperren`, `konten_vorzug`)
+     gespeichert, beim Start nachgeladen (abgelaufene Sperren verworfen),
+     bei jeder Aenderung sofort durchgeschrieben. **Bewusst nicht
+     einbezogen:** die Nutzungsmessungen (%-Werte) selbst bleiben weiterhin
+     nur im Speicher -- die aktualisieren sich ohnehin per Poll binnen
+     Minuten neu, ein Neustart macht sie hoechstens kurz ungenau, nie falsch
+     gesperrt/entsperrt. Commit "Konten: Sperren und Vorzug ueberleben jetzt
+     einen Daemon-Neustart".
+  2. **Rohe Fehlermeldung bei nicht erreichbarem Daemon:** der in Durchgang 8
+     als "Schoenheitsfehler, nicht behoben" notierte Punkt (Chats/Vault/
+     Server-Tab zeigten `TypeError: Failed to fetch` roh an) ist jetzt
+     behoben -- neue Hilfsfunktion `ladefehlerText()` in `web/bus.js`, wie im
+     Lauf-Tab. Commit "Oberflaeche: deutsche Meldung statt roher TypeError
+     bei nicht erreichbarem Daemon".
+  Ich habe NICHT versucht herauszufinden, wer/was den Code genau geschrieben
+  hat oder warum er unfertig liegen blieb -- der Inhalt war in sich
+  konsistent, getestet und passte exakt zu offenen Punkten aus fruehren
+  Durchgaengen, also war Nachvollziehen und sauber Abschliessen die richtige
+  Reaktion, kein Verwerfen.
+- **Durchgang 10 (danach):** `src/daemon.ts` (bisher nie als Ganzes
+  gruendlich gegengelesen, nur einzelne Routen im Rahmen anderer Funde) und
+  `src/discord.ts`/`src/kontenNutzung.ts` vollstaendig durchgelesen. Dabei
+  in der Discord-Bruecke einen echten, zusammenhaengenden Doppelfund im
+  `!stop`-Befehl gemacht (Commit "Discord: !stop erkennt normalen Chat
+  faelschlich als Befehl, meldet Erfolg ohne Wirkung"):
+  1. `text.startsWith('!stop')` (ohne Leerzeichen-Grenze, anders als
+     `!lauf `) erkannte jede Nachricht, die zufaellig mit diesen fuenf
+     Zeichen beginnt (z.B. "!stopped working on X"), als Abbruch-Befehl.
+  2. Schwerwiegender: eine angegebene, aber zu KEINEM laufenden Auftrag
+     passende (vertippte oder laengst beendete) Lauf-Id fiel im
+     `daemon.ts`-Handler NICHT auf "kein Ziel" zurueck -- der rohe Text
+     blieb als `ziel` stehen, `orchestratoren.get(ziel)` und
+     `supervisor.agentenListe(ziel)` liefen ins Leere (keine Wirkung), aber
+     die Konsole loggte trotzdem `Lauf ... abgebrochen` und der Discord-
+     Nutzer bekam ein bestaetigendes 🛑. Wer sich auf diese Meldung
+     verlaesst, glaubt faelschlich, einen (noch laufenden!) Auftrag gestoppt
+     zu haben.
+  Beide Faelle jetzt in zwei reinen, neu exportierten Funktionen
+  (`istStopBefehl()`, `stopZielAufloesen()`) behoben UND automatisiert
+  testbar gemacht (`tests/discord.test.mjs`, neu, 13 Faelle) -- vorher gab
+  es fuer `discord.ts` ueberhaupt keine Tests. Weiterhin kein echter
+  Discord-Server zum Live-Verifizieren verfuegbar, aber die Logik selbst ist
+  jetzt bewiesen, nicht nur gelesen. Der Rest von `daemon.ts` (alle
+  REST-Routen, WebSocket-Verteilung, Koerpergroessen-Deckel, CORS/Herkunfts-
+  Pruefung, geordnetes Herunterfahren) und `kontenNutzung.ts` beim
+  gruendlichen Durchlesen sonst unauffaellig -- keine weiteren Funde.
 - **Durchgang 8:** Prioritaet 2, den bisher offenen Punkt "Zustaende mit
   aktiven Agenten noch nicht visuell geprueft" (aus Durchgang 5) endlich
   angegangen -- und dabei zwei echte, zusammenhaengende Bugs gefunden und
@@ -852,19 +912,15 @@ begruendeten Entscheidung notiert.
 
 ## Offene Punkte (Prioritaet 1, noch zu pruefen)
 
-- [ ] **Daemon-Neustart:** `gesperrtBis` und `nutzung` in
-  `KontenVerwaltung` sind reiner In-Memory-Zustand (`new Map()`, kein
-  Laden/Speichern). Nach einem Neustart gelten alle Konten wieder als frei
-  und ungemessen (0 %), bis der naechste Poll (bis zu 10 Minuten) oder ein
-  neues `rate_limit_event` etwas meldet. Folge: ein Konto, das eigentlich
-  noch bis zum Reset gesperrt waere, wird sofort wieder probiert -- im
-  schlimmsten Fall ein weiterer sofortiger Limit-Fehler, der sich aber dank
-  des Anmeldefehler-Fixes jetzt wenigstens sauber als Wechsel und nicht als
-  toter Lauf zeigt. **Einschaetzung:** wahrscheinlich hinnehmbar (Daemon
-  laeuft normalerweise wochenlang durch, siehe `laufVergessen()`-Kommentar),
-  aber nicht verifiziert. Persistieren waere eine kleine JSON-Datei neben
-  der DB -- das ist eine Produktentscheidung (mehr bewegliche Teile fuer
-  einen Randfall), noch nicht umgesetzt.
+- [x] **Daemon-Neustart:** `gesperrtBis` (Sperren) und der manuelle Vorzug
+  in `KontenVerwaltung` waren reiner In-Memory-Zustand -- vor Durchgang 10
+  behoben, siehe Kurzfassung oben ("Konten: Sperren und Vorzug ueberleben
+  jetzt einen Daemon-Neustart", zwei neue SQLite-Tabellen, nachgeladen beim
+  Start, bei jeder Aenderung durchgeschrieben). **Bewusst NICHT persistiert:**
+  die Nutzungsmessungen (`nutzung`, %-Werte) selbst -- die aktualisieren
+  sich ohnehin per Poll binnen Minuten neu, ein Neustart macht sie
+  hoechstens kurz ungenau (0% bis zum naechsten Poll), nie faelschlich
+  gesperrt/entsperrt (das haengt jetzt allein an der persistierten Sperre).
 - [x] **Kontowechsel beim Chat-Fortsetzen** (`src/chats.ts`,
   `fortsetzungVorbereiten`/`fortsetzungAktualisieren`): in Durchgang 4
   durchdacht und live verifiziert -- Session-Buchhaltung ist korrekt
@@ -877,9 +933,13 @@ begruendeten Entscheidung notiert.
   kommt an (Typ `protocol`), "alle Konten gesperrt" NICHT direkt fuer
   Chat-Zuege (Typ `rate_limit`, wird nur fuer `protocol`/`error`
   weitergereicht) -- vermutlich kein Bug, da Discord Chats gar nicht kennt.
-  Siehe "Erledigt" oben fuer Details. Nicht live gegen einen echten
-  Discord-Server getestet (kein Server verfuegbar, `COCKPIT_DISCORD_TOKEN`
-  in der Testinstanz bewusst leer).
+  Siehe "Erledigt" oben fuer Details. In Durchgang 10 noch einmal
+  gruendlicher gegengelesen (`daemon.ts` UND `discord.ts` zusammen, nicht
+  nur die Ereignis-Verdrahtung) -- dabei zwei echte Bugs im `!stop`-Befehl
+  gefunden und behoben, siehe "Erledigt (Durchgang 10)" unten. Weiterhin
+  NICHT live gegen einen echten Discord-Server getestet (keiner verfuegbar,
+  `COCKPIT_DISCORD_TOKEN` in der Testinstanz bewusst leer) -- die Fixes sind
+  aber jetzt als reine Funktionen automatisiert testbar und getestet.
 - [x] **Anzeige in allen Zustaenden** (Server-Tab): in Durchgang 4 der
   Server-Tab (Kontokarten) gegengelesen, kein Fehler gefunden (siehe
   "Erledigt" oben). Zentrale (`web/tabs/zentrale.js`) hatte schon vorher
@@ -917,15 +977,14 @@ begruendeten Entscheidung notiert.
   Mess-Artefakt des eigenen Testskripts (siehe Kurzfassung oben), kein
   echter Bug. Nur genau 800px getestet, nicht der ganze 768-820px-Bereich.
 - [ ] `src-tauri/` nicht angefasst -- kein cargo hier verfuegbar.
-- [ ] **Neu, nicht behoben:** Chats-, Vault- und Server-Tab zeigen bei einem
-  fehlgeschlagenen ERSTEN Laden (Server nicht erreichbar, noch nie zuvor
-  erfolgreich geladen) die rohe JS-Fehlermeldung `TypeError: Failed to
-  fetch` statt eines deutschen Satzes wie in `lauf.js`
-  ("Kein Daemon erreichbar auf ..."). Nicht irrefuehrend, nur unschoen --
-  ein spaeterer Durchgang koennte `String(e)` durch eine freundlichere
-  Meldung ersetzen, an allen drei Stellen (`web/tabs/chats.js`,
-  `web/tabs/vault.js`, `web/tabs/server.js`, jeweils im catch-Zweig des
-  initialen Ladens).
+- [x] Rohe `TypeError: Failed to fetch`-Meldung bei fehlgeschlagenem ERSTEN
+  Laden in Chats/Vault/Server-Tab: vor Durchgang 10 behoben (neue
+  `ladefehlerText()`-Hilfsfunktion in `web/bus.js`, wie in `lauf.js`), siehe
+  Kurzfassung oben. NICHT nochmal visuell im Browser gegengeprueft (die
+  ohnehin schon fragile Playwright-Verfuegbarkeit in dieser Umgebung wurde
+  in diesem Durchgang nicht erneut getestet) -- nur per Code-Review und den
+  bestehenden Beleg-Traces aus Durchgang 8 (identischer catch-Zweig, nur der
+  angezeigte Text aendert sich) bestaetigt.
 
 ## Offene Punkte (Prioritaet 3 -- Rest des Cockpits)
 
