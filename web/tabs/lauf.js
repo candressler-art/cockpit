@@ -210,7 +210,8 @@ function limitZeichnen(l) {
   const eng = (l.fuenfStundenAnteil ?? 0) > 0.8 || (l.siebenTageAnteil ?? 0) > 0.8
   limitEl.className = 'pill' + (l.status !== 'allowed' ? ' ab' : eng ? ' ab' : ' an')
   limitEl.title = `Status: ${l.status}${l.rateLimitType ? ' · ' + l.rateLimitType : ''}` +
-    ' — gemessene Werte vom Server, keine Schaetzung'
+    ' — gemessene Werte vom zuletzt aktiven Konto, keine Schaetzung.' +
+    ' Alle Konten: Tab „Server" oder „Zentrale".'
 }
 
 function freigabeSetzen(f) {

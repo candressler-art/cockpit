@@ -15,6 +15,9 @@ import { api, abonnieren } from '../bus.js'
 let wurzel = null
 let letzter = null
 let letzteKonten = []
+let letzterModus = 'ausgeglichen'
+let letztesNaechstesKonto = null
+let letzterAbstandPunkte = null
 let vorn = false
 let kontenIntervall = null
 
@@ -96,19 +99,29 @@ function resetText(gesperrtBis) {
   return heute ? `gesperrt bis ${zeit}` : `gesperrt bis ${d.toLocaleDateString('de-DE')} ${zeit}`
 }
 
+/** Kurztext, wann und woher der Nutzungswert eines Kontos stammt. */
+function nutzungHerkunft(k) {
+  if (!k.gemessenAm) return 'noch nie gemessen'
+  const zeit = new Date(k.gemessenAm).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
+  const quelle = k.quelle === 'usage_api' ? 'API-Abfrage' : k.quelle === 'rate_limit_event' ? 'aus einem Lauf' : ''
+  return `gemessen ${zeit}${quelle ? ` · ${quelle}` : ''}`
+}
+
 function kontoKarte(k) {
   const gesperrt = Boolean(k.gesperrtBis)
   // Dieselbe Kartensprache wie die Hosts (.hostkarte, Eckklammern aus
   // hud.css) -- nicht angemeldet zaehlt wie ein toter Host, gesperrt wie ein
   // heisser.
   const kartenzustand = !k.angemeldet ? '' : gesperrt ? 'heiss' : 'ok'
+  const naechstes = k.angemeldet && !gesperrt && k.name === letztesNaechstesKonto
   return `<article class="hostkarte kontokarte ${kartenzustand}" data-konto="${esc(k.name)}">
     <header class="hostkopf">
       <span class="ampel ${k.angemeldet ? 'an' : 'ab'}"></span>
       <h3>${esc(k.name)}</h3>
       ${k.abo ? `<span class="quelle" title="Abo">${esc(k.abo)}</span>` : ''}
       <div class="spacer"></div>
-      ${k.bevorzugt ? '<span class="pill an">bevorzugt</span>' : ''}
+      ${k.bevorzugt ? '<span class="pill an" title="manuell gesetzt">manuell</span>' : ''}
+      ${naechstes ? '<span class="pill an" title="kaeme als naechstes dran">als naechstes</span>' : ''}
       ${!k.angemeldet
         ? '<span class="pill ab">nicht angemeldet</span>'
         : gesperrt
@@ -121,6 +134,11 @@ function kontoKarte(k) {
         ${k.bevorzugt ? 'Vorzug aufheben' : 'Bevorzugen'}
       </button>
     </div>
+    ${k.angemeldet ? `<div class="messungen kontomessungen">
+      ${ring('Woche', k.siebenTageAnteil === null ? null : k.siebenTageAnteil * 100, '')}
+      ${ring('5 Std.', k.fuenfStundenAnteil === null ? null : k.fuenfStundenAnteil * 100, '')}
+    </div>
+    <div class="kontonutzung">${esc(nutzungHerkunft(k))}</div>` : ''}
   </article>`
 }
 
@@ -138,9 +156,21 @@ async function vorzugSetzen(name, aufheben) {
   await kontenLaden()
 }
 
+function kontenKopfZeichnen() {
+  const el = wurzel?.querySelector('#kontokopf')
+  if (!el) return
+  const modusText = letzterModus === 'manuell' ? 'manuell gesteuert' : 'ausgeglichen (Balancing)'
+  const abstandText = letzterAbstandPunkte === null
+    ? ''
+    : ` · Abstand ${letzterAbstandPunkte.toFixed(0)} Punkte`
+  const naechstesText = letztesNaechstesKonto ? ` · als naechstes: ${letztesNaechstesKonto}` : ''
+  el.textContent = `Modus: ${modusText}${abstandText}${naechstesText}`
+}
+
 function kontenZeichnen() {
   const el = wurzel?.querySelector('#kontoliste')
   if (!el) return
+  kontenKopfZeichnen()
   if (letzteKonten.length === 0) {
     el.innerHTML = '<div class="leer">keine Konten gefunden</div>'
     return
@@ -159,6 +189,9 @@ async function kontenLaden() {
   try {
     const r = await fetch(api('/api/konten')).then((x) => x.json())
     letzteKonten = r.konten ?? []
+    letzterModus = r.modus ?? 'ausgeglichen'
+    letztesNaechstesKonto = r.naechstesKonto ?? null
+    letzterAbstandPunkte = typeof r.abstandPunkte === 'number' ? r.abstandPunkte : null
   } catch {
     // Ohne Antwort bleibt die letzte bekannte Liste stehen statt einer
     // Fehlerwand -- die Serverkarten darunter sind das Wichtigere auf diesem Tab.
@@ -190,6 +223,7 @@ export default {
     wurzel = el
     el.innerHTML = `
       <h2>Konten</h2>
+      <div id="kontokopf" class="kontokopf"></div>
       <div id="kontoliste" class="kontoliste"><div class="leer">Konten werden geholt…</div></div>
       <h2>Auslastung</h2>
       <div id="hostliste"><div class="leer">Werte werden geholt…</div></div>`

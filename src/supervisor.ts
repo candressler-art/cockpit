@@ -13,10 +13,11 @@ import { einordnen } from './normalisieren.js'
 import {
   KontenVerwaltung,
   HAUPT_KONTO,
+  kontenLesen,
   sperrzeitpunktAusLimitstand,
   versuchPrompt,
   type Konto,
-  type KontoMitZustand,
+  type KontenUebersicht,
 } from './konten.js'
 import {
   limitStandLesen,
@@ -108,15 +109,6 @@ export class Supervisor extends EventEmitter {
    * bleiben soll und keinen Kontonamen erwartet.
    */
   private limitStand: LimitStand | null = null
-  /**
-   * Derselbe Stand, aber je Konto -- daraus entscheidet sich, WIE LANGE ein
-   * Konto beim Wechsel gesperrt wird. this.limitStand allein reicht dafuer
-   * nicht: laeuft Konto A ins Limit und der Agent macht mit Konto B weiter,
-   * ueberschreibt dessen naechstes rate_limit_event denselben gemeinsamen
-   * Stand -- und A wuerde bei einem spaeteren Wechsel mit B's Reset-Zeit
-   * gesperrt, nicht mit seiner eigenen.
-   */
-  private limitStandJeKonto = new Map<string, LimitStand>()
   private offeneFreigaben = new Map<
     string,
     { aufloesen: (erlaubt: boolean, grund: string | null) => void; anfrage: PermissionRequest }
@@ -128,9 +120,31 @@ export class Supervisor extends EventEmitter {
     this.db = db
   }
 
-  /** Alle bekannten Konten mit Sperr- und Vorzugsstatus, fuer /api/konten. */
-  kontenListe(): KontoMitZustand[] {
-    return this.konten.alleMitZustand()
+  /** Gesamtbild aller Konten (Liste, Modus, naechstes Konto, Abstand) fuer /api/konten. */
+  kontenUebersicht(): KontenUebersicht {
+    return this.konten.uebersicht()
+  }
+
+  /** Angemeldete Konten -- Grundlage fuer den periodischen Nutzungs-Poll in daemon.ts. */
+  angemeldeteKonten(): Konto[] {
+    return kontenLesen().filter((k) => k.angemeldet)
+  }
+
+  /**
+   * Nutzungsstand eines Kontos melden -- von aussen (kontenNutzung.ts, der
+   * verbrauchsfreie Poll) oder von innen (rate_limit_event, siehe unten).
+   * Beide Quellen landen in derselben Ablage in konten.ts; die trennt
+   * "zuletzt gemessen gewinnt" von der Herkunft.
+   */
+  nutzungMelden(name: string, stand: LimitStand, quelle: 'usage_api' | 'rate_limit_event'): void {
+    this.konten.nutzungMelden(name, stand, quelle)
+    // Meldet der Poll ein volles Fenster, gleich sperren -- sonst ginge der
+    // naechste Agentenstart erst auf dieses Konto, liefe sofort ins Limit
+    // und wechselte dann. rate_limit_event braucht das nicht: dort kommt
+    // der Limitfehler ohnehin und der Wechsel oben sperrt selbst.
+    if (quelle === 'usage_api' && stand.status === 'rejected') {
+      this.konten.sperren(name, sperrzeitpunktAusLimitstand(stand, Date.now(), KONTO_SPERRE_VORGABE_MS))
+    }
   }
 
   /** Setzt das bevorzugte Konto. null hebt die Bevorzugung auf. */
@@ -297,7 +311,7 @@ export class Supervisor extends EventEmitter {
         // zuletzt gesehenen ueberhaupt -- der koennte laengst von einem
         // anderen Konto ueberschrieben sein. Und passend zum Fenster, das
         // wirklich griff (5h/7d), nicht immer 5h.
-        const standDesKontos = this.limitStandJeKonto.get(konto.name) ?? null
+        const standDesKontos = this.konten.nutzungLesen(konto.name)?.stand ?? null
         const reset = sperrzeitpunktAusLimitstand(standDesKontos, Date.now(), KONTO_SPERRE_VORGABE_MS)
         this.konten.sperren(konto.name, reset)
         const naechstes = this.konten.waehlen(versuchteKonten)
@@ -539,7 +553,7 @@ export class Supervisor extends EventEmitter {
         // bisher) UND je Konto, damit eine spaetere Sperre den RICHTIGEN
         // Reset-Zeitpunkt bekommt.
         this.limitStand = stand
-        if (kontoName) this.limitStandJeKonto.set(kontoName, stand)
+        if (kontoName) this.konten.nutzungMelden(kontoName, stand, 'rate_limit_event')
         this.emit('limit', stand)
       }
     }

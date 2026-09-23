@@ -224,10 +224,16 @@
   .hinweis code{font:11px/1 var(--mono);background:var(--crust);padding:2px 5px;border-radius:3px}
   /* Konten -- dieselbe Kartensprache wie die Hosts (.hostkarte, siehe hud.css
      fuer die Eckklammern), nur mit einer Zeile statt Ringen. */
+  .kontokopf{font-size:11px;color:var(--overlay);margin-bottom:8px}
   .kontoliste{display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));margin-bottom:18px}
   .kontokarte{padding:10px 14px}
   .kontozeile{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
   .kontoemail{font-size:11px;color:var(--subtext);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
+  .kontomessungen{margin-top:8px;justify-content:flex-start;gap:18px}
+  .kontomessungen .ring{width:46px;height:46px}
+  .kontomessungen .messung .wert{font-size:11px}
+  .kontomessungen .messung .was{font-size:9px}
+  .kontonutzung{font-size:10px;color:var(--overlay);margin-top:2px}
   #stimmwahl{flex:0 0 auto;max-width:130px}
   @media (max-width:820px){ #stimmwahl{max-width:52px} }
   /* --- Tab "Chats" --------------------------------------------------------
@@ -397,7 +403,11 @@
     #kcwd{width:100%}
   }
   /* --- Tab "Zentrale" ----------------------------------------------------- */
-  #tab-zentrale{padding:0;display:flex;flex-direction:column;overflow:hidden}
+  /* .an noetig, sonst schlaegt diese ID-Regel .tabflaeche{display:none}
+     an Spezifitaet und die Zentrale bleibt sichtbar, auch wenn ein anderer
+     Tab aktiv ist (gefunden beim Test des Server-Tabs: die Kacheln
+     "Nutzungsfenster"/"Serverlast" blieben oben stehen). */
+  #tab-zentrale.an{padding:0;display:flex;flex-direction:column;overflow:hidden}
   .z-raster{flex:1;min-height:0;display:grid;gap:12px;padding:12px;
     grid-template-columns:repeat(4,1fr);grid-template-rows:1.25fr 1fr auto;
     grid-template-areas:"kern kern limit last" "kern kern agenten strom"
@@ -435,6 +445,14 @@
   .z-ringtitel{font:10px var(--mono);color:var(--subtext);margin-top:5px}
   .z-ringnote{font:9px var(--mono);color:var(--overlay)}
   .z-fuss{font:10px var(--mono);color:var(--overlay);margin-top:auto}
+  #z-limitliste,#z-lastliste{overflow-y:auto;min-height:0;display:flex;
+    flex-direction:column;gap:8px}
+  .z-kontoblock,.z-hostblock{display:flex;flex-direction:column;gap:2px}
+  .z-kontoname{font:10px var(--mono);color:var(--subtext);letter-spacing:.03em;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .z-kontoblock+.z-kontoblock,.z-hostblock+.z-hostblock{border-top:1px solid var(--hud-rand);
+    padding-top:8px}
+  #z-limitmodus{font-size:9.5px}
   #z-agentenliste,#z-stromliste{overflow-y:auto;min-height:0;display:flex;
     flex-direction:column;gap:6px}
   .z-agent{background:var(--base);border:1px solid var(--surface0);border-radius:7px;
@@ -473,11 +491,21 @@
   .z-gzeile.cockpit{color:var(--hud)}
 
   @media (max-width:820px){
+    /* min-content statt auto: das Raster hat hier eine feste Hoehe (es
+       scrollt selbst), und auto-Zeilen mit Kacheln aus min-height:0 teilten
+       sich nur den Rest -- jede Kachel ~40px, Inhalt abgeschnitten (auch
+       "Neuer Auftrag" schon vorher). min-content gibt jeder ihre Hoehe. */
     .z-raster{grid-template-columns:1fr;
-      grid-template-rows:auto auto auto auto auto auto;
+      grid-template-rows:repeat(6,min-content);
       grid-template-areas:"kern" "auftrag" "limit" "last" "agenten" "strom";overflow-y:auto}
     #a-cwd{width:100%}
     #z-kern{min-height:46vh}
+    /* Zeilen sind hier "auto" -- die Listen mit min-height:0/overflow:auto
+       aus dem Desktop-Raster schrumpften dabei auf 0, und von Nutzungsfenster
+       und Serverlast blieb nur die Kopfzeile. Hier also volle Inhaltshoehe;
+       Agenten/Strom koennen lang werden und bekommen eine Obergrenze. */
+    #z-limitliste,#z-lastliste{flex:none;overflow:visible}
+    #z-agentenliste,#z-stromliste{flex:none;max-height:40vh}
     .z-sprachtext{display:none}
     .z-sprachleiste{margin:0 8px 8px;gap:8px;padding:7px 10px;flex-wrap:wrap}
     .z-gespraech{margin:0 8px 8px;max-height:90px}

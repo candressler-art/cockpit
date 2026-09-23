@@ -185,14 +185,22 @@ Arbeitsverzeichnis, nicht am Konto.
 `src/konten.ts` scannt dieses Verzeichnis bei jedem Zugriff neu (kein
 Zwischenspeicher), damit ein frisch angemeldetes Konto ohne Neustart des
 Daemons auftaucht. Nur ein Konto mit gueltiger `.credentials.json` gilt als
-nutzbar. Der Supervisor waehlt je Agentenstart das bevorzugte Konto, sonst das
-erste freie; laeuft ein Konto in ein Nutzungslimit, wird es bis zum
+nutzbar. Der Supervisor waehlt je Agentenstart das bevorzugte Konto (manuelle
+Uebersteuerung), sonst das Konto mit dem niedrigsten Wochenanteil
+(Balancing, 3 Punkte Hysterese gegen Hin- und Herspringen). Den Wochenanteil
+misst ein Poll alle 10 Minuten ueber `/api/oauth/usage?skip_spend=1`
+(`src/kontenNutzung.ts`, verbraucht nichts) und nebenbei jedes
+`rate_limit_event` eines laufenden Agenten. Meldet der Poll ein volles
+Fenster, wird das Konto sofort bis zum Reset gesperrt. Ist das Token eines
+ungenutzten Kontos abgelaufen, liefert der Poll nichts (kein eigener
+Token-Refresh) -- das Konto zaehlt dann als ungemessen (0 %), und es greift
+der Wechsel beim Limit. Laeuft ein Konto in ein Nutzungslimit, wird es bis zum
 gemessenen oder geschaetzten Reset gesperrt und der Agent macht per `resume`
 mit dem naechsten freien Konto weiter, statt in `waiting_ratelimit` zu parken
 -- sichtbar als Protokollzeile im Lauf-Log. Erst wenn alle Konten gesperrt
 sind, gilt das alte Warteverhalten. `GET /api/konten` und `POST /api/konten`
-lesen bzw. setzen den Vorzug; der Server-Tab zeigt die Konten mit Ampel, Abo
-und Sperrstatus.
+lesen bzw. setzen den Vorzug; Server-Tab und Zentrale zeigen je Konto Woche
+und 5 Stunden, den Modus (ausgeglichen/manuell) und wer als naechstes drankaeme.
 
 ## Fachrollen
 
@@ -303,7 +311,7 @@ kein Profil.
 | `/api/abbrechen` | POST | Agent oder ganzen Lauf abbrechen |
 | `/api/gesundheit` | GET | Status und letzter Limitstand |
 | `/api/rollen` | GET | verfuegbare Fachrollen |
-| `/api/konten` | GET | bekannte Konten mit Anmelde-, Sperr- und Vorzugsstatus |
+| `/api/konten` | GET | Konten mit Anmelde-, Sperr-, Vorzugs- und Nutzungsstand, dazu `modus`, `naechstesKonto`, `abstandPunkte` |
 | `/api/konten` | POST | bevorzugtes Konto setzen (`name`, `null` hebt es auf) |
 | `/api/system` | GET | Auslastung beider Server |
 | `/api/chats?q=` | GET | Sessions suchen |

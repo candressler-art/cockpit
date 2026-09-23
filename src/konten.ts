@@ -31,7 +31,37 @@ export interface Konto {
 export interface KontoMitZustand extends Konto {
   /** null: frei. Sonst ms-Zeitstempel, bis zu dem das Konto gesperrt ist. */
   gesperrtBis: number | null
+  /** Manuell als Vorzug gesetzt (Uebersteuerung, siehe Uebersicht.modus). */
   bevorzugt: boolean
+  /** Anteil 0..1 am 5h-Fenster, oder null, wenn nie gemessen. */
+  fuenfStundenAnteil: number | null
+  /** Anteil 0..1 am Wochenfenster, oder null, wenn nie gemessen. */
+  siebenTageAnteil: number | null
+  /** Wann der Wert unten gemessen wurde, oder null ohne jede Messung. */
+  gemessenAm: number | null
+  /** Woher der Wert stammt -- fuer die Oberflaeche, damit man dem Wert die
+   *  richtige Verlaesslichkeit zutraut (siehe kontenNutzung.ts). */
+  quelle: 'usage_api' | 'rate_limit_event' | null
+}
+
+/**
+ * Gesamtbild aller Konten, wie /api/konten es liefert: die Liste selbst,
+ * plus die zwei Zahlen, die man beim Draufschauen zuerst wissen will --
+ * "in welchem Modus laeuft das gerade" und "wer kommt als naechstes dran".
+ */
+export interface KontenUebersicht {
+  konten: KontoMitZustand[]
+  /** 'manuell': ein Vorzug ist gesetzt und schlaegt das Balancing.
+   *  'ausgeglichen': die Vorgabe -- das Balancing waehlt frei. */
+  modus: 'manuell' | 'ausgeglichen'
+  /** Name des Kontos, das eine Wahl JETZT treffen wuerde -- unter
+   *  Beruecksichtigung von Sperren, Vorzug und Hysterese. null, wenn keines
+   *  nutzbar ist. */
+  naechstesKonto: string | null
+  /** Groesster Abstand im Wochenanteil zwischen zwei angemeldeten Konten,
+   *  in Prozentpunkten (0..100). null, solange weniger als zwei angemeldete
+   *  Konten einen gemessenen Wochenanteil haben. */
+  abstandPunkte: number | null
 }
 
 export const HAUPT_KONTO = 'haupt'
@@ -134,26 +164,52 @@ export function kontenLesen(): Konto[] {
 }
 
 /**
+ * Ab welchem Abstand (0..1-Skala, 0.03 = 3 Prozentpunkte) das Balancing vom
+ * aktuell genutzten Konto weg zum niedrigeren wechselt. Ohne diese Schwelle
+ * wuerde ein Lauf mit vielen kurzen Agentenstarts bei einem Unterschied von
+ * einem einzigen Punkt staendig zwischen zwei fast gleich ausgelasteten
+ * Konten hin- und herspringen. Klein genug, dass die von Can verlangte
+ * 10-Punkte-Grenze im Wochenanteil auch bei einem einzelnen grossen Lauf auf
+ * dem gerade genutzten Konto nicht gerissen wird.
+ */
+export const BALANCING_HYSTERESE = 0.03
+
+/** Konto-Ausschnitt, den das Balancing braucht -- nur der Wochenanteil zaehlt. */
+export interface KontoBalancing {
+  name: string
+  /** Anteil 0..1 am Wochenfenster. null = nie gemessen, zaehlt als 0 --
+   *  ein ungemessenes Konto soll nicht bevorzugt UNGENUTZT bleiben. */
+  siebenTageAnteil: number | null
+}
+
+/**
  * Waehlt ein Konto aus einer Liste NUTZBARER Konten (der Aufrufer filtert
  * vorher auf `angemeldet`). Reine Funktion, keine Seiteneffekte -- deshalb
  * direkt testbar ohne Dateisystem oder Zeit.
  *
  * Regeln, in dieser Reihenfolge:
- *   1. Das bevorzugte Konto, wenn es in der Liste steht und frei ist.
- *   2. Sonst das erste freie Konto in Listenreihenfolge.
- *   3. Ist keines frei, null -- der Aufrufer wartet dann wie bisher.
+ *   1. Ein gesperrtes oder ausgeschlossenes Konto scheidet SOFORT aus --
+ *      das gilt auch fuer das bevorzugte und fuer das aktuell genutzte.
+ *      Eine Limitsperre ist immer vorrangig vor Vorzug und Balancing.
+ *   2. Das manuell bevorzugte Konto, wenn es frei ist -- das schlaegt das
+ *      Balancing vorbehaltlos, das IST die Uebersteuerung.
+ *   3. Ohne (nutzbaren) Vorzug: Ausgeglichenes Balancing. Das Konto mit dem
+ *      niedrigsten Wochenanteil gewinnt. Ist aber das aktuell genutzte
+ *      Konto noch innerhalb der Hysterese-Schwelle zum niedrigsten, bleibt
+ *      es dabei -- sonst spraenge das Balancing bei praktisch gleichauf
+ *      liegenden Konten bei jedem Agentenstart hin und her.
+ *   4. Ist keines frei, null -- der Aufrufer wartet dann wie bisher.
  *
  * `ausgeschlossen` nimmt Konten aus der Wahl, die in diesem Wechselzyklus
- * schon versucht wurden. Ohne das koennte ein Konto, dessen Sperre der
- * Aufrufer gerade erst gesetzt hat, aber dessen gesperrtBis-Eintrag noch
- * nicht... -- eigentlich unkritisch, da gesperrtBis sofort greift. Der
- * eigentliche Zweck ist, einen Doppelwechsel bei einem einzigen Limitfehler
- * zu verhindern: jedes Konto wird je Fehlerzyklus hoechstens einmal versucht.
+ * schon versucht wurden -- verhindert einen Doppelwechsel bei einem
+ * einzigen Limitfehler: jedes Konto wird je Fehlerzyklus hoechstens einmal
+ * versucht.
  */
 export function kontoWaehlen(
-  konten: readonly { name: string }[],
+  konten: readonly KontoBalancing[],
   gesperrtBis: ReadonlyMap<string, number | null>,
   bevorzugt: string | null,
+  aktuellesKonto: string | null,
   jetzt: number,
   ausgeschlossen?: ReadonlySet<string>,
 ): string | null {
@@ -162,11 +218,28 @@ export function kontoWaehlen(
     const bis = gesperrtBis.get(name) ?? null
     return bis === null || bis <= jetzt
   }
+
   if (bevorzugt && frei(bevorzugt) && konten.some((k) => k.name === bevorzugt)) {
     return bevorzugt
   }
-  const erstes = konten.find((k) => frei(k.name))
-  return erstes ? erstes.name : null
+
+  const nutzbar = konten.filter((k) => frei(k.name))
+  if (nutzbar.length === 0) return null
+
+  const anteil = (k: KontoBalancing): number => k.siebenTageAnteil ?? 0
+  let bestes = nutzbar[0]!
+  for (const k of nutzbar) {
+    if (anteil(k) < anteil(bestes)) bestes = k
+  }
+
+  if (aktuellesKonto) {
+    const aktuell = nutzbar.find((k) => k.name === aktuellesKonto)
+    if (aktuell && anteil(aktuell) - anteil(bestes) < BALANCING_HYSTERESE) {
+      return aktuell.name
+    }
+  }
+
+  return bestes.name
 }
 
 /**
@@ -177,6 +250,23 @@ export function kontoWaehlen(
 export class KontenVerwaltung {
   private bevorzugt: string | null = null
   private gesperrtBis = new Map<string, number>()
+  /**
+   * Letzter bekannter Nutzungsstand je Konto -- aus welcher der beiden
+   * Quellen auch immer zuletzt etwas kam (kontenNutzung.ts fuer den
+   * verbrauchsfreien Weg, supervisor.ts fuer rate_limit_event). "Zuletzt
+   * gemessen gewinnt" ueber beide Quellen hinweg: ein alter Wert wird nie
+   * VERWORFEN, nur von einem neueren ueberschrieben -- genau das ist
+   * gemeint mit "ein alter Wert gilt als Obergrenze", denn der Anteil
+   * innerhalb eines Fensters sinkt zwischen zwei Messungen nie von selbst,
+   * er kann sich nur durch echten weiteren Verbrauch erhoehen oder durch
+   * einen Fensterreset auf einen neuen (niedrigeren) Wert fallen -- beides
+   * bildet die naechste Messung dann ab.
+   */
+  private nutzung = new Map<string, { stand: LimitStand; quelle: 'usage_api' | 'rate_limit_event' }>()
+  /** Welches Konto der letzte erfolgreiche waehlen()-Aufruf zurueckgab --
+   *  Grundlage der Hysterese, damit ein knapper Vorsprung des jeweils
+   *  anderen Kontos nicht bei jedem Agentenstart neu den Ausschlag gibt. */
+  private zuletztGenutzt: string | null = null
 
   bevorzugtesKontoSetzen(name: string | null): void {
     this.bevorzugt = name
@@ -198,14 +288,45 @@ export class KontenVerwaltung {
   }
 
   /**
-   * Waehlt das naechste nutzbare Konto. `ausgeschlossen` reicht durch an
-   * kontoWaehlen -- fuer den Fall, dass ein Agent innerhalb desselben
-   * Limitfehler-Zyklus schon mehrere Konten durchprobiert hat.
+   * Nutzungsstand eines Kontos melden -- von kontenNutzung.ts (Poll alle
+   * ~10 min) oder von supervisor.ts (aus rate_limit_event waehrend eines
+   * laufenden Agenten). Ueberschreibt nur, wenn die neue Messung nicht
+   * AELTER ist als die vorhandene -- eine rate_limit_event-Meldung, die
+   * waehrenddessen noch eintrudelt, soll eine frischere Poll-Antwort nicht
+   * rueckwirkend verdraengen.
+   */
+  nutzungMelden(name: string, stand: LimitStand, quelle: 'usage_api' | 'rate_limit_event'): void {
+    const vorhanden = this.nutzung.get(name)
+    if (vorhanden && vorhanden.stand.gemessenAm > stand.gemessenAm) return
+    this.nutzung.set(name, { stand, quelle })
+  }
+
+  /** Letzter bekannter Nutzungsstand eines Kontos, oder null ohne Messung. */
+  nutzungLesen(name: string): { stand: LimitStand; quelle: 'usage_api' | 'rate_limit_event' } | null {
+    return this.nutzung.get(name) ?? null
+  }
+
+  private balancingListe(nutzbar: readonly Konto[]): KontoBalancing[] {
+    return nutzbar.map((k) => ({
+      name: k.name,
+      siebenTageAnteil: this.nutzung.get(k.name)?.stand.siebenTageAnteil ?? null,
+    }))
+  }
+
+  /**
+   * Waehlt das naechste nutzbare Konto: Sperre vor Vorzug vor Balancing,
+   * siehe kontoWaehlen(). `ausgeschlossen` reicht durch -- fuer den Fall,
+   * dass ein Agent innerhalb desselben Limitfehler-Zyklus schon mehrere
+   * Konten durchprobiert hat.
    */
   waehlen(ausgeschlossen?: ReadonlySet<string>): Konto | null {
     const nutzbar = kontenLesen().filter((k) => k.angemeldet)
     if (nutzbar.length === 0) return null
-    const name = kontoWaehlen(nutzbar, this.gesperrtBisMap(), this.bevorzugt, Date.now(), ausgeschlossen)
+    const name = kontoWaehlen(
+      this.balancingListe(nutzbar), this.gesperrtBisMap(), this.bevorzugt,
+      this.zuletztGenutzt, Date.now(), ausgeschlossen,
+    )
+    if (name) this.zuletztGenutzt = name
     return name ? (nutzbar.find((k) => k.name === name) ?? null) : null
   }
 
@@ -214,17 +335,59 @@ export class KontenVerwaltung {
     return kontenLesen().find((k) => k.name === name) ?? null
   }
 
-  /** Alle Konten mit Sperr- und Vorzugsstatus, fuer /api/konten. */
-  alleMitZustand(): KontoMitZustand[] {
+  /** Alle Konten mit Sperr-, Vorzugs- und Nutzungsstatus, fuer /api/konten. */
+  private alleMitZustand(): KontoMitZustand[] {
     const jetzt = Date.now()
     return kontenLesen().map((k) => {
       const bis = this.gesperrtBis.get(k.name) ?? null
+      const n = this.nutzung.get(k.name) ?? null
       return {
         ...k,
         gesperrtBis: bis !== null && bis > jetzt ? bis : null,
         bevorzugt: k.name === this.bevorzugt,
+        fuenfStundenAnteil: n?.stand.fuenfStundenAnteil ?? null,
+        siebenTageAnteil: n?.stand.siebenTageAnteil ?? null,
+        gemessenAm: n?.stand.gemessenAm ?? null,
+        quelle: n?.quelle ?? null,
       }
     })
+  }
+
+  /**
+   * Gesamtbild fuer /api/konten: Liste, Modus, wer als naechstes drankaeme,
+   * und der aktuelle Wochenabstand -- das, was man beim Draufschauen zuerst
+   * wissen will, nicht erst aus der Liste selbst ausrechnen muss.
+   */
+  uebersicht(): KontenUebersicht {
+    const konten = this.alleMitZustand()
+    const angemeldet = konten.filter((k) => k.angemeldet)
+
+    // Nur gemessene Konten: ein nie gemessenes als 0 zu zaehlen (wie es das
+    // Balancing tut) wuerde hier einen Abstand anzeigen, den es nicht gibt --
+    // z. B. "100 Punkte", nur weil das zweite Token gerade abgelaufen ist.
+    let abstandPunkte: number | null = null
+    const anteile = angemeldet
+      .map((k) => k.siebenTageAnteil)
+      .filter((a): a is number => a !== null)
+    if (anteile.length >= 2) {
+      abstandPunkte = (Math.max(...anteile) - Math.min(...anteile)) * 100
+    }
+
+    // Dieselbe Wahl wie waehlen(), aber OHNE zuletztGenutzt zu veraendern --
+    // eine reine Anzeige darf den echten Zustand nicht durch blosses
+    // Ansehen verschieben.
+    const nutzbar = konten.filter((k) => k.angemeldet)
+    const naechstesKonto = kontoWaehlen(
+      this.balancingListe(nutzbar), this.gesperrtBisMap(), this.bevorzugt,
+      this.zuletztGenutzt, Date.now(),
+    )
+
+    return {
+      konten,
+      modus: this.bevorzugt ? 'manuell' : 'ausgeglichen',
+      naechstesKonto,
+      abstandPunkte,
+    }
   }
 }
 

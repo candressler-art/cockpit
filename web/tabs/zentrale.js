@@ -25,7 +25,11 @@ let welle = null
 let schleife = null
 let letzteAgenten = []
 let letztesSystem = null
-let letztesLimit = null
+let letzteKonten = []
+let letzterKontenModus = 'ausgeglichen'
+let letztesNaechstesKonto = null
+let letzterAbstandPunkte = null
+let kontenIntervall = null
 let ereignisse = []
 let abmelden = []
 
@@ -69,21 +73,15 @@ function geruest() {
       </section>
 
       <section class="z-panel hud-panel" id="z-limit">
-        <span class="hud-titel">Nutzungsfenster</span>
-        <div class="z-ringe">
-          <div class="z-ring"><div class="hud-ring" id="r-5h"><div>
-            <div class="hud-zahl" style="--zahl-groesse:17px" id="r-5h-t">—</div></div></div>
-            <div class="z-ringtitel">5 Stunden</div></div>
-          <div class="z-ring"><div class="hud-ring" id="r-7t"><div>
-            <div class="hud-zahl" style="--zahl-groesse:17px" id="r-7t-t">—</div></div></div>
-            <div class="z-ringtitel">7 Tage</div></div>
-        </div>
+        <div class="z-kopf"><span class="hud-titel">Nutzungsfenster</span>
+          <div class="spacer"></div><span class="hud-titel" id="z-limitmodus">—</span></div>
+        <div id="z-limitliste"><div class="leer">wird geholt…</div></div>
         <div class="z-fuss" id="z-reset">—</div>
       </section>
 
       <section class="z-panel hud-panel" id="z-last">
         <span class="hud-titel">Serverlast</span>
-        <div class="z-ringe" id="z-lastringe"><div class="leer">wird geholt…</div></div>
+        <div id="z-lastliste"><div class="leer">wird geholt…</div></div>
       </section>
 
       <section class="z-panel hud-panel" id="z-agenten">
@@ -337,50 +335,89 @@ function agentenZeichnen() {
   }).join('')
 }
 
-function limitZeichnen() {
-  if (!wurzel || !letztesLimit) return
-  const setz = (id, anteil) => {
-    const r = wurzel.querySelector(`#${id}`)
-    const t = wurzel.querySelector(`#${id}-t`)
-    if (!r || !t) return
-    const p = anteil === null || anteil === undefined ? null : Math.round(anteil * 100)
-    r.style.setProperty('--prozent', p ?? 0)
-    r.style.setProperty('--ring-farbe',
-      p === null ? 'var(--surface1)' : p >= 85 ? 'var(--fehler)' : p >= 60 ? 'var(--werkzeug)' : 'var(--hud)')
-    t.textContent = p === null ? '—' : `${p}%`
-    t.className = `hud-zahl${p >= 85 ? ' heiss' : p >= 60 ? ' warm' : ''}`
+/** Ein Ring wie in der Server-Auslastung -- gemeinsam fuer Konten und Hosts. */
+function zRing(titel, wert, zusatz, groesse = 62) {
+  const p = wert === null || wert === undefined ? null : Math.round(wert)
+  const farbe = p === null ? 'var(--surface1)'
+    : p >= 85 ? 'var(--fehler)' : p >= 60 ? 'var(--werkzeug)' : 'var(--hud)'
+  return `<div class="z-ring">
+    <div class="hud-ring" style="--prozent:${p ?? 0};--ring-farbe:${farbe};--ring-groesse:${groesse}px"><div>
+      <div class="hud-zahl" style="--zahl-groesse:14px">${p === null ? '—' : p + '%'}</div></div></div>
+    <div class="z-ringtitel">${titel}</div><div class="z-ringnote">${zusatz ?? ''}</div></div>`
+}
+
+/**
+ * Nutzungsfenster BEIDER Konten -- vorher zeigte diese Kachel nur das
+ * zuletzt aktive Konto (aus dem globalen 'limit'-Strom). Die Daten kommen
+ * jetzt aus /api/konten, derselben Quelle wie der Server-Tab.
+ */
+function kontenZeichnen() {
+  const liste = wurzel?.querySelector('#z-limitliste')
+  const modusEl = wurzel?.querySelector('#z-limitmodus')
+  if (!liste) return
+  if (modusEl) {
+    modusEl.textContent = letzterKontenModus === 'manuell' ? 'manuell' : 'ausgeglichen'
   }
-  setz('r-5h', letztesLimit.fuenfStundenAnteil)
-  setz('r-7t', letztesLimit.siebenTageAnteil)
-  // Die SDK liefert resetsAt/fuenfStundenResetsAt/siebenTageResetsAt in
-  // Sekunden seit Epoch, nicht in ms -- wie in lauf.js. Ohne die
-  // Umrechnung zeigte diese Stelle eine Reset-Zeit weit in der
-  // Vergangenheit an, obwohl der Reset noch bevorstand.
-  const r = letztesLimit.fuenfStundenResetsAt ?? letztesLimit.resetsAt
-  wurzel.querySelector('#z-reset').textContent = r
-    ? `zurückgesetzt ${new Date(r * 1000).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}`
-    : ''
+  const angemeldet = letzteKonten.filter((k) => k.angemeldet)
+  if (angemeldet.length === 0) {
+    liste.innerHTML = '<div class="leer">keine Konten angemeldet</div>'
+    wurzel.querySelector('#z-reset').textContent = ''
+    return
+  }
+  liste.innerHTML = angemeldet.map((k) => {
+    const wer = k.name === letztesNaechstesKonto ? ' · als naechstes' : ''
+    const kopf = `${esc(k.name)}${k.bevorzugt ? ' · manuell' : wer}`
+    return `<div class="z-kontoblock">
+      <div class="z-kontoname" title="${esc(k.email ?? '')}">${kopf}</div>
+      <div class="z-ringe">
+        ${zRing('Woche', k.siebenTageAnteil === null ? null : k.siebenTageAnteil * 100, '', 50)}
+        ${zRing('5 Std.', k.fuenfStundenAnteil === null ? null : k.fuenfStundenAnteil * 100, '', 50)}
+      </div>
+    </div>`
+  }).join('')
+
+  // Reset-Zeit des Kontos mit dem hoechsten Wochenanteil -- das ist die
+  // Grenze, die als naechstes greift, wenn niemand eingreift.
+  const engstes = angemeldet.reduce(
+    (a, b) => (b.siebenTageAnteil ?? 0) > (a.siebenTageAnteil ?? 0) ? b : a, angemeldet[0],
+  )
+  // textContent, also kein esc() -- das wuerde ein & als &amp; anzeigen.
+  // Ohne zwei gemessene Konten gibt es keinen Abstand, dann keine Zahl.
+  const teile = []
+  if (letzterAbstandPunkte !== null) teile.push(`Abstand ${letzterAbstandPunkte.toFixed(0)} Punkte`)
+  if (engstes?.siebenTageAnteil !== null && engstes?.siebenTageAnteil !== undefined) {
+    teile.push(`${engstes.name} am naechsten am Limit`)
+  }
+  wurzel.querySelector('#z-reset').textContent = teile.join(' · ')
+}
+
+async function kontenLaden() {
+  try {
+    const r = await fetch(api('/api/konten')).then((x) => x.json())
+    letzteKonten = r.konten ?? []
+    letzterAbstandPunkte = typeof r.abstandPunkte === 'number' ? r.abstandPunkte : null
+    letzterKontenModus = r.modus ?? 'ausgeglichen'
+    letztesNaechstesKonto = r.naechstesKonto ?? null
+  } catch { /* Der naechste Poll oder das naechste 'limit'-Ereignis holt es nach. */ }
+  kontenZeichnen()
 }
 
 function systemZeichnen() {
-  const el = wurzel?.querySelector('#z-lastringe')
+  const el = wurzel?.querySelector('#z-lastliste')
   if (!el || !letztesSystem) return
-  const h = letztesSystem.hosts?.[0]
-  if (!h) { el.innerHTML = '<div class="leer">keine Daten</div>'; return }
-  const ring = (titel, wert, zusatz) => {
-    const p = wert === null || wert === undefined ? null : Math.round(wert)
-    const farbe = p === null ? 'var(--surface1)'
-      : p >= 85 ? 'var(--fehler)' : p >= 60 ? 'var(--werkzeug)' : 'var(--hud)'
-    return `<div class="z-ring">
-      <div class="hud-ring" style="--prozent:${p ?? 0};--ring-farbe:${farbe};--ring-groesse:62px"><div>
-        <div class="hud-zahl" style="--zahl-groesse:15px">${p === null ? '—' : p + '%'}</div></div></div>
-      <div class="z-ringtitel">${titel}</div><div class="z-ringnote">${zusatz}</div></div>`
-  }
-  const temp = h.tempC === null || h.tempC === undefined ? '' : `${h.tempC.toFixed(0)} °C`
-  el.innerHTML =
-    ring('CPU', h.cpuProzent, temp) +
-    ring('Speicher', h.ramProzent, h.ramGesamtMb ? `${(h.ramGesamtMb / 1024).toFixed(1)} GB` : '') +
-    ring('Platte', h.plattenProzent, h.plattenGesamtGb ? `${h.plattenGesamtGb} GB` : '')
+  const hosts = letztesSystem.hosts ?? []
+  if (hosts.length === 0) { el.innerHTML = '<div class="leer">keine Daten</div>'; return }
+  el.innerHTML = hosts.map((h) => {
+    const temp = h.tempC === null || h.tempC === undefined ? '' : `${h.tempC.toFixed(0)} °C`
+    return `<div class="z-hostblock">
+      <div class="z-kontoname">${esc(h.name)}</div>
+      <div class="z-ringe">
+        ${zRing('CPU', h.cpuProzent, temp, 50)}
+        ${zRing('Speicher', h.ramProzent, h.ramGesamtMb ? `${(h.ramGesamtMb / 1024).toFixed(1)} GB` : '', 50)}
+        ${zRing('Platte', h.plattenProzent, h.plattenGesamtGb ? `${h.plattenGesamtGb} GB` : '', 50)}
+      </div>
+    </div>`
+  }).join('')
 }
 
 function stromZeichnen() {
@@ -457,7 +494,9 @@ export default {
       const notiz = notizAus(e)
       if (notiz) kern?.anstossen(notiz)
     }))
-    abmelden.push(abonnieren('limit', (l) => { letztesLimit = l; limitZeichnen() }))
+    // 'limit' kommt nur vom zuletzt aktiven Konto -- als Stossimpuls, die
+    // eigentlichen (Zwei-Konten-)Daten holt kontenLaden() ueber /api/konten.
+    abmelden.push(abonnieren('limit', () => void kontenLaden()))
     abmelden.push(abonnieren('system', (s) => { letztesSystem = s; systemZeichnen() }))
     abmelden.push(beiZustand((z) => {
       const s = wurzel?.querySelector('#z-sprachstatus')
@@ -465,15 +504,18 @@ export default {
     }))
 
     try {
-      const [sys, ges] = await Promise.all([
+      const [sys] = await Promise.all([
         fetch(api('/api/system')).then((r) => r.json()),
-        fetch(api('/api/gesundheit')).then((r) => r.json()),
+        kontenLaden(),
       ])
       letztesSystem = sys
-      letztesLimit = ges.limit
       systemZeichnen()
-      limitZeichnen()
     } catch { /* der Live-Strom liefert es gleich nach */ }
+
+    // Kein Live-Kanal fuer Konten -- gepollt, aber nur solange der Tab
+    // offen ist (siehe sichtbar()), damit ein Hintergrundtab nicht mitzaehlt.
+    if (kontenIntervall) clearInterval(kontenIntervall)
+    kontenIntervall = setInterval(() => { if (vorn) void kontenLaden() }, 15_000)
 
     // Die verfuegbaren Fachrollen anzeigen: ohne sie zu kennen schreibt
     // niemand eine AN-ROLLE-Zeile.
@@ -510,6 +552,8 @@ export default {
   unmount() {
     for (const f of abmelden) { try { f() } catch { /* egal */ } }
     abmelden = []
+    if (kontenIntervall) clearInterval(kontenIntervall)
+    kontenIntervall = null
     if (schleife) cancelAnimationFrame(schleife)
     schleife = null
     kern?.abbauen()

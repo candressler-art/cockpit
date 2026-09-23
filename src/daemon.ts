@@ -24,6 +24,7 @@ import {
 import { vaultIndizieren, vaultGraphLesen, vaultBeobachten, vaultDa, VAULT } from './vault.js'
 import { vaultZugriffErlaubt } from './vaultZugriff.js'
 import { konsoleBefehl, cwdPruefen } from './konsole.js'
+import { nutzungAbfragen } from './kontenNutzung.js'
 import { existsSync } from 'node:fs'
 
 const PORT = Number(process.env.COCKPIT_PORT ?? 8765)
@@ -281,6 +282,28 @@ async function systemPuls(): Promise<void> {
 // braucht.
 void systemPuls()
 setInterval(() => void systemPuls(), 20_000).unref()
+
+// --- Nutzungsstand je Konto, verbrauchsfrei ----------------------------------
+//
+// Getrennter Weg von rate_limit_event (das kommt nur mit, waehrend ohnehin
+// ein Agent laeuft): dieser Puls fragt /api/oauth/usage ab (kontenNutzung.ts)
+// und haelt so auch ein Konto aktuell, auf dem gerade niemand arbeitet --
+// genau das braucht das Balancing, um ein Konto ueberhaupt vergleichen zu
+// koennen, bevor es zum ersten Mal dran war.
+async function kontenNutzungPuls(): Promise<void> {
+  for (const konto of supervisor.angemeldeteKonten()) {
+    try {
+      const r = await nutzungAbfragen(konto)
+      if (r) supervisor.nutzungMelden(konto.name, r.stand, r.quelle)
+    } catch (e) {
+      // Ein Konto darf die anderen nicht mitreissen -- weiterpollen.
+      console.warn(`[konten] Nutzungspuls fuer '${konto.name}' warf:`, String(e))
+    }
+  }
+}
+
+void kontenNutzungPuls()
+setInterval(() => void kontenNutzungPuls(), 10 * 60_000).unref()
 
 // Fachrollen beim Start einlesen. Ein Fehler hier soll frueh sichtbar sein --
 // nicht erst, wenn der Orchestrator in Runde drei eine Rolle adressiert.
@@ -754,7 +777,10 @@ const server = createServer(async (req, res) => {
     }
 
     if (pfad === '/api/konten' && req.method === 'GET') {
-      return json(200, { konten: supervisor.kontenListe() })
+      // Gesamtbild statt nur der Liste: modus, naechstesKonto und
+      // abstandPunkte sind das, was man beim Draufschauen zuerst wissen
+      // will, nicht erst aus der Liste selbst ausrechnen soll.
+      return json(200, supervisor.kontenUebersicht())
     }
 
     if (pfad === '/api/konten' && req.method === 'POST') {
@@ -762,7 +788,7 @@ const server = createServer(async (req, res) => {
       // Leerstring oder fehlendes Feld heben die Bevorzugung auf.
       const name = k?.name ? String(k.name) : null
       const ok = supervisor.bevorzugtesKontoSetzen(name)
-      return json(ok ? 200 : 404, { ok, konten: supervisor.kontenListe() })
+      return json(ok ? 200 : 404, { ok, ...supervisor.kontenUebersicht() })
     }
 
     if (pfad === '/api/system' && req.method === 'GET') {
