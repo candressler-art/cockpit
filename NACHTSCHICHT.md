@@ -2,6 +2,44 @@
 
 ## Fuer Can (Kurzfassung)
 
+- **Durchgang 7:** Erster gruendlicher Blick auf `src/orchestrator.ts`
+  selbst (vorher nur das aussenrum liegende Speicherleck angeschaut, siehe
+  Durchgang 6) -- zwei echte, wenn auch seltene, Robustheitsluecken
+  gefunden und behoben:
+  1. **Leseanfrage-Limit fehlerhaft behandelt:** Antwortet der Orchestrator
+     VIER Mal in Folge mit `LESE-ANFRAGE` (statt irgendwann zu
+     WEITER/ENTSCHEIDUNG/FERTIG zu wechseln), verliess die innere Schleife
+     in `fahren()` ohne das erwartete `break` -- der Code danach behandelte
+     das faelschlich wie einen normalen "weiter"-Fall mit leerem
+     `NAECHSTER-PROMPT`. Die naechste Runde bekam dadurch null Auftraege,
+     und der Lauf starb eine Runde SPAETER mit der irrefuehrenden Meldung
+     "Worker lieferte keinen Report", obwohl nie ein Worker lief. Jetzt:
+     sofortiger, klarer `formatfehler` mit Grundangabe. Per Test bewiesen
+     (`tests/warten.test.mjs`, Test 5): schlaegt ohne den Fix nachweislich
+     fehl (per `git stash`/Patch-Diff verifiziert, nicht nur behauptet).
+  2. **Leseanfrage (DATEI/GREP) ohne Groessendeckel:** Der Code warnte
+     selbst schon (Kommentar beim Regex-Deckel gegen katastrophales
+     Backtracking) davor, dass ein blockierender Aufruf in
+     `leseZeileAusfuehren()` die EINE Ereignisschleife des Daemons einfriert
+     -- deckelte aber nur das Suchmuster, nicht die Dateigroesse. Ein vom
+     Orchestrator angefragtes `GREP`/`DATEI` auf eine grosse Datei im
+     Arbeitsverzeichnis (Logdatei, DB-Dump, versehentlich mitgelesenes
+     Binaerartefakt) haette den ganzen Daemon fuer die Lesedauer
+     eingefroren, nicht nur diesen Lauf -- das synchrone `readFileSync`
+     kennt keine Groessenpruefung vorher. Fix: 2-MB-Deckel per `statSync`
+     vor jedem Lesen, sonst klare "abgelehnt"-Meldung. Neue Testdatei
+     `tests/orchestrator.test.mjs` (in `package.json` eingetragen) deckt
+     DATEI/GREP je normal und ueber dem Deckel ab, plus den bestehenden
+     Pfad-Ausbruchsschutz als Regressionstest.
+  Der Rest von `orchestrator.ts` (Blocker-Erkennung, Wiederholungs-Check,
+  Token-Budget-Pruefung, Parallelitaet, Rollen-Aufloesung) wurde beim
+  gruendlichen Durchlesen sonst nicht auffaellig -- eine kleine, bewusst
+  NICHT behobene Beobachtung: bei Fall B (Entscheidung noetig -> Mensch
+  antwortet -> Lauf laeuft weiter) wird die Token-Budget-Pruefung fuer
+  genau diese eine Runde uebersprungen (der `continue` springt daran
+  vorbei) -- kein Verlust, die naechste "weiter"-Runde summiert ohnehin
+  ueber ALLE bisherigen Agenten, also wird ein Ueberschreiten nur um eine
+  Runde spaeter erkannt, nie dauerhaft uebersehen. Nicht als Bug behandelt.
 - **Durchgang 6, wichtigster Fund:** Ein echtes Speicherleck in Prioritaet 3
   (Daemon-Robustheit) -- genau die Art Fehler, vor der ein eigener
   Code-Kommentar schon warnte, aber der Fix dazu war nie verdrahtet.
@@ -698,9 +736,17 @@ Code gelesen):**
   `src/stimme.ts`), Fachrollen (`src/rollen.ts`), Sprachgespraech
   (`src/gespraech.ts`): in Durchgang 6 erstmals gegengelesen (vorher noch
   nie angeschaut), kein weiterer Fehler gefunden. Details siehe "Erledigt
-  (Durchgang 6)" oben. Orchestrator/Laeufe (`src/orchestrator.ts`) selbst
-  (nicht nur das Speicherleck aussen drum) noch NICHT gegengelesen --
-  naechster Kandidat fuer einen kommenden Durchgang.
+  (Durchgang 6)" oben.
+- [x] **Orchestrator/Laeufe (`src/orchestrator.ts`):** in Durchgang 7
+  erstmals gruendlich gegengelesen -- zwei echte Robustheitsluecken
+  gefunden und behoben (Leseanfrage-Limit fuehrte zu falscher
+  Fehlermeldung; Leseanfrage ohne Groessendeckel konnte den Daemon
+  einfrieren). Details siehe "Durchgang 7" in der Kurzfassung oben. Die
+  Hilfsfunktionen zum Format der Orchestrator-Antwort selbst
+  (`src/protokoll.ts`: `orchestratorAntwortLesen`, `auftraegeTrennen`,
+  `istWiederholung`, `blockerGrund`, `reportTypLesen`) waren schon vorher
+  gut getestet (`tests/protokoll.test.mjs`) und wurden nur gegengelesen,
+  nicht veraendert.
 
 ## Testinstanz-Hinweise fuer den naechsten Durchgang
 
