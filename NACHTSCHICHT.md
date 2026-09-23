@@ -2,6 +2,29 @@
 
 ## Fuer Can (Kurzfassung)
 
+- **Durchgang 5:** Prioritaet 2 (Desktop-App/Oberflaeche) zum ersten Mal
+  angeschaut -- bisher hatte kein Durchgang dort angefangen. Playwright +
+  Chromium liessen sich in dieser Umgebung doch installieren (kein
+  Systembibliotheken-Problem, anders als befuerchtet), damit konnte ich
+  tatsaechlich im echten (headless) Browser gegen die Testinstanz pruefen,
+  nicht nur Code lesen. **Ergebnis: kein einziger neuer Layout-Bug
+  gefunden.** Alle sechs Tabs (Zentrale, Lauf, Chats, Vault, Konsole,
+  Server) bei 1280px und 375px systematisch gescreenshottet, im leeren
+  Zustand UND mit echten Testdaten (Vault mit 3 verlinkten Notizen, ein
+  Chat mit echtem Verlauf), inklusive Tab-Wechsel-Stresstest (10 schnelle
+  Spruenge zwischen allen Tabs, zwei Durchlaeufe) und der mobilen
+  Agenten-/Freigaben-Schublade (oeffnen, wechseln, per Tipp auf den Inhalt
+  schliessen). Die schon vorhandene Absicherung gegen die
+  ID-vs-Klassen-Spezifitaets-Falle (`#tab-x.an{...}` statt `#tab-x{...}`,
+  siehe `web/index.html`) haelt: keine der drei betroffenen Regeln
+  (`#tab-vault.an`, `#tab-konsole.an`, `#tab-zentrale.an`) kann je ohne
+  `.an` greifen, der Sicherheitsnetz-Selektor `#app>.tabflaeche:not(.an)`
+  gewinnt in jedem Fall. Zwei vermeintliche Funde erwiesen sich bei
+  genauerem Hinsehen als gewolltes Verhalten (siehe "Erledigt" unten) --
+  dokumentiert, damit ein spaeterer Durchgang nicht dieselbe Zeit noch
+  einmal investiert. Screenshots liegen unter `nachtschicht-bilder/`
+  (gitignored, nicht committet) fuer Cans eigene Kontrolle.
+  `src-tauri/` weiterhin nicht angefasst (kein cargo hier).
 - **Durchgang 4, wichtigster Fund:** Ein echter Chat-Tab-Bug, live gegen die
   Testinstanz reproduziert: sind waehrend eines fortgesetzten Chats
   irgendwann ALLE Konten gesperrt (kein weiteres zum Wechseln mehr), bleibt
@@ -313,6 +336,111 @@ Nutzungsringe (`ring()`) vertragen `null` (noch nie gemessen) sichtbar
 anders als `0`. Nur Code gelesen, nicht visuell im Browser geprueft (siehe
 Prioritaet-2-Luecke).
 
+## Erledigt (Durchgang 5)
+
+### Prioritaet 2 (Desktop-App/Oberflaeche) -- erstmals visuell geprueft, kein Bug gefunden
+
+**Aufbau:** `playwright` als devDependency ergaenzt (`npm install --save-dev
+playwright`, siehe `package.json`), `npx playwright install chromium` lief
+ohne Systembibliotheken-Problem durch (anders als in der Aufgabe befuerchtet
+-- diese Umgebung hat offenbar alles Noetige). Der Chromium-Download landet
+in `~/.cache/ms-playwright` (ausserhalb des Repos, uebersteht vermutlich
+einen Neustart des Containers/der VM, da es derselbe Server ist -- ein
+spaeterer Durchgang sollte `npx playwright install chromium` trotzdem kurz
+gegenpruefen, bevor er sich auf den Cache verlaesst).
+
+Eigene Testinstanz auf Port 8799 mit den wiederverwendbaren Fake-Konten aus
+`/tmp/nachtschicht/konten`, dem Chat-Spiegel aus Durchgang 4
+(`/tmp/nachtschicht/spiegel4` nach `spiegel5b` kopiert, `cockpit4.db` nach
+`cockpit5.db` kopiert -- enthaelt die eine Test-Sitzung "Testfrage eins").
+**Wichtig:** Kopieren aus `/var/lib/cockpit/vault` wurde vom
+Sandbox-Berechtigungssystem verweigert (auch ein einzelnes `cp` einer
+Markdown-Datei) -- die Nachtschicht-Vorgabe erlaubt das zwar, aber
+unbeaufsichtigt kam die Genehmigung nie durch. Stattdessen drei eigene,
+synthetische Testnotizen mit Wikilinks in `/tmp/nachtschicht/vault5`
+angelegt (siehe unten), um den Vault-Tab trotzdem mit echtem Inhalt statt
+nur dem Leerzustand zu pruefen.
+
+**Geprueft (Playwright, headless Chromium, echtes DOM/Layout, nicht nur
+Code gelesen):**
+- Alle sechs Tabs (Zentrale, Lauf, Chats, Vault, Konsole, Server) bei
+  1280px (Desktop) und 375px (Handy), erst im Leerzustand.
+- Automatische Ueberlauf-Erkennung: jedes Element, dessen rechte Kante
+  ueber die Fensterbreite hinausragt (mit Ausnahme von `position:fixed`
+  bewusst per `translateX(100%)` aus dem Bild geschobenen Schubladen).
+  Zwei Treffer, beide als gewolltes Verhalten identifiziert, siehe unten.
+- Dieselben sechs Tabs noch einmal mit echten Testdaten: Vault mit 3
+  verlinkten Notizen (`/api/vault/graph` lieferte korrekt 3 Knoten, 5
+  Kanten), Chatliste mit einem echten Eintrag, Chat im Fokusmodus mit
+  echtem Frage/Antwort-Verlauf.
+- Tab-Wechsel-Stresstest: 10 schnelle Spruenge zwischen allen Tabs
+  (inklusive Ruecksprüngen auf schon besuchte Tabs), bei jedem Schritt
+  geprueft, dass hoechstens EINE `.tabflaeche` sichtbar ist (`display`
+  berechnet, nicht nur die Klasse) -- bei beiden Breiten, 20 Uebergaenge
+  insgesamt, immer korrekt genau eine oder (im Lauf-Tab, der das
+  Drei-Spalten-Grid statt einer `.tabflaeche` nutzt) keine.
+- Mobile Agenten-/Freigaben-Schublade (`#aufAgenten`/`#aufFreigaben`,
+  `web/app.js`): Oeffnen, zur anderen Seite wechseln (schliesst die erste
+  automatisch, kein doppeltes Offenstehen), per echtem Mausklick auf den
+  noch sichtbaren Reststreifen von `main` schliessen, erneutes Antippen
+  desselben Knopfs schliesst wieder (Toggle). Alles wie im Code/Kommentar
+  beschrieben.
+- Statische Durchsicht aller ID-Selektoren mit `display` in
+  `web/index.html`: die drei Tab-spezifischen Regeln (`#tab-vault.an`,
+  `#tab-konsole.an`, `#tab-zentrale.an`) enthalten alle bereits `.an` in
+  der ID-Regel selbst -- sie koennen also nie ohne aktives `.an` greifen
+  und nie mit `.tabflaeche{display:none}` kollidieren. Keine weitere
+  Stelle in `web/` mit einer blossen `#tab-x{display:...}`-Regel ohne
+  `.an` gefunden.
+
+**Zwei vermeintliche Funde, beide als gewolltes Verhalten identifiziert
+(damit niemand das nochmal untersucht):**
+1. `#stimmwahl` (Sprachausgabe-Auswahl) ragt auf 375px um ~10px ueber den
+   sichtbaren Rand hinaus, auf JEDEM Tab. Grund: der Header hat unter
+   820px bewusst `overflow-x:auto` (Kommentar in `web/index.html`, Zeile
+   ~171: "die Kopfzeile hatte overflow:hidden ... jetzt scrollt sie
+   waagerecht"). Das ist der bereits gebaute Fix fuer genau dieses
+   Problem -- der Header ist absichtlich breiter als der Bildschirm und
+   scrollt. Kein Bug.
+2. `#rechts` (Freigaben-Schublade) hat im Lauf-Tab auf 375px eine
+   Bounding-Box, die weit ueber den rechten Rand hinausragt (bis zu
+   690px bei 375px Fensterbreite). Grund: `position:fixed;
+   transform:translateX(100%)` verschiebt das Element um seine EIGENE
+   Breite nach rechts aus dem sichtbaren Bereich -- das ist exakt die
+   Schubladen-Technik aus dem CSS-Kommentar, `getBoundingClientRect()`
+   rechnet die Transformation korrekt mit ein, das Element ist trotzdem
+   unsichtbar (per Screenshot bestaetigt). Kein Bug, nur ein
+   Mess-Artefakt meines ersten, noch zu simplen Ueberlauf-Checks (im
+   zweiten, genaueren Skript schon herausgefiltert).
+3. (Kein Bug, aber erwaehnenswert) Der 3D-Vault-Graph zeigte bei nur 3
+   Notizen zunaechst nur EIN Label sichtbar, nicht drei. Grund:
+   `beschriftungZeichnen()` in `web/tabs/vault.js` blendet Labels auf der
+   Rueckseite der Kugel bewusst aus (`.filter(b => b.vorne > -0.15)`,
+   Kommentar: "ein Name, der quer ueber der Kugel schwebt, sagt weniger
+   als gar keiner"). Beim Drehen der Ansicht wuerden die anderen Labels
+   erscheinen -- in einem Live-Screenshot ohne Interaktion sieht man nur
+   die Momentaufnahme einer Rotation. Kein Bug, aber falls Can es selbst
+   pruefen will: im Vault-Tab am Graph ziehen, dann tauchen die anderen
+   Namen auf.
+
+**Nicht geprueft / offen fuer den naechsten Durchgang:**
+- `src-tauri/` selbst (kein cargo, siehe Aufgabenstellung).
+- Zustaende mit AKTIVEN Agenten (laufender Graph, Freigabe-Karten mit
+  echtem Werkzeugaufruf, Konsole mit einem Eintrag, Zentrale mit
+  Live-Strom) -- dafuer haette ich einen echten (wenn auch mit
+  Fake-Token scheiternden) Lauf anstossen muessen, was in diesem
+  Durchgang aus Zeitgruenden nicht mehr passiert ist. Die Leerzustaende
+  sind alle sauber (siehe oben und Durchgang-4-Notizen zum Server-Tab),
+  aber ein Freigabe-Dialog mit echtem `pre`-Block voller Text (moegliches
+  Ueberlauf-Ziel, siehe `.freigabe pre{max-height:120px;overflow:auto}`
+  in `web/index.html`) wurde nicht visuell bestaetigt.
+- Fehlerzustaende (z.B. Server nicht erreichbar, `/api/*` liefert 500)
+  nur im Server-Tab codeseitig erwaehnt (Durchgang 4), nicht in den
+  anderen Tabs visuell geprueft.
+- Reale Bildschirmgroessen zwischen 375px und 1280px (z.B. Tablet-Breiten
+  um 768-820px, genau an der Media-Query-Grenze) nicht gesondert
+  geprueft -- nur die zwei in der Aufgabe genannten Eckwerte.
+
 ## Offene Punkte (Prioritaet 1, noch zu pruefen)
 
 - [ ] **Daemon-Neustart:** `gesperrtBis` und `nutzung` in
@@ -359,13 +487,17 @@ Prioritaet-2-Luecke).
 
 ## Offene Punkte (Prioritaet 2 -- Desktop-App/Oberflaeche)
 
-- [ ] Noch nicht begonnen. `npx playwright install chromium` noch nicht
-  versucht -- unklar, ob Systembibliotheken fehlen. Falls nicht: Tabs bei
-  1280px und 375px pruefen, HUD-Stil, Leer-/Lade-/Fehlerzustaende,
-  Tab-Wechsel-Reste, insbesondere die ID/Klassen-Fehlerklasse
-  (`#tab-x{display:flex}` vs. `.tabflaeche{display:none}`), die laut
-  Aufgabe "inzwischen abgesichert" ist (Commit `d56b87c`) -- gegenpruefen,
-  ob es aehnliche Stellen anderswo in `web/` gibt.
+- [x] **Tabs bei 1280px/375px, HUD-Stil, Leer-/Ladezustaende,
+  Tab-Wechsel-Reste, ID/Klassen-Fehlerklasse:** in Durchgang 5 mit
+  Playwright/Chromium visuell geprueft (Systembibliotheken waren KEIN
+  Problem, Installation lief durch). Kein Bug gefunden, siehe "Erledigt"
+  oben fuer Details und die zwei falsch-positiven Funde.
+- [ ] **Fehlerzustaende** (Server/API nicht erreichbar) und Zustaende mit
+  echten AKTIVEN Agenten (Freigabe-Dialoge mit echtem Inhalt, laufender
+  Graph, Konsole/Zentrale mit Live-Ereignissen) noch nicht visuell
+  geprueft -- siehe "Nicht geprueft" in Durchgang 5 oben.
+- [ ] Tablet-Breiten um die 768-820px-Media-Query-Grenze nicht gesondert
+  geprueft, nur die zwei Eckwerte 1280px/375px.
 - [ ] `src-tauri/` nicht angefasst -- kein cargo hier verfuegbar.
 
 ## Offene Punkte (Prioritaet 3 -- Rest des Cockpits)
@@ -410,3 +542,21 @@ Prioritaet-2-Luecke).
   Session-Id verwenden (z.B. `python3 -c "import uuid; print(uuid.uuid4())"`).
   Test-Daemon aus Durchgang 4 (PID 677265) wurde sauber ueber die eigene PID
   beendet.
+- Durchgang 5: `playwright` ist jetzt als devDependency in `package.json`
+  eingetragen (`npm install` reicht danach). Die Chromium-Binary selbst
+  liegt in `~/.cache/ms-playwright` ausserhalb des Repos -- vor der
+  Nutzung kurz `npx playwright install chromium` laufen lassen (dauert nur
+  Sekunden, wenn schon gecacht, sonst laedt es ~300MB nach). Fuer eigene
+  Oberflaechen-Tests: Testdaemon starten, dann ein kleines `.mjs`-Skript
+  mit `import { chromium } from 'playwright'`, `chromium.launch()`,
+  `page.goto('http://localhost:<port>/#/<tab>')` -- das Skript muss
+  IM Repo liegen (z.B. unter `nachtschicht-bilder/`, komplett gitignored),
+  sonst findet Node das `node_modules/playwright` nicht per relativem
+  Import. Kopieren aus `/var/lib/cockpit/vault` wurde vom
+  Berechtigungssystem verweigert (auch einzelne, nicht-rekursive
+  `cp`-Befehle) -- fuer Vault-Tests mit echtem Inhalt eigene synthetische
+  Markdown-Dateien mit `[[Wikilinks]]` direkt in
+  `/tmp/nachtschicht/vault<n>/` anlegen, das reicht dem Indexer.
+  Test-Daemons aus Durchgang 5 (PIDs 679012, 679478, 680325) wurden alle
+  sauber ueber die eigene PID beendet, jeweils vorher mit
+  `ps -p <pid> -o cmd` gegengeprueft.
