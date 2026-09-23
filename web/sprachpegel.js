@@ -25,6 +25,7 @@ let analyserAus = null   // Piper-Wiedergabe
 let analyserEin = null   // Mikrofon
 let mikroStrom = null
 let quelleAus = null
+let quelleEin = null     // MediaStreamAudioSourceNode des Mikrofons -- fuer hoeren.js
 
 /** Geglaettete Werte, die nach aussen gehen. */
 const stand = {
@@ -105,7 +106,8 @@ export async function mikroAn() {
     analyserEin = c.createAnalyser()
     analyserEin.fftSize = 2048
     analyserEin.smoothingTimeConstant = 0.5
-    c.createMediaStreamSource(mikroStrom).connect(analyserEin)
+    quelleEin = c.createMediaStreamSource(mikroStrom)
+    quelleEin.connect(analyserEin)
     // Bewusst NICHT an destination: das waere eine Rueckkopplung.
     stand.quelle = 'hoert'
     return true
@@ -120,10 +122,19 @@ export function mikroAus() {
   mikroStrom?.getTracks().forEach((t) => t.stop())
   mikroStrom = null
   analyserEin = null
+  quelleEin = null
   if (stand.quelle === 'hoert') stand.quelle = 'still'
 }
 
 export const mikroLaeuft = () => Boolean(mikroStrom)
+
+/**
+ * Rohzugriff fuer hoeren.js: derselbe AudioContext und derselbe Mikrofon-
+ * Quellknoten, an den ein AudioWorklet fuer die Aufnahme haengen kann --
+ * ohne ein zweites getUserMedia() und damit ein zweites Freigabe-Gerippe.
+ */
+export function kontextLesen() { return ctx }
+export function mikroKnoten() { return quelleEin }
 
 function baenderLesen(an) {
   an.getByteFrequencyData(frequenz)

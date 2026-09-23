@@ -10,6 +10,7 @@
 // Weg nach aussen.
 
 import { connect } from 'node:net'
+import { wavBauen } from './wav.js'
 
 const HOST = process.env.PIPER_HOST ?? '127.0.0.1'
 const PORT = Number(process.env.PIPER_PORT ?? 10200)
@@ -25,32 +26,6 @@ interface WyomingKopf {
   data?: Record<string, unknown>
   data_length?: number | null
   payload_length?: number | null
-}
-
-/**
- * WAV-Kopf um rohes PCM legen.
- *
- * Piper liefert nacktes PCM; ein <audio>-Element im Browser spielt das nicht.
- * 44 Byte Kopf davor, und es ist eine abspielbare Datei.
- */
-function wavBauen(pcm: Buffer, rate: number, breite: number, kanaele: number): Buffer {
-  const kopf = Buffer.alloc(44)
-  const bitsProProbe = breite * 8
-  const byteRate = rate * kanaele * breite
-  kopf.write('RIFF', 0)
-  kopf.writeUInt32LE(36 + pcm.length, 4)
-  kopf.write('WAVE', 8)
-  kopf.write('fmt ', 12)
-  kopf.writeUInt32LE(16, 16)
-  kopf.writeUInt16LE(1, 20) // PCM, unkomprimiert
-  kopf.writeUInt16LE(kanaele, 22)
-  kopf.writeUInt32LE(rate, 24)
-  kopf.writeUInt32LE(byteRate, 28)
-  kopf.writeUInt16LE(kanaele * breite, 32)
-  kopf.writeUInt16LE(bitsProProbe, 34)
-  kopf.write('data', 36)
-  kopf.writeUInt32LE(pcm.length, 40)
-  return Buffer.concat([kopf, pcm])
 }
 
 /**

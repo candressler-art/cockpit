@@ -99,6 +99,10 @@ anzulegen.
 | `COCKPIT_ORIGIN` | — | zusaetzlich erlaubte Herkunft fuer die API |
 | `BESZEL_URL/USER/PASS` | — | Zugang zum Monitoring-Hub (sonst nur eigener Host) |
 | `PIPER_HOST/PORT` | `127.0.0.1:10200` | Sprachausgabe |
+| `PIPER_TIMEOUT_MS` | `20000` | wie lange auf Piper gewartet wird |
+| `WHISPER_HOST/PORT` | `127.0.0.1:10300` | Spracherkennung |
+| `WHISPER_TIMEOUT_MS` | `20000` | wie lange auf Whisper gewartet wird |
+| `COCKPIT_GESPRAECH_MODELL` | `claude-sonnet-5` | Modell fuer den Sprachgespraech-Agenten |
 | `COCKPIT_MCP_BROWSER` | — | ueberschreibt den Browser-MCP-Server |
 | `COCKPIT_KONTEN_DIR` | `~/.claude-konten` | Verzeichnis der Zusatzkonten (siehe unten) |
 
@@ -119,6 +123,11 @@ anzulegen.
 | `src/chats.ts` | Index der Claude-Code-Sessions, Volltextsuche ueber FTS5 |
 | `src/vault.ts` | Index des Obsidian-Vaults: Titel, Wikilinks, Tags |
 | `src/stimme.ts` | Sprachausgabe ueber Piper (Wyoming-Protokoll) |
+| `src/hoeren.ts` | Spracherkennung ueber Whisper (Wyoming-Protokoll) |
+| `src/gespraech.ts` | Sprachgespraech: werkzeugloser Antwort-Agent mit Gedaechtnis |
+| `src/wav.ts` | WAV-Kopf bauen und lesen |
+| `src/wyoming.ts` | Wyoming-Rahmen schreiben/zerlegen, ohne Netzwerk -- von hoeren.ts genutzt |
+| `src/audio.ts` | PCM auf 16 kHz resampeln |
 | `src/konsole.ts` | Befehle mit Freigabepflicht |
 | `src/konten.ts` | mehrere Claude-Code-Konten: Erkennung, Wahl, Sperrung bei Limit |
 | `web/bus.js` | die eine WebSocket-Verbindung, Abonnements je Nachrichtentyp |
@@ -212,6 +221,7 @@ Auftraege aus der Zeit vor den Fachrollen unveraendert weiter.
 
 | Tab | Was er zeigt |
 |---|---|
+| **Zentrale** | Wissenskern, Nutzungsfenster, Serverlast, Agenten, Auftrag starten, Sprachgespraech |
 | **Lauf** | Live-Log, Agentengraph, Zeitachse, Freigaben -- die urspruengliche Ansicht |
 | **Chats** | die Claude-Code-Sessions vom Desktop, durchsuchbar und lesbar |
 | **Vault** | Notizen und Agenten in einer 3D-Szene (three.js, fest eingelegt) |
@@ -220,6 +230,54 @@ Auftraege aus der Zeit vor den Fachrollen unveraendert weiter.
 
 Vault und Sessions kommen per Syncthing vom Desktop, beide als `receiveonly` --
 der Spiegel schreibt nie zurueck. Details in `deploy/stacks/README.md`.
+
+## Sprachgespräch
+
+Das Mikro in der Zentrale (`web/tabs/zentrale.js`, Sprachbereich unten) fuehrt
+ein echtes Gespraech, nicht nur eine Pegelanzeige:
+
+1. Antippen startet die Aufnahme. Ein AudioWorklet (`web/hoerer-prozessor.js`,
+   Fallback ScriptProcessorNode) greift das Mikrofonsignal ab, das
+   `sprachpegel.js` fuer die Wellenform ohnehin offen haelt -- kein zweites
+   `getUserMedia()`. `web/hoeren.js` baut daraus 16-bit-PCM und ein WAV.
+   Bewusst kein `MediaRecorder` und keine Web-Speech-API: beide fehlen im
+   WebKitGTK der Tauri-Huelle, und die Web-Speech-API liefe ohnehin ueber
+   Googles Server.
+2. Die Aufnahme endet von selbst nach 1,2 s unter der Pegelschwelle, sobald
+   einmal Sprache erkannt wurde (Kunstpausen am Anfang brechen also nicht
+   sofort ab), spaetestens nach 60 s. Erneutes Antippen beendet sie sofort.
+3. Das WAV geht an `POST /api/hoeren`. `src/hoeren.ts` liest den WAV-Kopf
+   (`src/wav.ts`), resampelt bei Bedarf auf 16 kHz (`src/audio.ts`) und
+   schickt das PCM per Wyoming-Protokoll (`src/wyoming.ts`) an den
+   `whisper`-Container (`deploy/stacks/whisper.yml`, Modell `small-int8`,
+   Sprache `de`). Antwort: erkannter Text plus Dauer -- gemessen auf
+   servertwo rund 5,7-5,9 s fuer einen kurzen Satz (`base-int8` war mit
+   ~2,5 s schneller, verschluckte dabei aber Woerter wie "Wetter" und
+   "Orchestrator"; Begruendung der Wahl steht in `deploy/stacks/whisper.yml`).
+4. Der erkannte Text geht an `POST /api/gespraech`. `src/gespraech.ts` laesst
+   ihn ueber den Supervisor beantworten -- **ohne Werkzeuge** (`tools: []`),
+   mit einem kurzen deutschen Systemprompt fuer gesprochene Antworten (kein
+   Markdown, keine Aufzaehlungen, kein Code) und `COCKPIT_GESPRAECH_MODELL`
+   (Vorgabe `claude-sonnet-5`). Weil es ueber den Supervisor laeuft, greift
+   bei einem Nutzungslimit derselbe Kontowechsel wie ueberall sonst. Ohne
+   Werkzeuge gibt es nichts freizugeben -- kein Orchestrator-Lauf, keine
+   Freigabe-Anfrage.
+5. Die Antwort erscheint als Text im kleinen Verlauf unter der Sprachleiste
+   und wird ueber `stimme.sagen()` vorgelesen (Piper, mit Browserstimme als
+   Rueckfall) -- respektiert die vorhandene Stimmwahl: bei "stumm" bleibt es
+   bei Text.
+
+**Gedaechtnis:** `src/gespraech.ts` fuehrt die SDK-Session per `resume` fort;
+der Browser haelt die `sessionId` und schickt sie bei jeder Runde mit. Der
+Knopf "Neues Gespräch" verwirft sie -- die naechste Runde beginnt ohne
+Vorgeschichte. Auf dem Server steht dieselbe Session unter der Kennung
+`gespraech` wie eine Konsolen-Freigabe unter `konsole` -- kein echter Lauf in
+der Tabelle `runs`, taucht also nicht im Tab "Lauf" auf.
+
+**Zustaende** im Sprachbereich: bereit -- hört zu -- versteht… -- denkt… --
+spricht -- bereit. Fehler werden benannt statt verschluckt: "Mikrofon nicht
+freigegeben", "Spracherkennung nicht erreichbar" (Whisper aus oder
+unerreichbar), "Antwort nicht bekommen".
 
 ## Die Konsole hat keine Shell im Netz
 
@@ -253,13 +311,19 @@ kein Profil.
 | `/api/vault/graph?run=<id>` | GET | Notizen, Verknuepfungen und Agenten |
 | `/api/konsole` | POST | Befehl anfragen (Freigabe noetig) |
 | `/api/sprechen` | POST | Text als WAV; 503, wenn Piper fehlt |
+| `/api/hoeren` | POST | WAV-Audio (Body) als Text erkennen; 503, wenn Whisper fehlt |
+| `/api/gespraech` | POST | Eine Runde Sprachgespraech: `{text, sessionId?, neu?}` -> `{text, sessionId}` |
 
 ## Stand
 
 Alle geplanten Stufen sind umgesetzt: Umzug auf servertwo, Tab-Geruest und PWA,
 Server-Auslastung, Fachrollen, Vault-Graph, Chat-Verzeichnis, Sprachausgabe,
-Konsole mit Freigabe und der Browser fuer die Agenten.
+Sprachgespraech (Spracherkennung + Antwort-Agent), Konsole mit Freigabe und
+der Browser fuer die Agenten.
 
 Nicht verifiziert: ob die PWA sich im Handy-Chrome wirklich installieren laesst
-(der Service Worker scheitert im eingebauten Browser-Fenster), und der
-Kaltstart der Autostart-Kette auf dem Desktop.
+(der Service Worker scheitert im eingebauten Browser-Fenster), der
+Kaltstart der Autostart-Kette auf dem Desktop, und ein echtes
+Sprachgespraech ueber ein physisches Mikrofon -- getestet wurde die Kette
+End-zu-Ende mit einer per Piper erzeugten WAV-Datei anstelle einer echten
+Aufnahme (siehe Abschlussbericht).

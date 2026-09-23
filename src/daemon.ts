@@ -15,6 +15,8 @@ import type { CockpitEvent } from './typen.js'
 import { standLesen, type SystemStand } from './system.js'
 import { rollenLaden, rollenListe } from './rollen.js'
 import { sprechenGecacht } from './stimme.js'
+import { erkennen } from './hoeren.js'
+import { gespraechAntworten } from './gespraech.js'
 import { chatsIndizieren, chatsSuchen, chatLesen } from './chats.js'
 import { vaultIndizieren, vaultGraphLesen, vaultBeobachten, vaultDa } from './vault.js'
 import { konsoleBefehl, cwdPruefen } from './konsole.js'
@@ -353,6 +355,16 @@ const MIME: Record<string, string> = {
  */
 const MAX_KOERPER = 1024 * 1024
 
+/**
+ * Groesster erlaubter Anfragekoerper fuer /api/hoeren.
+ *
+ * Rohes 16-bit-Mono-PCM bei den Raten, die ein AudioContext typischerweise
+ * liefert (44.1/48 kHz), macht bei 60 Sekunden -- der vereinbarten Obergrenze
+ * einer Aufnahme -- rund 5,8 MB. 10 MB lassen Luft nach oben, ohne die
+ * gewoehnliche JSON-Grenze (MAX_KOERPER) auch fuer Audio gelten zu lassen.
+ */
+const MAX_AUDIO_KOERPER = 10 * 1024 * 1024
+
 async function koerperLesen(req: import('node:http').IncomingMessage): Promise<unknown> {
   const stuecke: Buffer[] = []
   let groesse = 0
@@ -383,6 +395,37 @@ async function koerperLesen(req: import('node:http').IncomingMessage): Promise<u
   } catch {
     return null
   }
+}
+
+/**
+ * Denselben Anfragekoerper roh lesen, ohne JSON-Parse -- fuer /api/hoeren,
+ * das WAV-Bytes statt JSON schickt. Gleiche Ueberlauf-Disziplin wie
+ * koerperLesen: weiterlesen statt die Verbindung kappen, sonst sieht eine zu
+ * grosse Anfrage nach einem Serverfehler aus.
+ */
+async function koerperBinaerLesen(
+  req: import('node:http').IncomingMessage,
+  maxBytes: number,
+): Promise<Buffer | null> {
+  const stuecke: Buffer[] = []
+  let groesse = 0
+  let zuGross = false
+  for await (const s of req) {
+    const b = s as Buffer
+    groesse += b.length
+    if (groesse > maxBytes) {
+      zuGross = true
+      stuecke.length = 0
+      if (groesse > maxBytes * 2) {
+        req.destroy()
+        return null
+      }
+      continue
+    }
+    stuecke.push(b)
+  }
+  if (zuGross || stuecke.length === 0) return null
+  return Buffer.concat(stuecke)
 }
 
 const server = createServer(async (req, res) => {
@@ -589,6 +632,33 @@ const server = createServer(async (req, res) => {
         // Serverstimme gerade nicht da ist, und auf seine eigene umschalten.
         // Stumm bleiben waere die schlechteste Antwort.
         return json(503, { fehler: String(e) })
+      }
+    }
+
+    if (pfad === '/api/hoeren' && req.method === 'POST') {
+      const wav = await koerperBinaerLesen(req, MAX_AUDIO_KOERPER)
+      if (!wav) return json(400, { fehler: 'kein Audio empfangen oder zu gross (Obergrenze ~60 s)' })
+      try {
+        const r = await erkennen(wav)
+        return json(200, r)
+      } catch (e) {
+        // Derselbe Vertrag wie /api/sprechen: 503 heisst "Dienst nicht da",
+        // nicht "etwas ist kaputt" -- die Oberflaeche unterscheidet danach.
+        return json(503, { fehler: String(e) })
+      }
+    }
+
+    if (pfad === '/api/gespraech' && req.method === 'POST') {
+      const k = (await koerperLesen(req)) as Record<string, unknown> | null
+      const text = String(k?.text ?? '').trim()
+      if (!text) return json(400, { fehler: 'text fehlt' })
+      const neu = k?.neu === true
+      const resume = !neu && k?.sessionId ? String(k.sessionId) : undefined
+      try {
+        const antwort = await gespraechAntworten(supervisor, text, resume)
+        return json(200, antwort)
+      } catch (e) {
+        return json(500, { fehler: String(e) })
       }
     }
 

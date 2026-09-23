@@ -16,6 +16,7 @@ import { api, abonnieren, beiZustand } from '../bus.js'
 import { Wissenskern } from '../kern.js'
 import * as sp from '../sprachpegel.js'
 import * as stimme from '../stimme.js'
+import * as hoeren from '../hoeren.js'
 
 let wurzel = null
 let vorn = false
@@ -27,6 +28,15 @@ let letztesSystem = null
 let letztesLimit = null
 let ereignisse = []
 let abmelden = []
+
+// --- Sprachgespraech ---------------------------------------------------------
+//
+// Der Zustand einer laufenden Runde (hört zu -> versteht -> denkt -> spricht)
+// und das Gedaechtnis darueber hinaus: gespraechSessionId traegt die SDK-
+// Session ueber mehrere Runden, "Neues Gespräch" wirft sie weg.
+let gespraechImGang = false
+let gespraechSessionId = null
+let gespraechVerlauf = []
 
 const esc = (t) =>
   String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
@@ -104,20 +114,26 @@ function geruest() {
       </section>
     </div>
 
-    <div class="z-sprachleiste hud-panel" id="z-sprache">
-      <button class="z-mikro" id="z-mikro" title="Mikrofon">◉</button>
-      <canvas id="z-welle" height="44"></canvas>
-      <div class="z-sprachtext">
-        <div class="hud-titel" id="z-sprachstatus">bereit</div>
-        <div class="z-sprachnote" id="z-sprachnote">Tippen zum Zuhören</div>
+    <div class="z-sprachblock">
+      <div class="z-sprachleiste hud-panel" id="z-sprache">
+        <button class="z-mikro" id="z-mikro" title="Mikrofon: tippen und sprechen">◉</button>
+        <canvas id="z-welle" height="44"></canvas>
+        <div class="z-sprachtext">
+          <div class="hud-titel" id="z-sprachstatus">bereit</div>
+          <div class="z-sprachnote" id="z-sprachnote">Tippen zum Sprechen</div>
+        </div>
+        <button class="still" id="z-neu" title="Verlauf verwerfen, neu anfangen">Neues Gespräch</button>
+        <button class="still" id="z-testen">Sprechen testen</button>
       </div>
-      <button class="still" id="z-testen">Sprechen testen</button>
+      <div class="z-gespraech" id="z-gespraech"></div>
     </div>`
 
   welle = wurzel.querySelector('#z-welle')
   wurzel.querySelector('#z-mikro').onclick = () => void mikroSchalten()
   wurzel.querySelector('#z-testen').onclick = () => void sprechenTesten()
+  wurzel.querySelector('#z-neu').onclick = () => neuesGespraech()
   wurzel.querySelector('#a-start').onclick = () => void auftragStarten()
+  verlaufZeichnen()
 }
 
 /**
@@ -160,18 +176,126 @@ async function auftragStarten() {
   }
 }
 
+/** Status und Notiz im Sprachbereich setzen. fehler=true faerbt die Notiz rot. */
+function sprachStatusSetzen(status, note, fehler = false) {
+  const s = wurzel?.querySelector('#z-sprachstatus')
+  const n = wurzel?.querySelector('#z-sprachnote')
+  if (s) s.textContent = status
+  if (n && note !== undefined) {
+    n.textContent = note
+    n.classList.toggle('fehler', fehler)
+  }
+}
+
+function neuesGespraech() {
+  gespraechSessionId = null
+  gespraechVerlauf = []
+  verlaufZeichnen()
+  sprachStatusSetzen('bereit', 'Neues Gespräch — tippen zum Sprechen')
+}
+
+function verlaufZeichnen() {
+  const el = wurzel?.querySelector('#z-gespraech')
+  if (!el) return
+  el.classList.toggle('an', gespraechVerlauf.length > 0)
+  el.innerHTML = gespraechVerlauf.slice(-6).map((z) =>
+    `<div class="z-gzeile ${z.rolle}"><span class="wer">${z.rolle === 'du' ? 'Du' : 'Cockpit'}</span>${esc(z.text)}</div>`,
+  ).join('')
+  el.scrollTop = el.scrollHeight
+}
+
+/**
+ * Mikro antippen: laeuft schon eine Aufnahme, beendet ein zweiter Tipp sie
+ * sofort (statt der 1,2s-Stille zu warten). Waehrend Erkennung, Antwort oder
+ * Sprechen ist der Knopf per .arbeitet gesperrt -- ein Tipp waere sonst eine
+ * zweite Runde ueber eine laufende.
+ */
 async function mikroSchalten() {
+  if (hoeren.aufnahmeLaeuft()) { hoeren.aufnahmeBeenden(); return }
+  if (gespraechImGang) return
+  await gespraechRunde()
+}
+
+/** Eine volle Runde: zuhoeren -> erkennen -> antworten -> vorlesen. */
+async function gespraechRunde() {
+  gespraechImGang = true
   const knopf = wurzel.querySelector('#z-mikro')
-  if (sp.mikroLaeuft()) {
-    sp.mikroAus()
-    knopf.classList.remove('an')
+  knopf.classList.add('an')
+  sprachStatusSetzen('hört zu', 'Sprich jetzt — Pause oder erneutes Tippen beendet')
+
+  let wav = null
+  try {
+    wav = await hoeren.aufnahmeStarten()
+  } catch (e) {
+    console.warn('[zentrale] Aufnahme fehlgeschlagen:', String(e))
+  }
+  knopf.classList.remove('an')
+  sp.mikroAus() // Aufnahme dieser Runde ist zu Ende -- die Leuchte soll das zeigen.
+
+  if (wav === null) {
+    sprachStatusSetzen('bereit', 'Mikrofon nicht freigegeben', true)
+    gespraechImGang = false
     return
   }
-  const ok = await sp.mikroAn()
-  knopf.classList.toggle('an', ok)
-  wurzel.querySelector('#z-sprachnote').textContent = ok
-    ? 'Mikrofon offen — der Kern hört mit'
-    : 'Mikrofon nicht freigegeben'
+
+  knopf.classList.add('arbeitet')
+  sprachStatusSetzen('versteht…', 'Spracherkennung läuft')
+  let erkannt
+  try {
+    const antwort = await fetch(api('/api/hoeren'), {
+      method: 'POST', headers: { 'content-type': 'audio/wav' }, body: wav,
+    })
+    const r = await antwort.json().catch(() => ({}))
+    if (!antwort.ok) throw new Error(r?.fehler ?? `HTTP ${antwort.status}`)
+    erkannt = String(r.text ?? '').trim()
+  } catch (e) {
+    knopf.classList.remove('arbeitet')
+    sprachStatusSetzen('bereit', `Spracherkennung nicht erreichbar: ${String(e?.message ?? e)}`, true)
+    gespraechImGang = false
+    return
+  }
+
+  if (!erkannt) {
+    knopf.classList.remove('arbeitet')
+    sprachStatusSetzen('bereit', 'Nichts verstanden — noch einmal versuchen', true)
+    gespraechImGang = false
+    return
+  }
+
+  gespraechVerlauf.push({ rolle: 'du', text: erkannt })
+  verlaufZeichnen()
+  sprachStatusSetzen('denkt…', erkannt)
+
+  let antwortText
+  try {
+    const r = await fetch(api('/api/gespraech'), {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: erkannt, sessionId: gespraechSessionId }),
+    }).then(async (x) => {
+      const daten = await x.json().catch(() => ({}))
+      if (!x.ok) throw new Error(daten?.fehler ?? `HTTP ${x.status}`)
+      return daten
+    })
+    antwortText = String(r.text ?? '').trim()
+    gespraechSessionId = r.sessionId ?? gespraechSessionId
+  } catch (e) {
+    knopf.classList.remove('arbeitet')
+    sprachStatusSetzen('bereit', `Antwort nicht bekommen: ${String(e?.message ?? e)}`, true)
+    gespraechImGang = false
+    return
+  }
+
+  gespraechVerlauf.push({ rolle: 'cockpit', text: antwortText })
+  verlaufZeichnen()
+  sprachStatusSetzen('spricht', antwortText)
+  knopf.classList.remove('arbeitet')
+
+  // sagen() respektiert die Stimmwahl selbst (aus -> bleibt stumm, nur Text
+  // steht schon im Verlauf oben) -- hier nichts zusaetzlich pruefen.
+  await stimme.sagen(antwortText, { wichtig: true })
+
+  sprachStatusSetzen('bereit', 'Tippen zum Sprechen')
+  gespraechImGang = false
 }
 
 async function sprechenTesten() {
@@ -373,7 +497,13 @@ export default {
       if (!schleife) rahmen()
     } else {
       kern.anhalten()
-      if (schleife) { cancelAnimationFrame(schleife); schleife = null }
+      // Laeuft gerade ein Sprachgespraech, muss sp.messen() weiterlaufen --
+      // sonst friert die Stille-Erkennung ein, weil niemand mehr den Pegel
+      // abfragt, nur weil der Tab gerade nicht vorn ist.
+      if (schleife && !hoeren.aufnahmeLaeuft() && !gespraechImGang) {
+        cancelAnimationFrame(schleife)
+        schleife = null
+      }
     }
   },
 
@@ -387,22 +517,28 @@ export default {
   },
 }
 
-/** Eigene Schleife fuer Pegel und Wellenform -- der Kern hat seine eigene. */
+/**
+ * Eigene Schleife fuer Pegel und Wellenform -- der Kern hat seine eigene.
+ *
+ * Den Sprachstatus-Text zeichnet diese Schleife NICHT mehr selbst: der
+ * gehoert jetzt der Gespraechsrunde (sprachStatusSetzen), die Zustaende wie
+ * "versteht…" oder "denkt…" kennt, die der reine Pegel (still/hört/spricht)
+ * nicht ausdruecken kann. Wuerde hier weiter jedes Bild ueberschrieben,
+ * faelen diese Zustaende sofort wieder auf "hört zu"/"bereit" zurueck.
+ */
 function rahmen() {
   const bild = (jetzt) => {
-    if (!vorn) { schleife = null; return }
+    const beschaeftigt = hoeren.aufnahmeLaeuft() || gespraechImGang
+    if (!vorn && !beschaeftigt) { schleife = null; return }
     schleife = requestAnimationFrame(bild)
     const s = sp.messen(jetzt)
+    if (!vorn) return // Pegel aktuell halten, aber nichts zeichnen -- Tab ist nicht sichtbar.
     kern?.pegelSetzen(s.pegel)
     kern?.lastSetzen(lastAnteil())
     if (welle) {
       const b = welle.clientWidth || 300
       if (welle.width !== b) welle.width = b
       sp.wellenformZeichnen(welle, s.quelle === 'still' ? '#3b5570' : '#6fe3ff')
-    }
-    const note = wurzel?.querySelector('#z-sprachstatus')
-    if (note) {
-      note.textContent = s.quelle === 'spricht' ? 'spricht' : s.quelle === 'hoert' ? 'hört zu' : 'bereit'
     }
   }
   schleife = requestAnimationFrame(bild)

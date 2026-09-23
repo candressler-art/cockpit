@@ -65,6 +65,16 @@ export interface AgentStartOptionen {
   resume?: string
   /** Werkzeuge, die ohne Rueckfrage laufen duerfen. */
   allowedTools?: string[]
+  /**
+   * Basis-Werkzeugmenge (SDK 'tools'). Anders als allowedTools NIMMT dies
+   * Werkzeuge aus dem Modellkontext, statt sie nur freizugeben -- []
+   * deaktiviert alle eingebauten Werkzeuge, der Agent sieht sie gar nicht
+   * erst. Fuers Sprachgespraech (gespraech.ts): kein Werkzeug, keine
+   * Freigabe noetig.
+   */
+  tools?: string[]
+  /** Eigener Systemprompt, ersetzt die Vorgabe der CLI. */
+  systemPrompt?: string
   /** MCP-Server, die dieser Agent nutzen darf. Leer: keine. */
   mcpServers?: Record<string, McpServerConfig>
 }
@@ -320,6 +330,8 @@ export class Supervisor extends EventEmitter {
           maxBudgetUsd: o.maxBudgetUsd,
           resume: resumeSessionId,
           allowedTools: o.allowedTools,
+          ...(o.tools !== undefined ? { tools: o.tools } : {}),
+          ...(o.systemPrompt !== undefined ? { systemPrompt: o.systemPrompt } : {}),
           // Nur was die Fachrolle ausdruecklich nennt. Ein Coder braucht
           // keinen Browser, und ein Werkzeug, das niemand nutzt, ist nur
           // zusaetzliche Angriffsflaeche im Kontext.

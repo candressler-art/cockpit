@@ -6,6 +6,7 @@ und stehen hier, damit nachvollziehbar bleibt, was dort laeuft und warum.
 | Stack | Zweck | Port |
 |---|---|---|
 | `piper.yml` | Sprachausgabe (Wyoming-Protokoll) fuer `/api/sprechen` | 127.0.0.1:10200 |
+| `whisper.yml` | Spracherkennung (Wyoming-Protokoll) fuer `/api/hoeren` | 127.0.0.1:10300 |
 | `syncthing.yml` | holt Obsidian-Vault und Claude-Code-Sessions vom Desktop | 127.0.0.1:8384 |
 
 Der Browser der Agenten hat bewusst KEINEN Stack: er laeuft je Sitzung als
@@ -16,12 +17,29 @@ und die CLI meldete ihn als "needs authentication". Zwei Testlaeufe sind
 genau daran mit einem Blocker stehengeblieben. Ueber stdio faellt das weg:
 kein Port, keine Herkunftspruefung, keine Autorisierung.
 
-## Warum beide nur auf 127.0.0.1 hoeren
+## Warum alle nur auf 127.0.0.1 hoeren
 
 Nach aussen geht ausschliesslich das Cockpit selbst, und zwar ueber
-`tailscale serve` auf Port 8443. Piper und Syncthing sind Zulieferer des
-Daemons und brauchen keinen eigenen Weg dorthin. Die Syncthing-Oberflaeche
+`tailscale serve` auf Port 8443. Piper, Whisper und Syncthing sind Zulieferer
+des Daemons und brauchen keinen eigenen Weg dorthin. Die Syncthing-Oberflaeche
 kann Ordnerpfade aendern -- sie gehoert erst recht nicht ins Netz.
+
+## Einen Stack ausrollen
+
+Es gibt dafuer (Stand heute) kein Skript -- `server-einrichten.sh` rollt nur
+den Cockpit-Daemon selbst aus, keine Stacks. Ein neuer Stack (z.B. beim
+erstmaligen Aufsetzen von `whisper.yml`) geht von Hand:
+
+    ssh -i ~/.ssh/id_ed25519_claude claude@192.168.2.193 \
+      "sudo mkdir -p /opt/stacks/whisper/data"
+    ssh -i ~/.ssh/id_ed25519_claude claude@192.168.2.193 \
+      "sudo tee /opt/stacks/whisper/docker-compose.yml >/dev/null" < deploy/stacks/whisper.yml
+    ssh -i ~/.ssh/id_ed25519_claude claude@192.168.2.193 \
+      "cd /opt/stacks/whisper && sudo docker compose up -d"
+
+Das Bild ist rund 1 GB gross und muss beim ersten Start ausserdem das Modell
+laden -- der erste `docker compose up -d` dauert deshalb spuerbar laenger als
+jeder Neustart danach.
 
 Erreichbar wird die Syncthing-Oberflaeche bei Bedarf ueber einen Tunnel:
 

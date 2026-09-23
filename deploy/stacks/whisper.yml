@@ -1,0 +1,31 @@
+# Spracherkennung fuer das Cockpit.
+#
+# Wyoming-Protokoll auf 10300, gebunden auf 127.0.0.1: erreichbar ist der
+# Dienst nur fuer den Daemon auf derselben Maschine -- genau wie piper.yml.
+# Der Browser bekommt Whisper nie zu sehen; /api/hoeren reicht fertigen Text
+# durch.
+#
+# small-int8, nicht base-int8: erst mit base-int8 versucht, dann gegen
+# small-int8 gemessen (zwei per Piper erzeugte deutsche Saetze, /api/hoeren,
+# Stand siehe README.md Abschnitt "Sprachgespraech"). base-int8 war knapp
+# 2,5 s schnell, verschluckte aber "Wetter" und machte aus "Orchestrator"
+# "Orchestrathofer" -- genau die Woerter, die in einem Cockpit-Gespraech
+# zaehlen. small-int8 erkannte beide Saetze korrekt, kostete dafuer knapp
+# 6 s. Fuer ein Kommando an das eigene Cockpit ist eine falsch verstandene
+# Anweisung teurer als drei zusaetzliche Sekunden Wartezeit.
+#
+# mem_limit wie bei piper: bei 7,5 GB Gesamtspeicher und Agenten, die je rund
+# 300 MB brauchen, ist ein unbegrenzter Container das, was im Zweifel den
+# Daemon mitnimmt.
+services:
+  whisper:
+    image: rhasspy/wyoming-whisper:latest
+    container_name: whisper
+    command: --model small-int8 --language de --data-dir /data --download-dir /data
+    ports:
+      - "127.0.0.1:10300:10300"
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+    mem_limit: 1500m
+    cpus: 2.0
