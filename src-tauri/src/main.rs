@@ -119,7 +119,15 @@ fn main() {
             // Mikrofon, sie braucht auch keins.
             #[cfg(target_os = "linux")]
             {
-                let erlaubte_herkunft = daemon_url(&basis);
+                // Als Url geparst statt als String: ein reiner Praefixvergleich
+                // (`starts_with`) liesse auch "https://servertwo…:84430.boese.de"
+                // durch, weil das textuell mit der erlaubten Adresse beginnt.
+                // `origin()` vergleicht dagegen Schema, Host und Port exakt --
+                // genau das, was WebKit auch fuer den Herkunftsbegriff meint.
+                let erlaubte_herkunft = daemon_url(&basis)
+                    .parse::<tauri::Url>()
+                    .expect("Daemon-Adresse ergibt keine gueltige URL")
+                    .origin();
                 fenster
                     .with_webview(move |webview| {
                         use webkit2gtk::{
@@ -146,7 +154,8 @@ fn main() {
                         wv.connect_permission_request(move |webview, anfrage| {
                             let herkunft_passt = webview
                                 .uri()
-                                .map(|uri| uri.as_str().starts_with(&erlaubte_herkunft))
+                                .and_then(|uri| uri.as_str().parse::<tauri::Url>().ok())
+                                .map(|uri| uri.origin() == erlaubte_herkunft)
                                 .unwrap_or(false);
                             let bekannte_art = anfrage
                                 .downcast_ref::<UserMediaPermissionRequest>()

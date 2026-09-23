@@ -295,6 +295,34 @@ aside, #rechts { background: var(--mantle); }
 button.still:hover { border-color: color-mix(in srgb, var(--hud) 45%, transparent); color: var(--hud); }
 select:focus { outline: none; border-color: var(--hud); }
 
+/* WebKitGTK zeichnet den geschlossenen <select>-Kasten -- Flaeche, Rand UND
+ * Pfeil -- ueber den nativen GTK-Theme-Pfad und ignoriert dafuer background
+ * aus index.html komplett, auch wenn color (Schrift) durchkommt: genau das
+ * "heller Kasten, dunkler Text"-Bild, das die Pruefung zeigte. color-scheme
+ * allein reicht hier nicht, weil das System-GTK-Thema trotzdem hell bleibt.
+ * appearance:none nimmt WebKit die native Zeichnung komplett weg -- danach
+ * gilt ausschliesslich unser CSS, der Pfeil kommt als eigener Farbverlauf
+ * statt aus dem GTK-Theme. !important auf background-color, weil hud.css im
+ * <head> vor dem Grundthema in index.html steht und dessen gleich
+ * spezifische textarea/input/select-Regel sonst per Quellreihenfolge
+ * gewinnen wuerde. Die Aufklappliste (<option>) bleibt separat, weil sie von
+ * jener Regel gar nicht erfasst wird. */
+:root { color-scheme: dark; }
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: var(--crust) !important;
+  color: var(--text);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--subtext) 50%),
+    linear-gradient(135deg, var(--subtext) 50%, transparent 50%);
+  background-position: calc(100% - 16px) 55%, calc(100% - 11px) 55%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+select option { background: var(--mantle); color: var(--text); }
+select option { background: var(--mantle); color: var(--text); }
+
 /* Auf schmalen Schirmen faellt die Klammer weg -- bei 9 Pixeln Kantenlaenge
  * auf einer 320-Pixel-Karte ist sie nur noch Unruhe. */
 @media (max-width: 520px) {
