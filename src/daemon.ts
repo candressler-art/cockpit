@@ -104,7 +104,14 @@ function orchestratorLaufStarten(o: {
       void discord?.laufBeendet(runId, ende.grund, String(text ?? ''), gew)
     })
     .catch((e) => db.runBeenden(runId, 'failed', String(e)))
-    .finally(() => orchestratoren.delete(runId))
+    .finally(() => {
+      orchestratoren.delete(runId)
+      // Jeder Lauf bekommt eine frische runId (anders als Chat/Konsole/
+      // Gespraech, die eine feste wiederverwenden) -- ohne das hier wuerde
+      // jeder Agent jedes je gelaufenen Auftrags fuer immer im Speicher
+      // bleiben, siehe Kommentar an laufVergessen().
+      supervisor.laufVergessen(runId)
+    })
 
   return runId
 }
@@ -539,6 +546,9 @@ const server = createServer(async (req, res) => {
         })
         .then((r) => db.runBeenden(runId, r.fehler ? 'failed' : 'done', r.fehler))
         .catch((e) => db.runBeenden(runId, 'failed', String(e)))
+        // Wie bei orchestratorLaufStarten: eine frische runId je Aufruf, sonst
+        // bleibt der Agent dieses Laufs fuer immer in supervisor.agenten.
+        .finally(() => supervisor.laufVergessen(runId))
       return
     }
 
