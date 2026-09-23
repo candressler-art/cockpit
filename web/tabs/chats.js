@@ -28,6 +28,7 @@ let letzteSeq = 0
 let pollAktiv = false      // "sollte pollen", ueberlebt ein sichtbar(false)
 let pollTimer = null
 let claudeBlase = null     // die gerade wachsende Antwortblase (DOM-Element)
+let arbeitetZeile = null   // dezente "Claude arbeitet…"-Zeile, solange keine Blase waechst
 let freigabenKarten = new Map() // Freigabe-Id -> Karten-Element im Verlauf
 
 const datum = (ts) =>
@@ -37,6 +38,25 @@ const mb = (b) => (b > 1024 * 1024 ? `${(b / 1024 / 1024).toFixed(1)} MB` : `${M
 
 const esc = (t) =>
   String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+
+// Gleiche Praefixe wie USAGE_LIMIT_ERROR_PREFIXES aus dem SDK
+// (@anthropic-ai/claude-agent-sdk), das supervisor.ts importiert und src/
+// chats.ts fuer denselben Zweck direkt nutzt -- hier von Hand gespiegelt,
+// weil das Frontend die SDK nicht laden kann. Bei einer SDK-Aktualisierung
+// mit neuen Praefixen muss diese Liste mitgezogen werden.
+const USAGE_LIMIT_ERROR_PREFIXES = [
+  "You've hit your", "You've reached your", "You're out of usage credits",
+  'Your org is out of usage · add funds to continue',
+  'Your org is out of usage · contact your admin',
+  "Your seat type doesn't include usage credits",
+  "Your seat type doesn't include usage",
+  'Your usage allocation has been disabled by your admin',
+  "Your group's usage limit is set to $0",
+  'Fable 5 requires usage credits',
+  "You're out of extra usage",
+  "Your seat type doesn't include extra usage",
+]
+const istLimitText = (t) => USAGE_LIMIT_ERROR_PREFIXES.some((p) => t.includes(p))
 
 // Die REST-Antworten liefern Agenten und Freigaben in SQL-Schreibweise
 // (snake_case) -- hier auf die Form bringen, mit der der Rest dieser Datei
@@ -106,6 +126,10 @@ function listenauswahlZeichnen() {
 }
 
 function beitragHtml(b) {
+  // rolle 'hinweis': kein echter Beitrag (z.B. eine Sitzung, die mit einer
+  // Nutzungslimit-Meldung endete, ohne dass noch ein Kontowechsel folgte --
+  // siehe chats.ts, chatLesen). Graue Statuszeile statt Sprechblase.
+  if (b.rolle === 'hinweis') return `<div class="chathinweis">${esc(b.text)}</div>`
   return `<div class="beitrag ${b.rolle}">
     <div class="brolle">${b.rolle === 'user' ? 'Du' : 'Claude'} · ${datum(b.ts)}</div>
     <pre>${esc(b.text)}</pre>
@@ -120,6 +144,7 @@ async function oeffnen(id) {
   aktZielCwd = ''
   letzteSeq = 0
   claudeBlase = null
+  arbeitetZeile = null
   freigabenKarten = new Map()
 
   wurzel.classList.add('fokus')
@@ -140,6 +165,7 @@ async function oeffnen(id) {
       aktLaufId = f.laufId
       letzteSeq = f.startSeq ?? 0
       eingabeSperren(true)
+      arbeitetZeigen() // Seite (neu) geladen, waehrend der Agent noch arbeitet
       pollStarten()
     }
   } catch (e) {
@@ -176,6 +202,10 @@ function sitzungZeichnen(d) {
       <textarea id="chattext" rows="1" placeholder="Nachricht… (Enter sendet, Shift+Enter Zeilenumbruch)"></textarea>
       <button id="chatsenden">Senden</button>
     </div>`
+
+  // Der Verlauf wurde eben komplett neu aufgebaut -- die alte Arbeitsanzeige
+  // (falls eine stand) haengt an keinem Element mehr, das noch im DOM ist.
+  arbeitetZeile = null
 
   lese.querySelector('#chatzurueck').onclick = fokusVerlassen
   const feld = lese.querySelector('#chattext')
@@ -215,6 +245,34 @@ function fehlerZeileAnhaengen(text) {
   verlaufAnsEndeScrollen()
 }
 
+/** Statuszeile fuer Ereignisse, die keine Sprechblase sind (Limitmeldung, Kontowechsel). */
+function statuszeileAnhaengen(text, art = 'status') {
+  const verlauf = wurzel.querySelector('#chatverlauf')
+  if (!verlauf) return
+  const d = document.createElement('div')
+  d.className = `chatstatuszeile chatstatuszeile-${art}`
+  d.textContent = text
+  verlauf.appendChild(d)
+  verlaufAnsEndeScrollen()
+}
+
+/** Dezente "Claude arbeitet…"-Zeile, solange noch keine Antwortblase waechst. */
+function arbeitetZeigen() {
+  if (arbeitetZeile) return
+  const verlauf = wurzel.querySelector('#chatverlauf')
+  if (!verlauf) return
+  arbeitetZeile = document.createElement('div')
+  arbeitetZeile.className = 'chatarbeitet'
+  arbeitetZeile.textContent = 'Claude arbeitet…'
+  verlauf.appendChild(arbeitetZeile)
+  verlaufAnsEndeScrollen()
+}
+
+function arbeitetVerbergen() {
+  arbeitetZeile?.remove()
+  arbeitetZeile = null
+}
+
 async function nachrichtSenden() {
   const id = offen
   const lese = wurzel.querySelector('#chatlese')
@@ -228,6 +286,7 @@ async function nachrichtSenden() {
   feld.value = ''
   feld.style.height = 'auto'
   eingabeSperren(true)
+  arbeitetZeigen()
   verlaufAnsEndeScrollen()
 
   try {
@@ -287,6 +346,7 @@ async function pollSchritt() {
   if (!endzustand) return
 
   pollGanzStoppen()
+  arbeitetVerbergen()
   const fehlertext = agent.status !== 'done' ? (agent.lastError || `Sitzung endete: ${agent.status}`) : null
   await sitzungNeuLaden(id)
   if (offen !== id) return
@@ -317,8 +377,19 @@ function ereignisVerarbeiten(e) {
     if (p?.type === 'assistant' && !p.parent_tool_use_id) {
       const inhalt = Array.isArray(p.message?.content) ? p.message.content : []
       const text = inhalt.filter((b) => b?.type === 'text').map((b) => String(b.text ?? '')).join('')
-      if (text) claudeBlaseErgaenzen(verlauf, text)
+      if (text && istLimitText(text)) {
+        // Keine echte Antwort, nur ein Konto, das gerade ins Limit laeuft --
+        // die Arbeitsanzeige bleibt bewusst stehen, denn der Kontowechsel
+        // (eigenes protocol-Ereignis) und danach die echte Antwort kommen
+        // gleich noch (Fund aus dem Live-Betrieb, siehe chats.ts chatLesen).
+        statuszeileAnhaengen(`⚠ ${text}`, 'limit')
+      } else if (text) {
+        arbeitetVerbergen()
+        claudeBlaseErgaenzen(verlauf, text)
+      }
     }
+  } else if (e.kind === 'protocol' && typeof e.summary === 'string' && e.summary.startsWith('Kontowechsel')) {
+    statuszeileAnhaengen(`↻ ${e.summary} — Antwort kommt gleich`, 'kontowechsel')
   } else if (e.kind === 'tool_use') {
     const z = document.createElement('div')
     z.className = 'chatwerkzeugzeile'

@@ -144,6 +144,73 @@ await chatsIndizieren(dbPfad)
   pruefe('genau zwei Beitraege (Frage + die nicht-synthetische Antwort)', d?.beitraege.length === 2)
 }
 
+// --- chatLesen: Nutzungslimit-Meldung ist kein echter Beitrag (Fund aus dem
+// Live-Betrieb: "weiter" wurde scheinbar mit der Limitmeldung beantwortet,
+// dabei folgte kurz danach per Kontowechsel die echte Antwort) -------------
+{
+  const sessionId3 = randomUUID()
+  mkdirSync(join(spiegel, projektOrdner), { recursive: true })
+  const spiegelDatei3 = join(spiegel, projektOrdner, `${sessionId3}.jsonl`)
+  const zeilen3 = [
+    JSON.stringify({
+      type: 'user', timestamp: zeit(0), cwd: desktopCwd,
+      message: { content: 'weiter' },
+    }),
+    // Das Hauptkonto laeuft sofort ins Limit -- steht als ganz normaler
+    // Assistant-Textblock in der Sitzung (siehe supervisor.ts), bevor der
+    // Kontowechsel greift.
+    JSON.stringify({
+      type: 'assistant', timestamp: zeit(500),
+      message: { content: [{ type: 'text', text: "You've hit your session limit · resets 8:10pm" }] },
+    }),
+    // Nach dem Kontowechsel: die echte Antwort des zweiten Kontos.
+    JSON.stringify({
+      type: 'assistant', timestamp: zeit(35000),
+      message: { content: [{ type: 'text', text: 'Hier ist die richtige Antwort.' }] },
+    }),
+  ]
+  writeFileSync(spiegelDatei3, zeilen3.join('\n') + '\n', 'utf-8')
+  await chatsIndizieren(dbPfad)
+
+  const d = await chatLesen(dbPfad, sessionId3)
+  pruefe('dritte Sitzung gefunden', d !== null)
+  pruefe('genau zwei Beitraege (Frage + echte Antwort, Limitmeldung weg)', d?.beitraege.length === 2)
+  pruefe(
+    'Limitmeldung nicht im Verlauf, weil nicht der letzte Beitrag',
+    !d?.beitraege.some((b) => b.text.includes("You've hit your session limit")),
+  )
+  pruefe('zweiter Beitrag ist die echte Antwort', d?.beitraege[1]?.text === 'Hier ist die richtige Antwort.')
+  pruefe('zweiter Beitrag bleibt rolle assistant, keine Umdeutung', d?.beitraege[1]?.rolle === 'assistant')
+}
+
+// --- chatLesen: Limitmeldung AM ENDE der Sitzung bleibt als Hinweis stehen -
+{
+  const sessionId4 = randomUUID()
+  mkdirSync(join(spiegel, projektOrdner), { recursive: true })
+  const spiegelDatei4 = join(spiegel, projektOrdner, `${sessionId4}.jsonl`)
+  const zeilen4 = [
+    JSON.stringify({
+      type: 'user', timestamp: zeit(0), cwd: desktopCwd,
+      message: { content: 'Noch eine Frage' },
+    }),
+    // Die Sitzung endet HIER mit dem Limit -- kein Kontowechsel mehr
+    // aufgezeichnet (z.B. weil auch das letzte Konto gesperrt war).
+    JSON.stringify({
+      type: 'assistant', timestamp: zeit(500),
+      message: { content: [{ type: 'text', text: "You've hit your session limit · resets 9:00pm" }] },
+    }),
+  ]
+  writeFileSync(spiegelDatei4, zeilen4.join('\n') + '\n', 'utf-8')
+  await chatsIndizieren(dbPfad)
+
+  const d = await chatLesen(dbPfad, sessionId4)
+  pruefe('vierte Sitzung gefunden', d !== null)
+  pruefe('genau zwei Beitraege (Frage + Hinweis)', d?.beitraege.length === 2)
+  const hinweis = d?.beitraege[1]
+  pruefe('letzter Beitrag hat rolle hinweis, keine falsche Antwort', hinweis?.rolle === 'hinweis')
+  pruefe('Hinweistext nennt das Limit', hinweis?.text.includes("You've hit your session limit"))
+}
+
 // --- fortsetzungVorbereiten: Kopie an richtiger Stelle, Spiegel unveraendert ---
 const ersatzCwd = join(wurzel, 'ersatz-cwd')
 mkdirSync(ersatzCwd, { recursive: true })
