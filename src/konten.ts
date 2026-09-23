@@ -110,9 +110,18 @@ function anmeldungPruefen(configDir: string): { angemeldet: boolean; abo: string
  * Server (/home/claude/.claude.json existiert, /home/claude/.claude/.claude.json
  * nicht). Deshalb zwei Kandidaten fuer das Hauptkonto, einer fuer alle
  * anderen.
+ *
+ * Wichtig: der Home-Kandidat gilt NUR, wenn CLAUDE_CONFIG_DIR tatsaechlich
+ * NICHT gesetzt ist -- sonst wuerde eine eigens isolierte Testinstanz (siehe
+ * NACHTSCHICHT.md, COCKPIT_KONTEN_DIR/CLAUDE_CONFIG_DIR auf /tmp) bei einem
+ * Hauptkonto ohne eigene .claude.json-E-Mail still auf das ECHTE
+ * /home/.../.claude.json ausweichen und Cans echte E-Mail in die isolierte
+ * Testantwort durchreichen -- live so beobachtet (candressler@gmail.com kam
+ * in einer Testinstanz mit eigenem CLAUDE_CONFIG_DIR aus /api/konten
+ * zurueck, obwohl deren .claude.json gar keine E-Mail enthielt).
  */
-function emailLesen(configDir: string, istHaupt: boolean): string | null {
-  const kandidaten = istHaupt
+export function emailLesen(configDir: string, istHaupt: boolean): string | null {
+  const kandidaten = istHaupt && !process.env.CLAUDE_CONFIG_DIR
     ? [join(configDir, '.claude.json'), join(heimatverzeichnis(), '.claude.json')]
     : [join(configDir, '.claude.json')]
   for (const pfad of kandidaten) {

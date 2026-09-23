@@ -9,8 +9,12 @@ import {
   istKontoFehlertext,
   kontoFehlerLabel,
   KONTO_AUTH_FEHLER_PRAEFIXE,
+  emailLesen,
 } from '../dist/konten.js'
 import { nutzungAusAntwort } from '../dist/kontenNutzung.js'
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 let ok = 0, gesamt = 0
 const pruefe = (name, bedingung) => {
@@ -386,6 +390,49 @@ const SDK_LIMIT_PRAEFIXE = ["You've hit your", "You've reached your"]
   pruefe('usage: kein Objekt ergibt null', nutzungAusAntwort(null, JETZT) === null)
   pruefe('usage: utilization null ergibt null',
     nutzungAusAntwort({ five_hour: { utilization: null, resets_at: null } }, JETZT) === null)
+}
+
+// --- 16. emailLesen: Home-Fallback nur ohne gesetztes CLAUDE_CONFIG_DIR ---
+// Fund: eine isolierte Testinstanz (eigenes CLAUDE_CONFIG_DIR, siehe
+// NACHTSCHICHT.md) mit einem Hauptkonto ohne E-Mail in seiner eigenen
+// .claude.json wich sonst still auf die ECHTE Home-.claude.json aus und
+// lieferte Cans echte E-Mail in die isolierte Antwort zurueck.
+{
+  const alteHome = process.env.HOME
+  const alteConfigDir = process.env.CLAUDE_CONFIG_DIR
+  const heimatVortaeuschen = mkdtempSync(join(tmpdir(), 'nachtschicht-home-'))
+  writeFileSync(
+    join(heimatVortaeuschen, '.claude.json'),
+    JSON.stringify({ oauthAccount: { emailAddress: 'echt@example.com' } }),
+  )
+  const isolierterConfigDir = mkdtempSync(join(tmpdir(), 'nachtschicht-konfig-'))
+  writeFileSync(join(isolierterConfigDir, '.claude.json'), JSON.stringify({}))
+
+  process.env.HOME = heimatVortaeuschen
+  try {
+    process.env.CLAUDE_CONFIG_DIR = isolierterConfigDir
+    pruefe(
+      'emailLesen: mit gesetztem CLAUDE_CONFIG_DIR kein Home-Fallback',
+      emailLesen(isolierterConfigDir, true) === null,
+    )
+
+    delete process.env.CLAUDE_CONFIG_DIR
+    pruefe(
+      'emailLesen: ohne CLAUDE_CONFIG_DIR (echtes Hauptkonto) Home-Fallback greift',
+      emailLesen(isolierterConfigDir, true) === 'echt@example.com',
+    )
+
+    process.env.CLAUDE_CONFIG_DIR = isolierterConfigDir
+    pruefe(
+      'emailLesen: Zusatzkonto (istHaupt=false) nutzt nie den Home-Fallback',
+      emailLesen(isolierterConfigDir, false) === null,
+    )
+  } finally {
+    if (alteHome === undefined) delete process.env.HOME
+    else process.env.HOME = alteHome
+    if (alteConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR
+    else process.env.CLAUDE_CONFIG_DIR = alteConfigDir
+  }
 }
 
 console.log(`\n${ok}/${gesamt} bestanden`)
