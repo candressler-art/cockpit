@@ -2,6 +2,36 @@
 
 ## Fuer Can (Kurzfassung)
 
+- **Durchgang 12:** Kein Log-Eintrag fuer Durchgang 11 vorgefunden (Branch
+  war beim Start dieses Durchgangs sauber, `git log` zeigt keinen Commit
+  zwischen "Logbuch nach Durchgang 10" und jetzt) -- vermutlich ist Durchgang
+  11 ohne jede Aenderung beendet worden oder der Kontext ist ihm ausgegangen,
+  bevor er ueberhaupt etwas geschrieben hat. Nichts zu reparieren dabei (kein
+  liegen gebliebener Code wie vor Durchgang 10), nur zur Kenntnis fuer Can,
+  falls das dem Waechter-Skript auffallen sollte.
+  Inhaltlich: von den urspruenglichen Aufgaben aus der "Offene Punkte"-Liste
+  war nur noch EIN Punkt tatsaechlich offen (nicht nur unverifiziert): die in
+  Durchgang 10 eingebaute `ladefehlerText()`-Meldung (Chats/Vault/Server bei
+  nicht erreichbarem Daemon) war zwar per Code-Review bestaetigt, aber nie
+  im echten Browser gesehen. Nachgeholt: Testdaemon gestartet, mit
+  Playwright (`nachtschicht-bilder/fetchfehler9.mjs`, lag schon fertig da,
+  nur nie ausgefuehrt) alle drei Tabs zum ersten Mal NACH dem Beenden des
+  Daemons besucht. Ergebnis fuer alle drei: "freundlich" (deutsche Meldung
+  "Kein Daemon erreichbar auf localhost:8803.", keine rohe `TypeError`
+  mehr). Kein Bug gefunden, Punkt jetzt wirklich abgeschlossen.
+  Damit sind ALLE urspruenglich in dieser Datei gelisteten Pruefpunkte
+  entweder erledigt oder haengen an etwas, das diese Nachtschicht nicht
+  selbst loesen kann (kein `cargo` fuer `src-tauri/`; die
+  Chat-Sitzungs-Wachstumsfrage braucht Cans Produktentscheidung, siehe
+  "Offene Punkte" unten). Ich habe keine neuen Fehler gefunden, obwohl ich
+  gezielt nach noch nicht mehrfach gepruefter Oberflaeche gesucht habe.
+  `.nachtschicht-fertig` lege ich trotzdem NICHT an: die beiden verbliebenen
+  Punkte sind echte offene Punkte, kein "alles erledigt" -- Can muss sie
+  sehen, nicht ich sie stillschweigend als erledigt markieren. Naechster
+  Durchgang: falls ihm nichts Neues auffaellt, kann er das ruhig genauso
+  sehen und ebenfalls sauber ohne Fund beenden -- das waere dann ein
+  echtes Signal an Can, selbst zu entscheiden statt auf einen 13. Durchgang
+  zu warten.
 - **Durchgang 10 (Start):** Bei Durchgangsbeginn lag bereits fertiger,
   getesteter, aber nie committeter Code im Arbeitsverzeichnis (9 geaenderte
   Dateien + eine neue Testdatei, kein Log-Eintrag dazu -- vermutlich
@@ -980,11 +1010,11 @@ begruendeten Entscheidung notiert.
 - [x] Rohe `TypeError: Failed to fetch`-Meldung bei fehlgeschlagenem ERSTEN
   Laden in Chats/Vault/Server-Tab: vor Durchgang 10 behoben (neue
   `ladefehlerText()`-Hilfsfunktion in `web/bus.js`, wie in `lauf.js`), siehe
-  Kurzfassung oben. NICHT nochmal visuell im Browser gegengeprueft (die
-  ohnehin schon fragile Playwright-Verfuegbarkeit in dieser Umgebung wurde
-  in diesem Durchgang nicht erneut getestet) -- nur per Code-Review und den
-  bestehenden Beleg-Traces aus Durchgang 8 (identischer catch-Zweig, nur der
-  angezeigte Text aendert sich) bestaetigt.
+  Kurzfassung oben. In Durchgang 12 endlich auch visuell im Browser
+  gegengeprueft (Testdaemon + Playwright, `nachtschicht-bilder/
+  fetchfehler9.mjs`, lag fertig aber ungenutzt da): alle drei Tabs zeigen
+  nach Beenden des Daemons die deutsche Meldung ("Kein Daemon erreichbar auf
+  ..."), keine rohe `TypeError` mehr. Bestaetigt, kein Bug.
 
 ## Offene Punkte (Prioritaet 3 -- Rest des Cockpits)
 
