@@ -2,6 +2,46 @@
 
 ## Fuer Can (Kurzfassung)
 
+- **Durchgang 4, wichtigster Fund:** Ein echter Chat-Tab-Bug, live gegen die
+  Testinstanz reproduziert: sind waehrend eines fortgesetzten Chats
+  irgendwann ALLE Konten gesperrt (kein weiteres zum Wechseln mehr), bleibt
+  der Chat-Agent im Status `waiting_ratelimit` stehen -- ein Status, den der
+  Chat-Tab (`web/tabs/chats.js`, `pollSchritt()`) bisher NICHT als Endzustand
+  kannte. Folge: die Eingabe blieb fuer immer gesperrt, die
+  "Claude arbeitet..."-Anzeige lief endlos weiter, der Poll alle 1,2s auch,
+  und der Fehlertext kam nie an -- nur ein Neuladen der Seite half. Behoben
+  (Commit "Chats: Kontowechsel bis zur Sperre aller Konten..."): eine Zeile,
+  `waiting_ratelimit` gehoert jetzt zur Endzustandsliste. **Bitte im Browser
+  gegenpruefen**, sobald Du kannst -- ich konnte die Oberflaeche nur ueber
+  die berechneten Werte/HTTP pruefen (siehe "Wie getestet" unten), nicht
+  visuell in einem echten Browser (kein DOM-Testaufbau in dieser Nachtschicht
+  vorhanden, siehe Punkt zu Playwright/jsdom weiter unten).
+- **Kontowechsel WAEHREND eines Chat-Fortsetzens** (die eigentliche Frage aus
+  der Aufgabenliste) ist ansonsten sauber gebaut: `agentStarten()` in
+  `supervisor.ts` haelt `resumeSessionId` selbst ueber mehrere Kontowechsel
+  hinweg aktuell (`resumeSessionId = this.agenten.get(k)?.sessionId ??
+  resumeSessionId`), und `chats.ts`/`daemon.ts` lesen erst NACH dem
+  vollstaendigen Abschluss von `agentStarten()` die dann aktuelle
+  `sessionId` aus, um `chat_fortsetzung.aktuelle_session` zu aktualisieren.
+  Kein Wettlauf, keine veraltete Session-Id gefunden.
+- **Discord-Bruecke** geprueft (nur Code-Lesen + Ereignis-Verdrahtung, kein
+  eigener Discord-Server verfuegbar): Kontowechsel-Ereignisse sind vom Typ
+  `protocol` und werden von `daemon.ts` an Discord weitergereicht
+  (`discord.protokoll()`), erscheinen also im Lauf-Faden. Der Fall "letztes
+  Konto auch noch gesperrt" ist vom Ereignistyp `rate_limit`, der bewusst
+  NICHT an Discord geht (nur `protocol` und `error`, siehe Kommentar in
+  `daemon.ts`) -- fuer einen Orchestrator-Lauf kommt trotzdem am Ende eine
+  `laufBeendet`-Nachricht mit Grund und Text. Fuer einen Chat-Zug (kein
+  Orchestrator-Lauf) gibt es dagegen GAR KEINE Discord-Nachricht, wenn alle
+  Konten gesperrt sind -- das ist aber vermutlich kein Bug, sondern
+  Kontext: Discord kennt Chats ueberhaupt nicht (keine Befehle dafuer, nur
+  `!lauf`/`!stop`/`!status` fuer Orchestrator-Laeufe), also war ein
+  Chat-Ereignis dort wohl nie vorgesehen.
+- **Anzeige im Server-Tab** (`web/tabs/server.js`, Kontokarten) kurz
+  gegengelesen: Leerzustand, Fehlerzustand (alte Liste bleibt stehen statt
+  Fehlerwand), nicht angemeldet, gesperrt/frei, Ringe mit `null`-Werten --
+  alles sauber abgefangen. Kein Fehler gefunden, aber nicht visuell
+  (Browser) geprueft.
 - **Durchgang 3, wichtigster Fund:** Ein Datenschutz-Bug in `emailLesen()`
   (`src/konten.ts`) liess eine isolierte Testinstanz (eigenes
   `CLAUDE_CONFIG_DIR`, wie in dieser Nachtschicht vorgeschrieben) fuer ein
@@ -182,6 +222,97 @@ noch" vs. "ist tot"?) -- eher eine Produktentscheidung als ein Bugfix. Die
 konservative Wahl war, das Verhalten zu pruefen und zu dokumentieren statt
 etwas Neues zu bauen.
 
+## Erledigt (Durchgang 4)
+
+### Chat-Tab haengt, wenn waehrend eines Chats alle Konten gesperrt werden
+
+**Commit:** "Chats: Kontowechsel bis zur Sperre aller Konten beendet den
+Poll nicht mehr haengend".
+
+**Befund, live gegen die Testinstanz reproduziert:** Test-Chat mit echter
+UUID-Session-Id angelegt (`/tmp/nachtschicht/spiegel4/.../<uuid>.jsonl`,
+passende `chats`-Indexzeile), dann `POST /api/chats/<id>/weiter` mit allen
+vier Fake-Konten (`haupt`, `dritt`, `zweit`, `zweit-test`, alle mit
+`accessToken:"attrappe"`) ausgeloest. Ereignisprotokoll zeigt den erwarteten
+Ablauf -- vier Anmeldefehler nacheinander, drei `Kontowechsel`-Protokollzeilen
+dazwischen, am Ende `status: waiting_ratelimit` fuer den Agenten `chat`.
+Das ist serverseitig alles korrekt (siehe naechster Absatz). Der Fehler liegt
+im Client: `web/tabs/chats.js`, `pollSchritt()` kannte als Endzustand nur
+`['done', 'failed', 'stopped']` -- `waiting_ratelimit` fehlte. Der Poll
+(alle 1,2s) laeuft dadurch fuer immer weiter, `eingabeSperren(false)` wird
+nie aufgerufen (Eingabefeld bleibt gesperrt), die "arbeitet"-Anzeige
+verschwindet nie, und der Fehlertext (`agent.lastError`) wird nie angezeigt.
+Einziger Ausweg fuer einen Nutzer waere ein Neuladen der Seite.
+
+**Fix:** `waiting_ratelimit` zur Endzustandsliste in `pollSchritt()`
+hinzugefuegt (eine Zeile plus Kommentar). Die vorhandene
+`fehlertext`-Berechnung direkt danach (`agent.status !== 'done' ? ... :
+null`) griff schon vorher korrekt fuer jeden Nicht-`done`-Status, keine
+weitere Anpassung noetig.
+
+**Wie getestet:** Kein Browser/DOM-Testaufbau vorhanden (kein `jsdom` als
+Dependency, `chats.js` importiert `bus.js`, das top-level auf
+`location.host`/`window.__TAURI__` zugreift -- ohne echten Browser oder
+jsdom-Setup laesst sich das Modul nicht mal laden). Playwright-Installation
+in diesem Durchgang nicht versucht (siehe Prioritaet-2-Punkt unten, dort
+noch offen). Stattdessen: das komplette Backend-Ereignisprotokoll fuer den
+Testlauf gegen `/api/lauf/<laufId>` gelesen und Zeile fuer Zeile mit dem
+Code in `pollSchritt()`/`ereignisVerarbeiten()` abgeglichen -- der Agent
+landet nachweislich (JSON-Beleg im Testlauf) bei `status: "waiting_ratelimit"`
+und NIRGENDS bei `done`/`failed`/`stopped`, also haette der alte Code den
+Poll nie beendet. Zusaetzlich verifiziert: ein zweiter `/weiter`-Aufruf
+direkt danach bekam `202` (kein haengendes `chatLaeuft`-Lock serverseitig --
+das Problem ist rein clientseitig), und `chat_fortsetzung.aktuelle_session`
+in der DB blieb unveraendert korrekt (keine Verfaelschung durch die vier
+gescheiterten Versuche, da nie eine neue Session-Id vergeben wurde, bevor
+der Login-Fehler kam). **Bitte von Can im echten Browser gegenpruefen.**
+
+### Kontowechsel waehrend eines fortgesetzten Chats -- Code gelesen, kein Fehler gefunden
+
+`agentStarten()` in `supervisor.ts` fuehrt `resumeSessionId` selbst ueber
+mehrere Kontowechsel-Versuche innerhalb EINES Aufrufs nach (Zeile ~322:
+`resumeSessionId = this.agenten.get(k)?.sessionId ?? resumeSessionId`).
+`daemon.ts` liest die finale `sessionId` erst NACH Abschluss des gesamten
+`agentStarten()`-Aufrufs aus `supervisor.agentenListe(...)`, um
+`chats.ts`s `fortsetzungAktualisieren()` aufzurufen -- kein Wettlauf
+zwischen Kontowechsel und Session-Buchhaltung moeglich, weil beides
+sequenziell im selben Promise-Verlauf passiert. Live mit der UUID-Session
+aus dem obigen Test nachvollzogen: `chat_fortsetzung.aktuelle_session` blieb
+exakt bei der urspruenglichen Session-Id stehen, weil kein Konto je eine
+neue Antwort lieferte (alle vier scheiterten sofort an "Not logged in",
+bevor die CLI je eine neue Session-Id vergeben haette) -- das ist das
+korrekte Verhalten fuer diesen Fall, keine Verwechslung oder verlorene
+Zuordnung.
+
+### Discord-Bruecke -- Code gelesen, kein Fehler gefunden (aber eine Luecke notiert)
+
+`supervisor.on('ereignis', ...)` in `daemon.ts` reicht nur Ereignisse vom
+Typ `protocol` und `error` an Discord weiter (bewusst, siehe Kommentar:
+"alles andere waere Rauschen"). Die `Kontowechsel: X nicht nutzbar (...),
+weiter mit Y`-Zeile aus `supervisor.ts` ist vom Typ `protocol` und kommt
+damit in Discord an (im Lauf-Faden, `discord.protokoll()`). Der Fall "auch
+das letzte Konto ist jetzt gesperrt" ist dagegen vom Typ `rate_limit` und
+geht NICHT an Discord -- fuer einen Orchestrator-Lauf faengt das die
+abschliessende `laufBeendet()`-Nachricht auf (die kommt so oder so, wenn der
+Lauf endet). Fuer einen Chat-Zug (kein Orchestrator-Lauf, kein
+`laufBegonnen`/`laufBeendet`-Aufruf) gibt es dagegen ueberhaupt keine
+Discord-Nachricht mehr, sobald alle Konten gesperrt sind. **Einschaetzung:**
+vermutlich kein Bug, sondern Discord war fuer Chats nie vorgesehen (keine
+`!chat`-Befehle, nur `!lauf`/`!stop`/`!status`) -- aber falls Can Chats auch
+per Handy/Discord ueberwachen will, waere das eine Luecke, die erst mit dem
+heutigen Fix im Chat-Tab (siehe oben) ueberhaupt sichtbar wuerde (vorher
+haengte die Oberflaeche sowieso).
+
+### Anzeige im Server-Tab (Kontokarten) -- kurz gegengelesen, kein Fehler gefunden
+
+`web/tabs/server.js`, `kontoKarte()`/`kontenZeichnen()`/`kontenLaden()`:
+Leerliste zeigt `<div class="leer">`, ein Ladefehler laesst die zuletzt
+bekannte Liste stehen statt einer Fehlerwand, nicht angemeldete Konten
+zeigen eine eigene Pille und deaktivieren den Vorzug-Knopf, die
+Nutzungsringe (`ring()`) vertragen `null` (noch nie gemessen) sichtbar
+anders als `0`. Nur Code gelesen, nicht visuell im Browser geprueft (siehe
+Prioritaet-2-Luecke).
+
 ## Offene Punkte (Prioritaet 1, noch zu pruefen)
 
 - [ ] **Daemon-Neustart:** `gesperrtBis` und `nutzung` in
@@ -197,17 +328,27 @@ etwas Neues zu bauen.
   aber nicht verifiziert. Persistieren waere eine kleine JSON-Datei neben
   der DB -- das ist eine Produktentscheidung (mehr bewegliche Teile fuer
   einen Randfall), noch nicht umgesetzt.
-- [ ] **Kontowechsel beim Chat-Fortsetzen** (`src/chats.ts`,
-  `fortsetzungVorbereiten`/`fortsetzungAktualisieren`): noch nicht
-  durchdacht, ob ein Kontowechsel WAEHREND eines fortgesetzten Chats
-  (`resume` von aussen, siehe `versuchPrompt()`-Kommentar zum
-  "servertwo-Fund") sauber mit `chats.ts`s eigenem Session-Tracking
-  zusammenspielt.
-- [ ] **Discord-Bruecke:** noch nicht angeschaut, ob/wie ein Kontowechsel
-  dort sichtbar wird.
-- [ ] **Anzeige in allen Zustaenden** (Server-Tab, Zentrale): noch nicht
-  gegen echtes HTML/CSS geprueft (gehoert eigentlich zu Prioritaet 2, aber
-  inhaltlich an Prioritaet 1 gekoppelt).
+- [x] **Kontowechsel beim Chat-Fortsetzen** (`src/chats.ts`,
+  `fortsetzungVorbereiten`/`fortsetzungAktualisieren`): in Durchgang 4
+  durchdacht und live verifiziert -- Session-Buchhaltung ist korrekt
+  (kein Wettlauf, siehe "Erledigt" oben). Dabei aber einen echten Bug im
+  Chat-TAB (nicht in `chats.ts` selbst) gefunden und behoben: der Poll
+  erkannte `waiting_ratelimit` nicht als Ende, siehe oben. Bitte im
+  Browser gegenpruefen.
+- [x] **Discord-Bruecke:** in Durchgang 4 gegengelesen (kein eigener
+  Discord-Server verfuegbar, nur Code + Ereignis-Verdrahtung). Kontowechsel
+  kommt an (Typ `protocol`), "alle Konten gesperrt" NICHT direkt fuer
+  Chat-Zuege (Typ `rate_limit`, wird nur fuer `protocol`/`error`
+  weitergereicht) -- vermutlich kein Bug, da Discord Chats gar nicht kennt.
+  Siehe "Erledigt" oben fuer Details. Nicht live gegen einen echten
+  Discord-Server getestet (kein Server verfuegbar, `COCKPIT_DISCORD_TOKEN`
+  in der Testinstanz bewusst leer).
+- [x] **Anzeige in allen Zustaenden** (Server-Tab): in Durchgang 4 der
+  Server-Tab (Kontokarten) gegengelesen, kein Fehler gefunden (siehe
+  "Erledigt" oben). Zentrale (`web/tabs/zentrale.js`) hatte schon vorher
+  eine eigene Farbzuordnung fuer `waiting_ratelimit`. NICHT visuell im
+  Browser geprueft (kein Playwright/jsdom-Aufbau in dieser Nachtschicht,
+  siehe Prioritaet-2-Punkt unten) -- nur Code und berechnete Werte gelesen.
 - [x] **Vorzug setzen/aufheben:** in Durchgang 3 end-to-end gegen die
   Testinstanz verifiziert -- `POST /api/konten {"name":"zweit"}` setzt den
   Vorzug (`modus` wechselt auf `manuell`, `bevorzugt:true` nur bei `zweit`),
@@ -256,3 +397,16 @@ etwas Neues zu bauen.
   Kommandozeile und enthaelt zufaellig denselben Text). Immer mit
   `ps -p <pid> -o cmd` gegenpruefen, dass es wirklich `node dist/daemon.js`
   ohne Praefix ist, bevor `kill` laeuft.
+- Durchgang 4 hat `/tmp/nachtschicht/spiegel4/` (eigener Spiegel-Ordner mit
+  EINEM Test-Chat, Datei `-tmp-nachtschicht-work/<uuid>.jsonl`) und
+  `/tmp/nachtschicht/cockpit4.db*` angelegt, um `COCKPIT_SESSIONS` nicht mit
+  dem (leeren) `/tmp/nachtschicht/spiegel/` aus den Vorgaengern zu
+  vermischen. Wichtig fuer eigene Chat-Tests: die CLI validiert `--resume`
+  strikt als UUID -- ein selbstgebauter Session-Dateiname wie
+  `sess-test-0001.jsonl` scheitert SOFORT mit einem CLI-Nutzungsfehler
+  ("...is not a UUID..."), BEVOR ueberhaupt ein Konto/Login gepruefte wird,
+  und taeuscht damit einen ganz anderen Fehlerpfad vor als eine echte
+  Sitzung. Fuer Chat+Konten-Tests immer eine echte UUID als Dateiname/
+  Session-Id verwenden (z.B. `python3 -c "import uuid; print(uuid.uuid4())"`).
+  Test-Daemon aus Durchgang 4 (PID 677265) wurde sauber ueber die eigene PID
+  beendet.
