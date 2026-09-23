@@ -256,6 +256,20 @@ export function kontoWaehlen(
  * wann gesperrt. Die Kontenliste selbst wird nicht zwischengespeichert --
  * die liest kontenLesen() bei jedem Zugriff neu.
  */
+/**
+ * Was KontenVerwaltung braucht, um Sperren und Vorzug ueber einen
+ * Daemon-Neustart hinweg zu behalten -- bewusst als schmales Interface
+ * (nicht CockpitDb direkt importiert), damit konten.ts von db.ts unabhaengig
+ * bleibt. CockpitDb erfuellt das Interface strukturell, ohne dass etwas
+ * verdrahtet werden muss.
+ */
+export interface KontenPersistenz {
+  kontoSperrenLesen(): Record<string, number>
+  kontoSperren(name: string, bis: number): void
+  kontoVorzugLesen(): string | null
+  kontoVorzugSetzen(name: string | null): void
+}
+
 export class KontenVerwaltung {
   private bevorzugt: string | null = null
   private gesperrtBis = new Map<string, number>()
@@ -277,8 +291,25 @@ export class KontenVerwaltung {
    *  anderen Kontos nicht bei jedem Agentenstart neu den Ausschlag gibt. */
   private zuletztGenutzt: string | null = null
 
+  /**
+   * Ohne Persistenz (z.B. in Tests) rein im Speicher, wie bisher. Mit
+   * Persistenz werden Sperren und Vorzug beim Start nachgeladen (abgelaufene
+   * Sperren dabei verworfen) und bei jeder Aenderung sofort weggeschrieben --
+   * ein Neustart mitten in einer 5-Stunden-Sperre probiert das Konto danach
+   * nicht mehr sofort wieder.
+   */
+  constructor(private readonly persistenz?: KontenPersistenz) {
+    if (!persistenz) return
+    const jetzt = Date.now()
+    for (const [name, bis] of Object.entries(persistenz.kontoSperrenLesen())) {
+      if (bis > jetzt) this.gesperrtBis.set(name, bis)
+    }
+    this.bevorzugt = persistenz.kontoVorzugLesen()
+  }
+
   bevorzugtesKontoSetzen(name: string | null): void {
     this.bevorzugt = name
+    this.persistenz?.kontoVorzugSetzen(name)
   }
 
   bevorzugtesKontoLesen(): string | null {
@@ -288,6 +319,7 @@ export class KontenVerwaltung {
   /** Merkt ein Konto als gesperrt bis zum angegebenen Zeitpunkt. */
   sperren(name: string, bisMs: number): void {
     this.gesperrtBis.set(name, bisMs)
+    this.persistenz?.kontoSperren(name, bisMs)
   }
 
   private gesperrtBisMap(): Map<string, number | null> {

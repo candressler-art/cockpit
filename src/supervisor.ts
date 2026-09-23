@@ -115,11 +115,14 @@ export class Supervisor extends EventEmitter {
     string,
     { aufloesen: (erlaubt: boolean, grund: string | null) => void; anfrage: PermissionRequest }
   >()
-  private konten = new KontenVerwaltung()
+  private konten: KontenVerwaltung
 
   constructor(db: CockpitDb) {
     super()
     this.db = db
+    // Persistenz uebergeben, damit Sperren/Vorzug einen Daemon-Neustart
+    // ueberleben (siehe Kommentar an KontenVerwaltung.constructor).
+    this.konten = new KontenVerwaltung(db)
   }
 
   /** Gesamtbild aller Konten (Liste, Modus, naechstes Konto, Abstand) fuer /api/konten. */

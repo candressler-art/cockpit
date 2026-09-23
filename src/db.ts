@@ -74,6 +74,21 @@ CREATE TABLE IF NOT EXISTS permissions (
   reason       TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_perm_offen ON permissions (run_id, decided_at);
+
+-- Laufzeitzustand von KontenVerwaltung (src/konten.ts): Sperren und Vorzug
+-- waren bis hierher reiner In-Memory-Zustand und gingen bei jedem
+-- Daemon-Neustart verloren -- ein Konto, das eigentlich noch bis zum
+-- Reset gesperrt war, wurde sofort wieder probiert. Verstoesst gegen die
+-- Grundregel oben ("kein Zustand im Speicher, der nicht auch hier steht").
+CREATE TABLE IF NOT EXISTS konten_sperren (
+  name TEXT PRIMARY KEY,
+  bis  INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS konten_vorzug (
+  id   INTEGER PRIMARY KEY CHECK (id = 1),
+  name TEXT
+);
 `
 
 export class CockpitDb {
@@ -283,6 +298,45 @@ export class CockpitDb {
       .run(jetzt)
 
     return Number(r.changes ?? 0)
+  }
+
+  /** Alle gespeicherten Kontosperren, Name -> Sperrzeitpunkt (ms). */
+  kontoSperrenLesen(): Record<string, number> {
+    const rows = this.db.prepare(`SELECT name, bis FROM konten_sperren`).all() as {
+      name: string
+      bis: number
+    }[]
+    const out: Record<string, number> = {}
+    for (const r of rows) out[r.name] = r.bis
+    return out
+  }
+
+  /** Merkt eine Kontosperre dauerhaft, ueberlebt einen Daemon-Neustart. */
+  kontoSperren(name: string, bis: number): void {
+    this.db
+      .prepare(
+        `INSERT INTO konten_sperren (name, bis) VALUES (?, ?)
+         ON CONFLICT (name) DO UPDATE SET bis = excluded.bis`,
+      )
+      .run(name, bis)
+  }
+
+  /** Manuell gesetztes Vorzugskonto, oder null ohne Vorzug. */
+  kontoVorzugLesen(): string | null {
+    const row = this.db.prepare(`SELECT name FROM konten_vorzug WHERE id = 1`).get() as
+      | { name: string | null }
+      | undefined
+    return row?.name ?? null
+  }
+
+  /** Setzt oder loescht (null) das Vorzugskonto, dauerhaft. */
+  kontoVorzugSetzen(name: string | null): void {
+    this.db
+      .prepare(
+        `INSERT INTO konten_vorzug (id, name) VALUES (1, ?)
+         ON CONFLICT (id) DO UPDATE SET name = excluded.name`,
+      )
+      .run(name)
   }
 
   close(): void {

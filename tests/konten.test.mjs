@@ -10,6 +10,7 @@ import {
   kontoFehlerLabel,
   KONTO_AUTH_FEHLER_PRAEFIXE,
   emailLesen,
+  KontenVerwaltung,
 } from '../dist/konten.js'
 import { nutzungAusAntwort } from '../dist/kontenNutzung.js'
 import { mkdtempSync, writeFileSync } from 'node:fs'
@@ -430,6 +431,100 @@ const SDK_LIMIT_PRAEFIXE = ["You've hit your", "You've reached your"]
   } finally {
     if (alteHome === undefined) delete process.env.HOME
     else process.env.HOME = alteHome
+    if (alteConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR
+    else process.env.CLAUDE_CONFIG_DIR = alteConfigDir
+  }
+}
+
+// --- 17. KontenVerwaltung: Persistenz-Anbindung (Daemon-Neustart) ---
+// Fund: gesperrtBis/nutzung/bevorzugt waren reiner In-Memory-Zustand --
+// verstoesst gegen die in db.ts dokumentierte Grundregel ("kein Zustand im
+// Speicher, der nicht auch hier steht"). Die eigentliche SQLite-Persistenz
+// ist in tests/db.test.mjs getestet; hier geht es nur um die Anbindung an
+// KontenVerwaltung selbst -- ueber ein Fake-Persistenz-Objekt (implementiert
+// KontenPersistenz), ohne echte Datenbank oder echtes CLAUDE_CONFIG_DIR.
+{
+  const alteHome = process.env.HOME
+  const alteKontenDir = process.env.COCKPIT_KONTEN_DIR
+  const alteConfigDir = process.env.CLAUDE_CONFIG_DIR
+  const heim = mkdtempSync(join(tmpdir(), 'nachtschicht-persistenz-home-'))
+  const konfigDir = mkdtempSync(join(tmpdir(), 'nachtschicht-persistenz-konfig-'))
+  writeFileSync(
+    join(konfigDir, '.credentials.json'),
+    JSON.stringify({ claudeAiOauth: { accessToken: 'attrappe', subscriptionType: 'pro' } }),
+  )
+  process.env.HOME = heim
+  process.env.CLAUDE_CONFIG_DIR = konfigDir
+  // Leeres COCKPIT_KONTEN_DIR: nur das eine Hauptkonto ('haupt') existiert,
+  // damit waehlen() ein eindeutiges, vorhersagbares Ergebnis liefert.
+  process.env.COCKPIT_KONTEN_DIR = mkdtempSync(join(tmpdir(), 'nachtschicht-persistenz-zusatz-'))
+
+  try {
+    const fakePersistenz = () => {
+      const sperren = {}
+      let vorzug = null
+      const sperrenAufrufe = []
+      const vorzugAufrufe = []
+      return {
+        kontoSperrenLesen: () => ({ ...sperren }),
+        kontoSperren: (name, bis) => { sperren[name] = bis; sperrenAufrufe.push([name, bis]) },
+        kontoVorzugLesen: () => vorzug,
+        kontoVorzugSetzen: (name) => { vorzug = name; vorzugAufrufe.push(name) },
+        _sperrenAufrufe: sperrenAufrufe,
+        _vorzugAufrufe: vorzugAufrufe,
+      }
+    }
+
+    // Konstruktion ohne Persistenz: unveraendertes Verhalten (reiner Speicher).
+    const ohnePersistenz = new KontenVerwaltung()
+    pruefe('ohne Persistenz: waehlen() findet haupt', ohnePersistenz.waehlen()?.name === 'haupt')
+    ohnePersistenz.sperren('haupt', Date.now() + 100_000)
+    pruefe('ohne Persistenz: sperren() wirkt weiterhin nur im Speicher',
+      ohnePersistenz.waehlen() === null)
+
+    // Eine abgelaufene, gespeicherte Sperre darf beim Start NICHT geladen werden.
+    const p1 = fakePersistenz()
+    p1.kontoSperren('haupt', Date.now() - 1000)
+    const kvAbgelaufen = new KontenVerwaltung(p1)
+    pruefe('Konstruktion: abgelaufene gespeicherte Sperre wird verworfen',
+      kvAbgelaufen.waehlen()?.name === 'haupt')
+
+    // Eine noch gueltige, gespeicherte Sperre MUSS beim Start greifen -- das
+    // ist der eigentliche Fund: ohne das waere haupt nach einem Neustart
+    // sofort wieder probiert worden, obwohl die 5-Stunden-Sperre noch laeuft.
+    const p2 = fakePersistenz()
+    p2.kontoSperren('haupt', Date.now() + 100_000)
+    const kvGesperrt = new KontenVerwaltung(p2)
+    pruefe('Konstruktion: noch gueltige gespeicherte Sperre wird uebernommen',
+      kvGesperrt.waehlen() === null)
+
+    // Vorzug wird beim Start ebenfalls uebernommen.
+    const p3 = fakePersistenz()
+    p3.kontoVorzugSetzen('haupt')
+    const kvVorzug = new KontenVerwaltung(p3)
+    pruefe('Konstruktion: gespeicherter Vorzug wird uebernommen',
+      kvVorzug.bevorzugtesKontoLesen() === 'haupt')
+
+    // sperren()/bevorzugtesKontoSetzen() schreiben bei JEDEM Aufruf durch,
+    // nicht nur beim ersten -- ein zweiter Anmeldefehler waehrend derselben
+    // Sperre muss den neuen Sperrzeitpunkt ebenfalls sofort speichern.
+    const p4 = fakePersistenz()
+    const kvSchreiben = new KontenVerwaltung(p4)
+    kvSchreiben.sperren('dritt', 111)
+    kvSchreiben.sperren('dritt', 222)
+    pruefe('sperren(): jeder Aufruf schreibt durch (nicht nur der erste)',
+      p4._sperrenAufrufe.length === 2 &&
+      p4._sperrenAufrufe[0][0] === 'dritt' && p4._sperrenAufrufe[0][1] === 111 &&
+      p4._sperrenAufrufe[1][1] === 222)
+    kvSchreiben.bevorzugtesKontoSetzen('dritt')
+    kvSchreiben.bevorzugtesKontoSetzen(null)
+    pruefe('bevorzugtesKontoSetzen(): schreibt auch das Aufheben (null) durch',
+      p4._vorzugAufrufe.length === 2 && p4._vorzugAufrufe[0] === 'dritt' && p4._vorzugAufrufe[1] === null)
+  } finally {
+    if (alteHome === undefined) delete process.env.HOME
+    else process.env.HOME = alteHome
+    if (alteKontenDir === undefined) delete process.env.COCKPIT_KONTEN_DIR
+    else process.env.COCKPIT_KONTEN_DIR = alteKontenDir
     if (alteConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR
     else process.env.CLAUDE_CONFIG_DIR = alteConfigDir
   }
