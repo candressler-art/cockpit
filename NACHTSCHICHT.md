@@ -27,6 +27,10 @@ Nacht 1 (bis "Logbuch nach Durchgang 12") ist live. Seitdem, **bitte pruefen**:
   ganzen Daemon**, eine unsinnige Laengenangabe liess ihn endlos haengen --
   jetzt 503 (`e85ec1a`). WAV mit absurder Abtastrate an /api/hoeren blaehte
   sich auf GB auf -- jetzt abgelehnt (`54857ed`). Logbuch auf ~150 Zeilen.
+- **D26:** hielt ein anderer Prozess kurz eine Schreibsperre auf
+  `cockpit.db` (z. B. `sqlite3` in der Shell), **starb der Daemon** beim
+  naechsten Agenten-Ereignis ("database is locked"). Jetzt wartet er bis
+  5 s (`c537153`). Hinweis: in dieser Zeit steht die Ereignisschleife.
 
 ## Offene Punkte (naechste Durchgaenge, Prioritaet 1 zuerst)
 
@@ -44,10 +48,11 @@ Nacht 1 (bis "Logbuch nach Durchgang 12") ist live. Seitdem, **bitte pruefen**:
 4. Chat-Stopp/Neu-Senden (D18/D19) nur mit Unit-Test und Attrappen-Konten
    geprueft (Attrappe endet sofort mit "Not logged in", kein echter
    laufender Agent zum Stoppen) -- in der App gegenpruefen.
-   Noch ungeprueft aus D25: daemon.ts `.catch(() => db.runBeenden(...))`
-   nach Lauf-Ende -- wirft die DB dort ein zweites Mal, gibt es eine
-   unhandledRejection (sehr selten, Platte voll o. ae.). Discord-Ausgaenge
-   geprueft: Embed-Grenzen werden durch kuerzen() eingehalten.
+   Discord-Ausgaenge geprueft: Embed-Grenzen werden durch kuerzen()
+   eingehalten. D26: `.catch(runBeenden)` in daemon.ts abgesichert.
+   Weiterhin gilt: jeder andere DB-Fehler (Platte voll, Sperre > 5 s) in
+   einem Supervisor-Handler beendet den Daemon -- bewusst ohne globales
+   process.on (siehe Punkt 5).
 5. Prioritaet 2/3 laut Aufgabenstellung: Oberflaeche weiter feinschleifen
    (Konsistenz, Handy, Tastatur, Ladezustaende), mehr End-to-End-Szenarien,
    Daemon-Robustheit bei Last/Fehlern -- bisher nur das oben Gelistete tief
@@ -73,6 +78,8 @@ Nacht 1 (bis "Logbuch nach Durchgang 12") ist live. Seitdem, **bitte pruefen**:
 
 ## Erledigt (neueste zuerst, Details im Commit)
 
+- `c537153` DB busy_timeout 5 s (db.ts, chats.ts), laufAbschliessen() in
+  daemon.ts; Sperr-Stub `/tmp/nachtschicht/halter.cjs <ms>`.
 - `e85ec1a` WyomingLeser prueft Kopf/Laengen/Datenfeld, stimme.ts nutzt ihn
   (Absturz alt/neu in Testinstanz mit Stub `/tmp/nachtschicht/piperstub.mjs`).
 - `54857ed` /api/hoeren: Abtastrate nur 3-768 kHz (`src/hoeren.ts`).
