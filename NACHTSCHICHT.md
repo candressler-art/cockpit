@@ -52,6 +52,12 @@ fruehere Fassung dieser Datei (bis Durchgang 12, vor dem Kuerzen hier).
   serverone ~20-30 °C und "von 31.2 GB"; bleibt die Temperatur leer, darf
   der Beszel-Nutzer `system_stats` nicht lesen (Log: "Beszel-Abfrage
   fehlgeschlagen ... (system_stats)").
+- **Durchgang 24 (Daemon-Robustheit):** Eine einzige WebSocket-Nachricht
+  `null` (gueltiges JSON, kein Objekt) **beendete den ganzen Daemon**
+  (`af5945a`, dazu maxPayload 64 KB). Ebenso haette ein werfender
+  Discord-Befehl (z. B. DB-Fehler bei `!status`) den Prozess beendet
+  (`15c19cf`). Zu grosser/kaputter Anfragekoerper meldet jetzt 413/400 mit
+  Klartext statt "prompt fehlt" (`77bf285`).
 
 ## Offene Punkte (naechste Durchgaenge, Prioritaet 1 zuerst)
 
@@ -72,7 +78,10 @@ fruehere Fassung dieser Datei (bis Durchgang 12, vor dem Kuerzen hier).
 5. Prioritaet 2/3 laut Aufgabenstellung: Oberflaeche weiter feinschleifen
    (Konsistenz, Handy, Tastatur, Ladezustaende), mehr End-to-End-Szenarien,
    Daemon-Robustheit bei Last/Fehlern -- bisher nur das oben Gelistete tief
-   geprueft, nicht erschoepfend.
+   geprueft, nicht erschoepfend. D24 hat Absturzpfade gesucht (WS, Discord,
+   Anfragekoerper); ungeprueft: unhandledRejection-Pfade in orchestrator.ts/
+   supervisor.ts (keine globale Absicherung per process.on -- bewusst nicht
+   eingebaut, weil sie echte Fehler verschleiern kann).
 
 ## Entscheidungen fuer Can (noch offen, keine Selbstentscheidung getroffen)
 
@@ -90,6 +99,11 @@ fruehere Fassung dieser Datei (bis Durchgang 12, vor dem Kuerzen hier).
   Ressourcenbindung durch wartende Laeufe, Sichtbarkeit "wartet" vs. "tot").
 
 ## Erledigt (chronologisch, mit Commit)
+
+- `77bf285` / `af5945a` / `15c19cf` Daemon: AnfrageFehler+koerperAuswerten
+  (`src/httpFehler.ts`), folgenLesen (`src/eingaben.ts`), Discord-catch;
+  Tests in httpFehler/eingaben/discord.test.mjs, Testinstanz per curl/ws
+  gegengeprueft (vorher: Absturz bei WS "null" reproduziert).
 
 - `f82a1e6` Serverlast: `beszelAbbilden()`/`eigenenHostMischen()` in
   `src/system.ts`, `tests/system.test.mjs`; Testinstanz gegen Beszel-Stub
