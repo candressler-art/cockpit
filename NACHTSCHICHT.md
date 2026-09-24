@@ -30,6 +30,14 @@ fruehere Fassung dieser Datei (bis Durchgang 12, vor dem Kuerzen hier).
   "manuell", wenn der Vorzug auf ein vorhandenes, angemeldetes Konto zeigt
   (`7b891d2`); Fortsetzungsprompt sagt "Kontowechsel" statt immer
   "Nutzungslimit" (`9e4ae1b`).
+- **Durchgang 17:** Die Oberflaeche hatte **keinen Abbrechen-Knopf** (nur
+  Discord `!stop`). Jetzt "Stoppen" im Lauf-Tab (nur sichtbar, solange ein
+  Agent arbeitet; zweiter Klick bestaetigt), `/api/abbrechen` meldet bei
+  Einzellaeufen nicht mehr faelschlich 404 (`886ad89`). Dabei gefunden: ein
+  gestoppter Agent landete als `failed` ("Operation aborted") statt
+  `stopped`, und haette nach Kontofehler sogar das naechste Konto probiert
+  (`f3b5f04`). **Bitte pruefen:** Knopf in der Desktop-App (Kopfzeile rechts,
+  am Handy ganz links).
 
 ## Offene Punkte (naechste Durchgaenge, Prioritaet 1 zuerst)
 
@@ -44,7 +52,12 @@ fruehere Fassung dieser Datei (bis Durchgang 12, vor dem Kuerzen hier).
    eine Sitzung als "verworfen" gilt -- nicht angefasst.
 3. **`src-tauri/`** nie angefasst (kein `cargo` in dieser Umgebung) -- auf
    dem PC bauen und pruefen.
-4. Prioritaet 2/3 laut Aufgabenstellung: Oberflaeche weiter feinschleifen
+4. Ideen aus D17, noch nicht angefasst: Chats-Tab hat ebenfalls keinen
+   Stopp fuer einen laufenden Chat-Zug (API waere `/api/abbrechen` mit
+   `runId`=laufId); `/api/chats/%E0` liefert 500 (URIError aus
+   decodeURIComponent) statt 400; statischer Pfad auf ein Verzeichnis
+   (`/tabs`) liefert 500 (EISDIR) statt 404.
+5. Prioritaet 2/3 laut Aufgabenstellung: Oberflaeche weiter feinschleifen
    (Konsistenz, Handy, Tastatur, Ladezustaende), mehr End-to-End-Szenarien,
    Daemon-Robustheit bei Last/Fehlern -- bisher nur das oben Gelistete tief
    geprueft, nicht erschoepfend.
@@ -62,6 +75,11 @@ fruehere Fassung dieser Datei (bis Durchgang 12, vor dem Kuerzen hier).
 
 ## Erledigt (chronologisch, mit Commit)
 
+- `886ad89` Lauf-Tab: Stopp-Knopf (1280/375 per Playwright geprueft,
+  Skript `nachtschicht-bilder/stopp_ui.mjs`); /api/abbrechen ok+gestoppt
+  auch ohne Orchestrator; Einzellauf endet als 'stopped'.
+- `f3b5f04` Supervisor: 'stopped' haelt gegen spaete Nachrichten, kein
+  Kontowechsel nach Abbruch (`tests/abbruch.test.mjs`).
 - `9e4ae1b` Konten: Fortsetzungsprompt neutral ("Kontowechsel").
 - `7b891d2` Konten: `modus` in /api/konten nur 'manuell', wenn der Vorzug
   wirken kann (Konto vorhanden + angemeldet); gespeicherter Wert bleibt.
