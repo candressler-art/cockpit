@@ -31,6 +31,8 @@ export interface Konto {
 export interface KontoMitZustand extends Konto {
   /** null: frei. Sonst ms-Zeitstempel, bis zu dem das Konto gesperrt ist. */
   gesperrtBis: number | null
+  /** Warum gesperrt (null, wenn frei) -- siehe SperrGrund. */
+  sperrGrund: SperrGrund | null
   /** Manuell als Vorzug gesetzt (Uebersteuerung, siehe Uebersicht.modus). */
   bevorzugt: boolean
   /** Anteil 0..1 am 5h-Fenster, oder null, wenn nie gemessen. */
@@ -51,7 +53,8 @@ export interface KontoMitZustand extends Konto {
  */
 export interface KontenUebersicht {
   konten: KontoMitZustand[]
-  /** 'manuell': ein Vorzug ist gesetzt und schlaegt das Balancing.
+  /** 'manuell': ein Vorzug auf ein vorhandenes, angemeldetes Konto ist
+   *  gesetzt und schlaegt das Balancing (solange das Konto nicht gesperrt ist).
    *  'ausgeglichen': die Vorgabe -- das Balancing waehlt frei. */
   modus: 'manuell' | 'ausgeglichen'
   /** Name des Kontos, das eine Wahl JETZT treffen wuerde -- unter
@@ -265,14 +268,60 @@ export function kontoWaehlen(
  */
 export interface KontenPersistenz {
   kontoSperrenLesen(): Record<string, number>
-  kontoSperren(name: string, bis: number): void
+  kontoSperren(name: string, bis: number, grund?: SperrGrund): void
+  /** Optional, damit aeltere Test-Attrappen ohne Grund weiter passen --
+   *  fehlt ein Eintrag, gilt die Sperre als 'limit' (die vorsichtige Lesart). */
+  kontoSperrGruendeLesen?(): Record<string, SperrGrund>
   kontoVorzugLesen(): string | null
   kontoVorzugSetzen(name: string | null): void
+  kontoNutzungLesen(): Record<string, { stand: LimitStand; quelle: 'usage_api' | 'rate_limit_event' }>
+  kontoNutzungSpeichern(name: string, stand: LimitStand, quelle: 'usage_api' | 'rate_limit_event'): void
 }
+
+/**
+ * Beim Laden einer persistierten Messung nach einem Daemon-Neustart: ein
+ * Fenster, dessen Reset-Zeitpunkt schon vergangen ist, sagt nichts mehr ueber
+ * den AKTUELLEN Verbrauch aus -- das Fenster ist laengst neu aufgemacht,
+ * moeglicherweise laengst wieder frei. Genullt statt die ganze Messung zu
+ * verwerfen, damit das jeweils andere (noch gueltige) Fenster erhalten
+ * bleibt -- 5h- und Wochenfenster resetten unabhaengig voneinander. Ist
+ * `resetsAt` unbekannt (null), bleibt das Fenster erhalten: ohne einen
+ * Reset-Zeitpunkt laesst sich Veralten nicht feststellen, und ein unbekannter
+ * Reset ist kein Beleg dafuer, dass er schon vorbei waere.
+ *
+ * Liefert null, wenn BEIDE Fenster abgelaufen sind -- dann ist an der
+ * gesamten Messung nichts mehr brauchbar, sie wird behandelt wie "nie
+ * gemessen" (genau das Verhalten vor dieser Persistenz).
+ */
+export function nutzungBeimLadenFiltern(stand: LimitStand, jetzt: number): LimitStand | null {
+  const f5Aktuell = stand.fuenfStundenResetsAt === null || stand.fuenfStundenResetsAt * 1000 > jetzt
+  const f7Aktuell = stand.siebenTageResetsAt === null || stand.siebenTageResetsAt * 1000 > jetzt
+  if (!f5Aktuell && !f7Aktuell) return null
+  return {
+    ...stand,
+    fuenfStundenAnteil: f5Aktuell ? stand.fuenfStundenAnteil : null,
+    fuenfStundenResetsAt: f5Aktuell ? stand.fuenfStundenResetsAt : null,
+    siebenTageAnteil: f7Aktuell ? stand.siebenTageAnteil : null,
+    siebenTageResetsAt: f7Aktuell ? stand.siebenTageResetsAt : null,
+  }
+}
+
+/**
+ * Warum ein Konto gesperrt ist. 'limit': volles Nutzungsfenster -- die
+ * Sperre haelt bis zum Reset, egal was sonst passiert. 'anmeldung': die CLI
+ * meldete einen Anmeldefehler (Token abgelaufen und nicht erneuerbar,
+ * abgemeldet). So eine Sperre ist nur eine Vermutung ueber die naechsten
+ * Stunden -- meldet Can das Konto per /login neu an, belegt der naechste
+ * erfolgreiche Nutzungs-Poll, dass das Token wieder gilt, und hebt sie auf
+ * (anmeldeSperreAufheben). Vorher blieb ein frisch neu angemeldetes Konto
+ * die vollen 5 Stunden gesperrt, ohne Weg, das aufzuheben.
+ */
+export type SperrGrund = 'limit' | 'anmeldung'
 
 export class KontenVerwaltung {
   private bevorzugt: string | null = null
   private gesperrtBis = new Map<string, number>()
+  private sperrGrund = new Map<string, SperrGrund>()
   /**
    * Letzter bekannter Nutzungsstand je Konto -- aus welcher der beiden
    * Quellen auch immer zuletzt etwas kam (kontenNutzung.ts fuer den
@@ -293,18 +342,30 @@ export class KontenVerwaltung {
 
   /**
    * Ohne Persistenz (z.B. in Tests) rein im Speicher, wie bisher. Mit
-   * Persistenz werden Sperren und Vorzug beim Start nachgeladen (abgelaufene
-   * Sperren dabei verworfen) und bei jeder Aenderung sofort weggeschrieben --
-   * ein Neustart mitten in einer 5-Stunden-Sperre probiert das Konto danach
-   * nicht mehr sofort wieder.
+   * Persistenz werden Sperren, Vorzug UND der letzte Nutzungsstand beim Start
+   * nachgeladen (abgelaufene Sperren und veraltete Fenster dabei verworfen,
+   * siehe nutzungBeimLadenFiltern()) und bei jeder Aenderung sofort
+   * weggeschrieben -- ein Neustart mitten in einer 5-Stunden-Sperre probiert
+   * das Konto danach nicht mehr sofort wieder, UND ein Konto, dessen erster
+   * Poll nach dem Neustart an einem abgelaufenen Token (401) oder einem
+   * HTTP 429 scheitert, faellt nicht mehr auf "nie gemessen" (= 0 % im
+   * Balancing) zurueck, obwohl es in Wahrheit noch mitten im Limit steckt.
    */
   constructor(private readonly persistenz?: KontenPersistenz) {
     if (!persistenz) return
     const jetzt = Date.now()
+    const gruende = persistenz.kontoSperrGruendeLesen?.() ?? {}
     for (const [name, bis] of Object.entries(persistenz.kontoSperrenLesen())) {
-      if (bis > jetzt) this.gesperrtBis.set(name, bis)
+      if (bis > jetzt) {
+        this.gesperrtBis.set(name, bis)
+        this.sperrGrund.set(name, gruende[name] ?? 'limit')
+      }
     }
     this.bevorzugt = persistenz.kontoVorzugLesen()
+    for (const [name, { stand, quelle }] of Object.entries(persistenz.kontoNutzungLesen())) {
+      const gefiltert = nutzungBeimLadenFiltern(stand, jetzt)
+      if (gefiltert) this.nutzung.set(name, { stand: gefiltert, quelle })
+    }
   }
 
   bevorzugtesKontoSetzen(name: string | null): void {
@@ -317,9 +378,28 @@ export class KontenVerwaltung {
   }
 
   /** Merkt ein Konto als gesperrt bis zum angegebenen Zeitpunkt. */
-  sperren(name: string, bisMs: number): void {
+  sperren(name: string, bisMs: number, grund: SperrGrund = 'limit'): void {
     this.gesperrtBis.set(name, bisMs)
-    this.persistenz?.kontoSperren(name, bisMs)
+    this.sperrGrund.set(name, grund)
+    this.persistenz?.kontoSperren(name, bisMs, grund)
+  }
+
+  /**
+   * Hebt eine laufende Sperre auf, aber NUR, wenn sie wegen eines
+   * Anmeldefehlers gesetzt wurde -- eine Limitsperre bleibt unangetastet.
+   * Aufrufer ist der Nutzungs-Poll nach einer erfolgreichen Antwort (das
+   * Token gilt also nachweislich wieder). true, wenn wirklich etwas
+   * aufgehoben wurde.
+   */
+  anmeldeSperreAufheben(name: string): boolean {
+    const bis = this.gesperrtBis.get(name)
+    if (bis === undefined || bis <= Date.now() || this.sperrGrund.get(name) !== 'anmeldung') return false
+    this.gesperrtBis.delete(name)
+    this.sperrGrund.delete(name)
+    // Zeitpunkt 0 statt DELETE: beim naechsten Start verwirft der
+    // Konstruktor abgelaufene Sperren ohnehin, das Interface bleibt schmal.
+    this.persistenz?.kontoSperren(name, 0, 'anmeldung')
+    return true
   }
 
   private gesperrtBisMap(): Map<string, number | null> {
@@ -340,6 +420,7 @@ export class KontenVerwaltung {
     const vorhanden = this.nutzung.get(name)
     if (vorhanden && vorhanden.stand.gemessenAm > stand.gemessenAm) return
     this.nutzung.set(name, { stand, quelle })
+    this.persistenz?.kontoNutzungSpeichern(name, stand, quelle)
   }
 
   /** Letzter bekannter Nutzungsstand eines Kontos, oder null ohne Messung. */
@@ -385,6 +466,7 @@ export class KontenVerwaltung {
       return {
         ...k,
         gesperrtBis: bis !== null && bis > jetzt ? bis : null,
+        sperrGrund: bis !== null && bis > jetzt ? (this.sperrGrund.get(k.name) ?? 'limit') : null,
         bevorzugt: k.name === this.bevorzugt,
         fuenfStundenAnteil: n?.stand.fuenfStundenAnteil ?? null,
         siebenTageAnteil: n?.stand.siebenTageAnteil ?? null,
@@ -423,9 +505,16 @@ export class KontenVerwaltung {
       this.zuletztGenutzt, Date.now(),
     )
 
+    // 'manuell' nur, wenn der Vorzug wirken kann: ein persistierter Vorzug
+    // auf ein inzwischen geloeschtes oder abgemeldetes Konto hat keine
+    // Wirkung -- und beim geloeschten gaebe es nicht einmal eine Karte mit
+    // "Vorzug aufheben". Der gespeicherte Wert selbst bleibt (konservativ):
+    // kommt das Konto zurueck, gilt er wieder.
+    const vorzugWirkt = nutzbar.some((k) => k.name === this.bevorzugt)
+
     return {
       konten,
-      modus: this.bevorzugt ? 'manuell' : 'ausgeglichen',
+      modus: vorzugWirkt ? 'manuell' : 'ausgeglichen',
       naechstesKonto,
       abstandPunkte,
     }
@@ -471,6 +560,7 @@ export function sperrzeitpunktAusLimitstand(
   stand: Pick<LimitStand, 'resetsAt' | 'rateLimitType' | 'fuenfStundenResetsAt' | 'siebenTageResetsAt'> | null,
   jetzt: number,
   vorgabeMs: number,
+  textFallbackMs: number | null = null,
 ): number {
   if (stand) {
     if (typeof stand.resetsAt === 'number') return stand.resetsAt * 1000
@@ -482,7 +572,139 @@ export function sperrzeitpunktAusLimitstand(
       return stand.fuenfStundenResetsAt * 1000
     }
   }
+  // Kein gemessener Stand (oder keiner, der zum ausloesenden Fenster passt) --
+  // steht im Fehlertext selbst eine Reset-Zeit (siehe resetzeitAusFehlertext),
+  // ist die genauer als die pauschale Vorgabe.
+  if (typeof textFallbackMs === 'number') return textFallbackMs
   return jetzt + vorgabeMs
+}
+
+const MONATSNAMEN: Record<string, number> = {
+  jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+  jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
+}
+
+/**
+ * UTC-Versatz (Minuten, Osten positiv) einer IANA-Zeitzone zu einem
+ * gegebenen Zeitpunkt -- Standardtrick ueber Intl: die Wanduhrzeit der Zone
+ * wird noch einmal als UTC interpretiert, die Differenz zum echten UTC-
+ * Zeitpunkt ist der gesuchte Versatz. null bei unbekannter Zone.
+ */
+function tzVersatzMinuten(zone: string, zeitpunktMs: number): number | null {
+  try {
+    const teile = new Intl.DateTimeFormat('en-US', {
+      timeZone: zone, hour12: false,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+    }).formatToParts(new Date(zeitpunktMs))
+    const w = Object.fromEntries(teile.map((t) => [t.type, t.value]))
+    const alsUtc = Date.UTC(
+      Number(w.year), Number(w.month) - 1, Number(w.day),
+      Number(w.hour) % 24, Number(w.minute), Number(w.second),
+    )
+    return Math.round((alsUtc - zeitpunktMs) / 60_000)
+  } catch {
+    return null
+  }
+}
+
+const WOCHENTAGE: Record<string, number> = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 }
+
+/**
+ * Wie weit eine Reset-Zeit OHNE Datum ("resets 4:50pm (...)") in der
+ * Vergangenheit liegen darf, bevor sie als "morgen" gilt. Die CLI rundet die
+ * angezeigte Zeit, und zwischen Meldung und Auswertung vergeht etwas Zeit --
+ * ohne Toleranz wuerde ein Session-Limit, das gerade eben zurueckgesetzt
+ * wurde, das Konto volle 24 Stunden sperren. Eine Zeit knapp in der
+ * Vergangenheit heisst nur: Konto gilt sofort wieder als frei, der naechste
+ * Versuch liefert notfalls eine frische Meldung.
+ */
+const RESET_OHNE_DATUM_TOLERANZ_MS = 10 * 60 * 1000
+
+/**
+ * Liest eine Reset-Zeit direkt aus dem Fehlertext der CLI, wenn kein
+ * rate_limit_event und keine Poll-Messung sie liefert. Formate, wie sie in
+ * echten Sitzungen stehen (gezaehlt in /var/lib/cockpit/sessions-desktop):
+ *   - "You've hit your weekly limit · resets Sep 26, 4am (Europe/Berlin)"
+ *   - "You've hit your weekly limit · resets 4am (Europe/Berlin)"   (ohne Datum)
+ *   - "You've hit your session limit · resets 4:50pm (Europe/Berlin)"
+ *   - Wochentag statt Datum ("resets Mon 12:00am (...)")
+ * Ohne Datum ist das naechste Vorkommen dieser Uhrzeit gemeint (bzw. dieses
+ * Wochentags), gerechnet in der genannten Zone. Voraussetzung ist immer die
+ * EXPLIZITE IANA-Zeitzone in Klammern: Meldungen ohne Zone ("resets
+ * 8:10pm", "resets Mon 12:00am", siehe tests/chats.test.mjs) blieben reine
+ * Raterei, deshalb bewusst NICHT geparst; dafuer bleibt die pauschale
+ * Vorgabe (vorgabeMs) die einzige Quelle.
+ *
+ * Mit Datum fehlt das Jahr; da ein Reset immer in der Zukunft liegt, wird
+ * das laufende Jahr angenommen und nur dann um eins erhoeht, wenn das
+ * Ergebnis sonst mehr als einen Tag in der Vergangenheit laege (Jahreswechsel).
+ */
+export function resetzeitAusFehlertext(text: string, jetzt: number): number | null {
+  const treffer = text.match(
+    /resets\s+(?:(sun|mon|tue|wed|thu|fri|sat)[a-z]*\.?,?\s+|([A-Za-z]{3,9})\s+(\d{1,2}),?\s*)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\s*\(([\w/+-]+)\)/i,
+  )
+  if (!treffer) return null
+  const [, wochentagText, monatText, tagText, stundeText, minuteText, meridian, zone] = treffer
+  if (!stundeText || !meridian || !zone) return null
+  let stunde = Number(stundeText) % 12
+  if (meridian.toLowerCase() === 'pm') stunde += 12
+  const minute = minuteText ? Number(minuteText) : 0
+
+  // Kalenderdatum und Wochentag von "jetzt" in der genannten Zone.
+  let heute: Record<string, string>
+  try {
+    heute = Object.fromEntries(
+      new Intl.DateTimeFormat('en-US', {
+        timeZone: zone, year: 'numeric', month: 'numeric', day: 'numeric', weekday: 'short',
+      }).formatToParts(new Date(jetzt)).map((t) => [t.type, t.value]),
+    )
+  } catch {
+    return null // unbekannte Zeitzone -- lieber gar keine Zeit als eine falsche
+  }
+  const jahrJetzt = Number(heute.year)
+  const monatJetzt = Number(heute.month) - 1
+  const tagJetzt = Number(heute.day)
+  const wochentagJetzt = WOCHENTAGE[String(heute.weekday).slice(0, 3).toLowerCase()]
+  if (!Number.isFinite(jahrJetzt) || !Number.isFinite(tagJetzt) || wochentagJetzt === undefined) return null
+
+  // Date.UTC rechnet Tagesueberlauf (32. Sep -> 2. Okt) selbst um.
+  const zeitpunktFuer = (jahr: number, monat: number, tag: number): number | null => {
+    const grobUtc = Date.UTC(jahr, monat, tag, stunde, minute, 0)
+    const versatz = tzVersatzMinuten(zone, grobUtc)
+    if (versatz === null) return null
+    return grobUtc - versatz * 60_000
+  }
+
+  if (monatText && tagText) {
+    const monat = MONATSNAMEN[monatText.slice(0, 3).toLowerCase()]
+    if (monat === undefined) return null
+    const tag = Number(tagText)
+    let ergebnis = zeitpunktFuer(jahrJetzt, monat, tag)
+    if (ergebnis === null) return null
+    if (ergebnis < jetzt - 24 * 60 * 60 * 1000) {
+      const naechstesJahr = zeitpunktFuer(jahrJetzt + 1, monat, tag)
+      if (naechstesJahr !== null) ergebnis = naechstesJahr
+    }
+    return ergebnis
+  }
+
+  // Ohne Datum: heute (bzw. am naechsten genannten Wochentag), sonst eine
+  // Periode (Tag bzw. Woche) spaeter.
+  let tageVoraus = 0
+  let periode = 1
+  if (wochentagText) {
+    const ziel = WOCHENTAGE[wochentagText.slice(0, 3).toLowerCase()]
+    if (ziel === undefined) return null
+    tageVoraus = (ziel - wochentagJetzt + 7) % 7
+    periode = 7
+  }
+  let ergebnis = zeitpunktFuer(jahrJetzt, monatJetzt, tagJetzt + tageVoraus)
+  if (ergebnis === null) return null
+  if (ergebnis < jetzt - RESET_OHNE_DATUM_TOLERANZ_MS) {
+    ergebnis = zeitpunktFuer(jahrJetzt, monatJetzt, tagJetzt + tageVoraus + periode)
+  }
+  return ergebnis
 }
 
 /**
@@ -529,9 +751,11 @@ export function kontoFehlerLabel(text: string, praefixeLimit: readonly string[])
  * `resume` haengt an dieselbe Session an -- schickt man dort den kompletten
  * Originalauftrag noch einmal, steht er zweimal in der Konversation, einmal
  * schon (teilweise) bearbeitet, einmal als vermeintlich neuer Auftrag.
+ * Neutral "Kontowechsel": seit dd0525c wechselt auch ein Anmeldefehler das
+ * Konto, dann waere "Nutzungslimit" schlicht falsch.
  */
 export const KONTOWECHSEL_FORTSETZUNGSPROMPT =
-  'Du wurdest durch ein Nutzungslimit unterbrochen. Mach genau dort weiter, wo du aufgehoert hast.'
+  'Du wurdest durch einen Kontowechsel unterbrochen. Mach genau dort weiter, wo du aufgehoert hast.'
 
 /**
  * Waehlt Prompt fuer einen (Wieder-)Versuch. Reine Funktion, damit sich der

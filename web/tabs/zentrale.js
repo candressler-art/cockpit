@@ -304,8 +304,27 @@ async function sprechenTesten() {
 /** Wie stark das System arbeitet: treibt den Herzschlag. */
 function lastAnteil() {
   const aktive = letzteAgenten.filter((a) => AKTIV.has(a.status)).length
-  const cpu = letztesSystem?.hosts?.[0]?.cpuProzent ?? 0
+  // Der eigene Host (lokal gemessen), nicht einfach der erste: mit zwei
+  // Hosts steht alphabetisch serverone vorn, die Agenten laufen aber hier.
+  const hosts = letztesSystem?.hosts ?? []
+  const eigener = hosts.find((h) => h.quelle === 'lokal') ?? hosts[0]
+  const cpu = eigener?.cpuProzent ?? 0
   return Math.min(1, aktive * 0.34 + cpu / 160)
+}
+
+/**
+ * Einen Agenten aus REST (snake_case) oder Live-Strom (camelCase) einpflegen.
+ * Schluessel ist Lauf + Agent: 'chat' heisst der Agent in jedem Chat-Lauf.
+ */
+function agentEinpflegen(a) {
+  const neu = {
+    runId: a.runId ?? a.run_id, agentId: a.agentId ?? a.agent_id, label: a.label,
+    status: a.status, role: a.role, fachrolle: a.fachrolle,
+    weightedTokens: a.weightedTokens ?? a.weighted_tokens,
+  }
+  const i = letzteAgenten.findIndex((x) => x.agentId === neu.agentId && x.runId === neu.runId)
+  if (i >= 0) letzteAgenten[i] = neu
+  else letzteAgenten.push(neu)
 }
 
 function agentenZeichnen() {
@@ -468,23 +487,15 @@ export default {
     }
 
     // --- echte Daten anzapfen ---
+    // 'agenten' ist die Nachlieferung fuer den Lauf, den der Lauf-Tab gerade
+    // zeigt -- nur EIN Lauf. Einpflegen statt ersetzen: wer dort einen alten
+    // Lauf aufschlug, loeschte sonst hier die Agenten des laufenden.
     abmelden.push(abonnieren('agenten', (d) => {
-      letzteAgenten = (d ?? []).map((a) => ({
-        agentId: a.agent_id ?? a.agentId, label: a.label,
-        status: a.status, role: a.role, fachrolle: a.fachrolle ?? a.fachrolle,
-        weightedTokens: a.weighted_tokens ?? a.weightedTokens,
-      }))
+      for (const a of d ?? []) agentEinpflegen(a)
       agentenZeichnen()
     }))
     abmelden.push(abonnieren('agent', (a) => {
-      const id = a.agentId ?? a.agent_id
-      const i = letzteAgenten.findIndex((x) => x.agentId === id)
-      const neu = {
-        agentId: id, label: a.label, status: a.status, role: a.role,
-        fachrolle: a.fachrolle, weightedTokens: a.weightedTokens ?? a.weighted_tokens,
-      }
-      if (i >= 0) letzteAgenten[i] = neu
-      else letzteAgenten.push(neu)
+      agentEinpflegen(a)
       agentenZeichnen()
     }))
     abmelden.push(abonnieren('ereignis', (e) => {
@@ -528,15 +539,7 @@ export default {
       const { laeufe } = await fetch(api('/api/laeufe')).then((r) => r.json())
       for (const l of (laeufe ?? []).filter((x) => x.status === 'running')) {
         const d = await fetch(api(`/api/lauf/${l.run_id}`)).then((r) => r.json())
-        for (const a of d.agenten ?? []) {
-          const neu = {
-            agentId: a.agent_id, label: a.label, status: a.status, role: a.role,
-            fachrolle: a.fachrolle, weightedTokens: a.weighted_tokens,
-          }
-          const i = letzteAgenten.findIndex((x) => x.agentId === neu.agentId)
-          if (i >= 0) letzteAgenten[i] = neu
-          else letzteAgenten.push(neu)
-        }
+        for (const a of d.agenten ?? []) agentEinpflegen(a)
       }
       agentenZeichnen()
     } catch { /* kein Beinbruch: die Karte bleibt leer, bis das erste Live-Ereignis kommt */ }

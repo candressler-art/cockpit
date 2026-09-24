@@ -308,7 +308,7 @@ kein Profil.
 | `/api/lauf` | POST | Einzelnen Chat-Agenten starten |
 | `/api/orchestrator` | POST | Orchestrator-Lauf starten |
 | `/api/freigabe` | POST | Offene Freigabe entscheiden |
-| `/api/abbrechen` | POST | Agent oder ganzen Lauf abbrechen |
+| `/api/abbrechen` | POST | Agent (`runId`, `agentId`) oder ganzen Lauf (`runId`) abbrechen; `ok` auch bei Einzellaeufen ohne Orchestrator, `gestoppt` = Zahl gestoppter Agenten |
 | `/api/gesundheit` | GET | Status und letzter Limitstand |
 | `/api/rollen` | GET | verfuegbare Fachrollen |
 | `/api/konten` | GET | Konten mit Anmelde-, Sperr-, Vorzugs- und Nutzungsstand, dazu `modus`, `naechstesKonto`, `abstandPunkte` |

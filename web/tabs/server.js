@@ -27,7 +27,7 @@ let kontenIntervall = null
 const esc = (t) =>
   String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
 
-const pz = (v) => (v === null || v === undefined ? '—' : `${Math.round(v)} %`)
+export const pz = (v) => (v === null || v === undefined ? '—' : `${Math.round(v)} %`)
 
 function dauer(sek) {
   if (!sek && sek !== 0) return '—'
@@ -100,14 +100,14 @@ function resetText(gesperrtBis) {
 }
 
 /** Kurztext, wann und woher der Nutzungswert eines Kontos stammt. */
-function nutzungHerkunft(k) {
+export function nutzungHerkunft(k) {
   if (!k.gemessenAm) return 'noch nie gemessen'
   const zeit = new Date(k.gemessenAm).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
   const quelle = k.quelle === 'usage_api' ? 'API-Abfrage' : k.quelle === 'rate_limit_event' ? 'aus einem Lauf' : ''
   return `gemessen ${zeit}${quelle ? ` · ${quelle}` : ''}`
 }
 
-function kontoKarte(k) {
+export function kontoKarte(k) {
   const gesperrt = Boolean(k.gesperrtBis)
   // Dieselbe Kartensprache wie die Hosts (.hostkarte, Eckklammern aus
   // hud.css) -- nicht angemeldet zaehlt wie ein toter Host, gesperrt wie ein
@@ -125,7 +125,9 @@ function kontoKarte(k) {
       ${!k.angemeldet
         ? '<span class="pill ab">nicht angemeldet</span>'
         : gesperrt
-          ? `<span class="pill heiss">${esc(resetText(k.gesperrtBis))}</span>`
+          ? k.sperrGrund === 'anmeldung'
+            ? `<span class="pill heiss" title="Anmeldefehler -- nach /login hebt die naechste erfolgreiche Nutzungsabfrage die Sperre auf">Anmeldefehler · ${esc(resetText(k.gesperrtBis))}</span>`
+            : `<span class="pill heiss">${esc(resetText(k.gesperrtBis))}</span>`
           : '<span class="pill an">frei</span>'}
     </header>
     <div class="kontozeile">

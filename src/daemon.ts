@@ -16,15 +16,19 @@ import { standLesen, type SystemStand } from './system.js'
 import { rollenLaden, rollenListe } from './rollen.js'
 import { sprechenGecacht } from './stimme.js'
 import { erkennen } from './hoeren.js'
-import { gespraechAntworten } from './gespraech.js'
+import { GespraechBelegt, gespraechAntworten } from './gespraech.js'
 import {
   chatsIndizieren, chatsSuchen, chatLesen, chatKopfLesen,
   fortsetzungLesen, fortsetzungVorbereiten, fortsetzungAktualisieren,
 } from './chats.js'
 import { vaultIndizieren, vaultGraphLesen, vaultBeobachten, vaultDa, VAULT } from './vault.js'
 import { vaultZugriffErlaubt } from './vaultZugriff.js'
-import { konsoleBefehl, cwdPruefen } from './konsole.js'
+import { konsoleBefehl } from './konsole.js'
+import { cwdPruefen, folgenLesen, zahlLesen } from './eingaben.js'
 import { nutzungAbfragen } from './kontenNutzung.js'
+import { AnfrageFehler, fehlerStatus, koerperAuswerten } from './httpFehler.js'
+import { ChatZuege } from './chatZuege.js'
+import { nachliefern, senden as klientSenden, type Klient } from './nachlieferung.js'
 import { existsSync } from 'node:fs'
 
 const PORT = Number(process.env.COCKPIT_PORT ?? 8765)
@@ -40,12 +44,14 @@ const supervisor = new Supervisor(db)
 const orchestratoren = new Map<string, Orchestrator>()
 
 /**
- * Welche Chat-Sitzung gerade weiterschreibt -- sessionId -> startSeq (die
- * hoechste seq VOR diesem Zug, ab der die Oberflaeche pollt). Verhindert
- * einen zweiten gleichzeitigen Zug auf dieselbe Sitzung (409) und sagt der
- * Oberflaeche beim Neuladen, ob sie sofort mitpollen soll.
+ * Welche Chat-Sitzung gerade weiterschreibt -- samt startSeq (die hoechste
+ * seq VOR diesem Zug, ab der die Oberflaeche pollt). Verhindert einen zweiten
+ * gleichzeitigen Zug auf dieselbe Sitzung (409) und sagt der Oberflaeche beim
+ * Neuladen, ob sie sofort mitpollen soll.
  */
-const chatLaeuft = new Map<string, number>()
+const chatZuege = new ChatZuege()
+/** So lange darf ein schon gestoppter Chat-Zug auslaufen, bevor 409 kommt. */
+const CHAT_AUSLAUF_WARTEN_MS = 10_000
 
 /**
  * Startet einen Orchestrator-Lauf. Gemeinsam genutzt von HTTP und Discord,
@@ -84,7 +90,7 @@ function orchestratorLaufStarten(o: {
   orchestratoren.set(runId, orch)
   letzterLauf = { runId, cwd: o.cwd }
   orch.on('orchestrator', (e: { runId: string; art?: string; daten?: Record<string, unknown> }) => {
-    verteilen('orchestrator', e, e.runId)
+    verteilen('orchestrator', e)
     if (e.art === 'frage' && e.daten?.frage) {
       void discord?.frageStellen(runId, String(e.daten.frage))
     }
@@ -97,13 +103,13 @@ function orchestratorLaufStarten(o: {
     .then((ende) => {
       const status =
         ende.grund === 'fertig' ? 'done' : ende.grund === 'abgebrochen' ? 'stopped' : 'failed'
-      db.runBeenden(runId, status, JSON.stringify(ende))
-      verteilen('lauf_ende', { runId, ende }, runId)
+      laufAbschliessen(runId, status, JSON.stringify(ende))
+      verteilen('lauf_ende', { runId, ende })
       const gew = supervisor.agentenListe(runId).reduce((x, a) => x + a.weightedTokens, 0)
       const text = 'text' in ende ? ende.text : 'frage' in ende ? ende.frage : ''
       void discord?.laufBeendet(runId, ende.grund, String(text ?? ''), gew)
     })
-    .catch((e) => db.runBeenden(runId, 'failed', String(e)))
+    .catch((e) => laufAbschliessen(runId, 'failed', String(e)))
     .finally(() => {
       orchestratoren.delete(runId)
       // Jeder Lauf bekommt eine frische runId (anders als Chat/Konsole/
@@ -233,44 +239,51 @@ interface PermissionRequestLike { runId: string }
 
 // --- WebSocket-Verteilung ----------------------------------------------------
 
-interface Klient {
-  sock: WebSocket
-  runId: string | null
-}
 const klienten = new Set<Klient>()
+const klientEntfernen = (k: Klient) => { klienten.delete(k) }
+
+// Rueckstau-Grenze und Nachlieferung stehen in nachlieferung.ts.
+function senden(k: Klient, typ: string, daten: unknown): void {
+  klientSenden(k, typ, daten, klientEntfernen)
+}
 
 /**
- * Ab hier gilt ein Klient als ueberfahren.
+ * An alle Klienten, ungefiltert.
  *
- * Ein Handy im schlechten Netz nimmt die Ereignisse eines schnellen Laufs
- * nicht schnell genug ab; der Puffer im Prozess waechst dann unbegrenzt.
- * Zwei Megabyte sind rund ein Tausendfaches einer normalen Nachricht --
- * wer so weit hinterherhaengt, hat den Anschluss ohnehin verloren und holt
- * ihn beim Wiederverbinden per Backfill nach.
+ * Frueher bekam ein Klient, der einem Lauf folgte, nur noch dessen
+ * Ereignisse -- aus der Zeit, als der Lauf-Tab die einzige Ansicht war.
+ * Heute teilen sich alle Tabs eine Verbindung, und Zentrale, Vault und die
+ * Sprachhinweise (Freigabe, Lauf-Ende) brauchen ALLE Laeufe: wer im Lauf-Tab
+ * einen alten Lauf ansah, verpasste sonst die Freigabe des neuen. Das
+ * `folgen` steuert deshalb nur noch die Nachlieferung; der Lauf-Tab filtert
+ * selbst, was zu ihm gehoert.
  */
-const MAX_RUECKSTAU = 2 * 1024 * 1024
-
-function senden(k: Klient, typ: string, daten: unknown): void {
-  if (k.sock.readyState !== 1) return
-  if (k.sock.bufferedAmount > MAX_RUECKSTAU) {
-    console.warn('[cockpit] Klient haengt zurueck, Nachricht verworfen:', typ)
-    return
-  }
-  k.sock.send(JSON.stringify({ typ, daten }))
+function verteilen(typ: string, daten: unknown): void {
+  for (const k of [...klienten]) senden(k, typ, daten)
 }
 
-function verteilen(typ: string, daten: unknown, runId: string | null): void {
-  for (const k of klienten) {
-    if (runId && k.runId && k.runId !== runId) continue
-    senden(k, typ, daten)
+supervisor.on('ereignis', (e: CockpitEvent) => verteilen('ereignis', e))
+supervisor.on('agent', (a: { runId: string }) => verteilen('agent', a))
+/**
+ * Endstatus eines Laufs schreiben, ohne zu werfen.
+ *
+ * Steht am Ende einer Promise-Kette ohne weiteren Faenger: warf runBeenden
+ * dort (Platte voll, Sperre laenger als DB_WARTEN_MS), wurde daraus eine
+ * unhandledRejection, und Node beendet dann den ganzen Daemon -- samt aller
+ * anderen laufenden Agenten. Ein fehlender Endstatus in der Laufliste ist
+ * das kleinere Uebel.
+ */
+function laufAbschliessen(runId: string, status: string, grund: string | null): void {
+  try {
+    db.runBeenden(runId, status, grund)
+  } catch (e) {
+    console.warn(`[cockpit] Endstatus fuer Lauf ${runId} nicht gespeichert:`, String(e))
   }
 }
 
-supervisor.on('ereignis', (e: CockpitEvent) => verteilen('ereignis', e, e.runId))
-supervisor.on('agent', (a: { runId: string }) => verteilen('agent', a, a.runId))
-supervisor.on('freigabe', (f: { runId: string }) => verteilen('freigabe', f, f.runId))
+supervisor.on('freigabe', (f: { runId: string }) => verteilen('freigabe', f))
 // Der Limitstand gilt kontoweit, nicht je Lauf -- also an alle Klienten.
-supervisor.on('limit', (l: unknown) => verteilen('limit', l, null))
+supervisor.on('limit', (l: unknown) => verteilen('limit', l))
 
 // --- Auslastung der Server ---------------------------------------------------
 //
@@ -282,7 +295,7 @@ let letzterSystemStand: SystemStand | null = null
 async function systemPuls(): Promise<void> {
   try {
     letzterSystemStand = await standLesen()
-    verteilen('system', letzterSystemStand, null)
+    verteilen('system', letzterSystemStand)
   } catch (e) {
     console.warn('[cockpit] Systemstand nicht ermittelbar:', String(e))
   }
@@ -428,19 +441,15 @@ async function koerperLesen(req: import('node:http').IncomingMessage): Promise<u
       // Wenn selbst das Wegwerfen kein Ende nimmt, ist es kein Versehen mehr.
       if (groesse > MAX_KOERPER * 8) {
         req.destroy()
-        return null
+        break
       }
       continue
     }
     stuecke.push(b)
   }
-  if (zuGross) return null
-  if (stuecke.length === 0) return null
-  try {
-    return JSON.parse(Buffer.concat(stuecke).toString('utf-8'))
-  } catch {
-    return null
-  }
+  // Wirft AnfrageFehler (413/400) -- der Fanghaken im Handler macht daraus
+  // eine JSON-Antwort mit lesbarer Meldung statt "prompt fehlt".
+  return koerperAuswerten(stuecke.length ? Buffer.concat(stuecke) : null, zuGross, MAX_KOERPER)
 }
 
 /**
@@ -532,6 +541,8 @@ const server = createServer(async (req, res) => {
       const label = String(k?.label ?? 'Chat')
       const model = k?.model ? String(k.model) : undefined
       if (!prompt) return json(400, { fehler: 'prompt fehlt' })
+      const schlecht = cwdPruefen(cwd)
+      if (schlecht) return json(400, { fehler: schlecht })
 
       const runId = randomUUID()
       db.runAnlegen(runId, label, cwd)
@@ -548,8 +559,14 @@ const server = createServer(async (req, res) => {
           cwd,
           model,
         })
-        .then((r) => db.runBeenden(runId, r.fehler ? 'failed' : 'done', r.fehler))
-        .catch((e) => db.runBeenden(runId, 'failed', String(e)))
+        .then((r) => {
+          // Von Hand gestoppt heisst 'stopped' wie beim Orchestrator-Lauf --
+          // sonst stuende der Abbruch als 'failed' ("Operation aborted") in
+          // der Laufliste und saehe nach einem Absturz aus.
+          const gestoppt = supervisor.agentenListe(runId).some((a) => a.status === 'stopped')
+          laufAbschliessen(runId, gestoppt ? 'stopped' : r.fehler ? 'failed' : 'done', gestoppt ? 'von Hand abgebrochen' : r.fehler)
+        })
+        .catch((e) => laufAbschliessen(runId, 'failed', String(e)))
         // Wie bei orchestratorLaufStarten: eine frische runId je Aufruf, sonst
         // bleibt der Agent dieses Laufs fuer immer in supervisor.agenten.
         .finally(() => supervisor.laufVergessen(runId))
@@ -559,11 +576,14 @@ const server = createServer(async (req, res) => {
     if (pfad.startsWith('/api/lauf/') && req.method === 'GET') {
       const teile = pfad.split('/').filter(Boolean)
       const runId = teile[2] ?? ''
-      const seit = Number(url.searchParams.get('seit') ?? 0)
+      // Frueher Number(...) ohne Pruefung: ?seit=abc wurde NaN, und die
+      // Abfrage (seq > NaN) lieferte still gar nichts statt eines Fehlers.
+      const seit = zahlLesen(url.searchParams.get('seit'), 'seit', { min: 0, ganzzahlig: true })
+      if (seit.fehler) return json(400, { fehler: seit.fehler })
       return json(200, {
         runId,
         agenten: db.agentenLesen(runId),
-        ereignisse: db.ereignisseSeit(runId, seit),
+        ereignisse: db.ereignisseSeit(runId, seit.zahl ?? 0),
         freigaben: db.offeneFreigaben(runId),
       })
     }
@@ -573,19 +593,28 @@ const server = createServer(async (req, res) => {
       const anfangsPrompt = String(k?.anfangsPrompt ?? '').trim()
       const cwd = String(k?.cwd ?? '')
       if (!anfangsPrompt) return json(400, { fehler: 'anfangsPrompt fehlt' })
-      if (!cwd) return json(400, { fehler: 'cwd fehlt' })
+      const schlecht = cwdPruefen(cwd)
+      if (schlecht) return json(400, { fehler: schlecht })
+      const maxRunden = zahlLesen(k?.maxRunden, 'maxRunden', { min: 1, ganzzahlig: true })
+      const parallelitaet = zahlLesen(k?.parallelitaet, 'parallelitaet', { min: 1, ganzzahlig: true })
+      const maxBudgetUsd = zahlLesen(k?.maxBudgetUsd, 'maxBudgetUsd', { min: 0 })
+      // 0 heisst hier "keine Grenze" (siehe Orchestrator), deshalb min 0.
+      const tokenBudget = zahlLesen(k?.tokenBudget, 'tokenBudget', { min: 0, ganzzahlig: true })
+      const zahlFehler = maxRunden.fehler ?? parallelitaet.fehler ?? maxBudgetUsd.fehler ?? tokenBudget.fehler
+      if (zahlFehler) return json(400, { fehler: zahlFehler })
 
       const runId = orchestratorLaufStarten({
         label: String(k?.label ?? 'Orchestrator-Lauf'),
         cwd,
         anfangsPrompt,
         projektBlock: String(k?.projektBlock ?? '(kein Projektblock angegeben)'),
-        maxRunden: k?.maxRunden ? Number(k.maxRunden) : undefined,
-        parallelitaet: k?.parallelitaet ? Number(k.parallelitaet) : undefined,
+        maxRunden: maxRunden.zahl,
+        parallelitaet: parallelitaet.zahl,
         orchestratorModell: k?.orchestratorModell ? String(k.orchestratorModell) : undefined,
         workerModell: k?.workerModell ? String(k.workerModell) : undefined,
-        maxBudgetUsd: k?.maxBudgetUsd ? Number(k.maxBudgetUsd) : undefined,
-        tokenBudget: k?.tokenBudget !== undefined ? Number(k.tokenBudget) : undefined,
+        // Wie bisher: 0 bedeutet "kein Dollar-Limit", nicht "sofort aufhoeren".
+        maxBudgetUsd: maxBudgetUsd.zahl || undefined,
+        tokenBudget: tokenBudget.zahl,
       })
       return json(202, { runId })
     }
@@ -605,12 +634,18 @@ const server = createServer(async (req, res) => {
       const agentId = k?.agentId ? String(k.agentId) : null
       if (!agentId) {
         // Ganzen Lauf stoppen: der Orchestrator beendet nach der laufenden Runde.
+        // Ein Einzellauf (/api/lauf) oder ein Chat-Zug hat keinen
+        // Orchestrator -- dort zaehlt, ob wenigstens ein Agent tatsaechlich
+        // gestoppt wurde. Frueher kam hier 404, obwohl der Agent gerade
+        // abgebrochen worden war.
         const orch = orchestratoren.get(runId)
         if (orch) orch.abbrechen()
+        let gestoppt = 0
         for (const a of supervisor.agentenListe(runId)) {
-          supervisor.agentAbbrechen(runId, a.agentId)
+          if (supervisor.agentAbbrechen(runId, a.agentId)) gestoppt++
         }
-        return json(orch ? 200 : 404, { ok: Boolean(orch) })
+        const ok = Boolean(orch) || gestoppt > 0
+        return json(ok ? 200 : 404, { ok, gestoppt })
       }
       const ok = supervisor.agentAbbrechen(runId, agentId)
       return json(ok ? 200 : 404, { ok })
@@ -627,8 +662,8 @@ const server = createServer(async (req, res) => {
       // Antwortet sofort mit der Freigabe-Id. Das Ergebnis kommt ueber den
       // Live-Strom nach -- ein Befehl kann zwei Minuten laufen, und so lange
       // eine HTTP-Verbindung offenzuhalten waere die schlechtere Wahl.
-      const { id } = konsoleBefehl(supervisor, befehl, cwd, (e) => verteilen('konsole', e, null))
-      verteilen('konsole', { id, phase: 'freigabe', befehl, cwd }, null)
+      const { id } = konsoleBefehl(supervisor, befehl, cwd, (e) => verteilen('konsole', e))
+      verteilen('konsole', { id, phase: 'freigabe', befehl, cwd })
       return json(202, { id })
     }
 
@@ -651,7 +686,12 @@ const server = createServer(async (req, res) => {
       const k = (await koerperLesen(req)) as Record<string, unknown> | null
       const text = String(k?.text ?? '').trim()
       if (!text) return json(400, { fehler: 'text fehlt' })
-      if (chatLaeuft.has(id)) return json(409, { fehler: 'Diese Sitzung schreibt gerade schon weiter' })
+      const besetzt = () => json(409, { fehler: 'Diese Sitzung schreibt gerade schon weiter' })
+      // Direkt nach "Stoppen" steht der Agent schon auf 'stopped', laeuft
+      // aber noch aus -- dann kurz warten statt 409 (siehe chatZuege.ts).
+      const laufIdVorher = fortsetzungLesen(DB_PFAD, id)?.laufId ?? `chat-${id}`
+      const statusVorher = supervisor.agentenListe(laufIdVorher).find((a) => a.agentId === 'chat')?.status
+      if (!(await chatZuege.freiWerden(id, statusVorher, CHAT_AUSLAUF_WARTEN_MS))) return besetzt()
 
       const kopf = chatKopfLesen(DB_PFAD, id)
       if (!kopf) return json(404, { fehler: 'Sitzung unbekannt' })
@@ -659,13 +699,14 @@ const server = createServer(async (req, res) => {
       const f = await fortsetzungVorbereiten(DB_PFAD, id, process.env.HOME ?? '/opt/cockpit')
       if (!f) return json(404, { fehler: 'Sitzung unbekannt' })
 
+      // Zweite Pruefung ohne await dazwischen: zwei gleichzeitige Anfragen
+      // kommen beide an den awaits oben vorbei, aber nur eine hierueber.
+      if (chatZuege.laeuft(id)) return besetzt()
       const startSeq = db.letzteSeq(f.laufId)
-      chatLaeuft.set(id, startSeq)
-      json(202, { laufId: f.laufId, cwd: f.cwd, startSeq })
 
-      // Nicht awaiten: die Antwort ist schon raus, der Zug laeuft weiter und
+      // Nicht awaiten: die Antwort geht gleich raus, der Zug laeuft weiter und
       // die Oberflaeche verfolgt ihn per Poll auf /api/lauf/<laufId>.
-      void (async () => {
+      chatZuege.starten(id, startSeq, async () => {
         try {
           const r = await supervisor.agentStarten({
             runId: f.laufId,
@@ -689,11 +730,9 @@ const server = createServer(async (req, res) => {
           // Darf den Daemon nicht mitreissen -- ein gestorbener Chat-Zug ist
           // Sache dieser Sitzung, nicht des ganzen Prozesses.
           console.warn(`[chats] Weiterschreiben ${id.slice(0, 8)} fehlgeschlagen:`, String(e))
-        } finally {
-          chatLaeuft.delete(id)
         }
-      })()
-      return
+      })
+      return json(202, { laufId: f.laufId, cwd: f.cwd, startSeq })
     }
 
     if (pfad === '/api/chats' && req.method === 'GET') {
@@ -731,8 +770,8 @@ const server = createServer(async (req, res) => {
           fortsetzung: {
             laufId,
             cwd: zielCwd,
-            laeuft: chatLaeuft.has(id),
-            startSeq: chatLaeuft.get(id) ?? db.letzteSeq(laufId),
+            laeuft: chatZuege.laeuft(id),
+            startSeq: chatZuege.startSeq(id) ?? db.letzteSeq(laufId),
           },
         },
       })
@@ -782,6 +821,7 @@ const server = createServer(async (req, res) => {
         const antwort = await gespraechAntworten(supervisor, text, resume)
         return json(200, antwort)
       } catch (e) {
+        if (e instanceof GespraechBelegt) return json(409, { fehler: e.message })
         return json(500, { fehler: String(e) })
       }
     }
@@ -845,9 +885,16 @@ const server = createServer(async (req, res) => {
     })
     return res.end(inhalt)
   } catch (e) {
-    const code = (e as { code?: string }).code === 'ENOENT' ? 404 : 500
+    const code = fehlerStatus(e)
+    // Schon angefangene Antwort nicht ein zweites Mal beginnen -- writeHead
+    // wuerde selbst werfen, und das hier ist der letzte Fanghaken.
+    if (res.headersSent) return res.end()
+    const text = e instanceof AnfrageFehler ? e.message : code === 404 ? 'nicht gefunden' : code === 400 ? 'ungueltige Anfrage' : `Fehler: ${String(e)}`
+    // Die Tabs rufen bei /api/ immer .json() auf -- Klartext kaeme dort als
+    // Parse-Fehler an statt als lesbare Meldung.
+    if (pfad.startsWith('/api/')) return json(code, { fehler: text })
     res.writeHead(code, { 'content-type': 'text/plain; charset=utf-8' })
-    res.end(code === 404 ? 'nicht gefunden' : `Fehler: ${String(e)}`)
+    res.end(text)
   }
 })
 
@@ -856,6 +903,10 @@ const server = createServer(async (req, res) => {
 const wss = new WebSocketServer({
   server,
   path: '/ws',
+  // Tabs schicken nur kurze "folgen"-Nachrichten. Ohne Deckel puffert ws bis
+  // 100 MiB je Nachricht (Voreinstellung) -- zu viel fuer eine Maschine, die
+  // sich der Daemon mit Agenten teilt. Groesseres schliesst die Verbindung (1009).
+  maxPayload: 64 * 1024,
   // WebSockets unterliegen nicht der Same-Origin-Policy: ohne diese Pruefung
   // koennte eine beliebige offene Webseite eine Verbindung aufbauen und alles
   // mitlesen, was die Agenten ausgeben -- Dateiinhalte eingeschlossen. Das ist
@@ -878,27 +929,25 @@ wss.on('connection', (sock) => {
   klienten.add(klient)
 
   sock.on('message', (roh) => {
-    let n: Record<string, unknown>
-    try {
-      n = JSON.parse(String(roh)) as Record<string, unknown>
-    } catch {
-      return
-    }
+    const f = folgenLesen(String(roh))
+    if (!f) return
     // Der Klient sagt, welchem Lauf er folgt und was er schon hat -- daraufhin
     // bekommt er den Rueckstand nachgeliefert. Ohne diesen Backfill fehlt nach
-    // jedem Verbindungsabbruch ein Stueck Verlauf.
-    if (n.typ === 'folgen') {
-      klient.runId = n.runId ? String(n.runId) : null
-      const seit = Number(n.seit ?? 0)
-      if (klient.runId) {
-        for (const e of db.ereignisseSeit(klient.runId, seit)) senden(klient, 'ereignis', e)
-        senden(klient, 'agenten', db.agentenLesen(klient.runId))
-        senden(klient, 'freigaben', db.offeneFreigaben(klient.runId))
-      }
-      const stand = supervisor.limitStandLesen()
-      if (stand) senden(klient, 'limit', stand)
-      senden(klient, 'bereit', { runId: klient.runId })
-    }
+    // jedem Verbindungsabbruch ein Stueck Verlauf. Seitenweise und mit
+    // Ruecksicht auf den Puffer, siehe nachlieferung.ts.
+    void nachliefern(klient, f.runId, f.seit, {
+      seite: (runId, ab, anzahl) => db.ereignisseSeit(runId, ab, anzahl),
+      abschluss: (runId) => {
+        const teile: Array<[string, unknown]> = []
+        if (runId) {
+          teile.push(['agenten', db.agentenLesen(runId)], ['freigaben', db.offeneFreigaben(runId)])
+        }
+        const stand = supervisor.limitStandLesen()
+        if (stand) teile.push(['limit', stand])
+        teile.push(['bereit', { runId }])
+        return teile
+      },
+    }, klientEntfernen).catch((e) => console.error('[cockpit] WebSocket-Nachricht nicht verarbeitet:', e))
   })
 
   sock.on('close', () => klienten.delete(klient))

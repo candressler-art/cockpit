@@ -16,7 +16,6 @@
 // aushoehlen, die der ganze Punkt dieser Loesung ist.
 
 import { execFile } from 'node:child_process'
-import { existsSync } from 'node:fs'
 import type { Supervisor } from './supervisor.js'
 
 /** Laenger darf kein Befehl laufen. Danach wird die Gruppe abgeraeumt. */
@@ -105,12 +104,4 @@ export function konsoleBefehl(
   })()
 
   return { id, ergebnis }
-}
-
-/** Prueft ein Arbeitsverzeichnis, bevor ueberhaupt eine Freigabe angefragt wird. */
-export function cwdPruefen(cwd: string): string | null {
-  if (!cwd) return 'cwd fehlt'
-  if (!cwd.startsWith('/')) return 'cwd muss ein absoluter Pfad sein'
-  if (!existsSync(cwd)) return `${cwd} gibt es auf diesem Host nicht`
-  return null
 }

@@ -71,5 +71,23 @@ function werteAus(pcm) {
   pruefe('leeres PCM bleibt leer', r.length === 0)
 }
 
+// --- erkennen(): unplausible Abtastrate vorab ablehnen -----------------------
+// Eine WAV-Kopfzeile mit z. B. 100 Hz liess pcm16Resampeln 160-fach
+// aufblaehen: bei 10 MB Obergrenze ~1.6 GB Puffer und Sekunden blockierter
+// Event-Loop, bevor Whisper ueberhaupt gefragt wurde.
+{
+  process.env.WHISPER_PORT = '1' // nie erreichbar -- es darf gar nicht so weit kommen
+  const { erkennen } = await import('../dist/hoeren.js')
+  const { wavBauen } = await import('../dist/wav.js')
+  for (const rate of [100, 1_000_000]) {
+    let fehler = ''
+    await erkennen(wavBauen(Buffer.alloc(2000), rate, 2, 1)).catch((e) => { fehler = String(e) })
+    pruefe(`Abtastrate ${rate} Hz abgelehnt ohne Verbindungsversuch`, fehler.includes('Abtastrate'))
+  }
+  let fehler = ''
+  await erkennen(wavBauen(Buffer.alloc(2000), 48000, 2, 1)).catch((e) => { fehler = String(e) })
+  pruefe('48 kHz geht bis zum Verbindungsversuch', fehler.includes('nicht erreichbar'))
+}
+
 console.log(`\n${ok}/${gesamt} bestanden`)
 if (ok !== gesamt) process.exit(1)

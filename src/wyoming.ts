@@ -38,6 +38,19 @@ export function wyomingSchreiben(
   return payload && payload.length > 0 ? Buffer.concat([zeile, payload]) : zeile
 }
 
+function istObjekt(x: unknown): x is Record<string, unknown> {
+  return typeof x === 'object' && x !== null && !Array.isArray(x)
+}
+
+/** Laengenfeld aus dem Kopf: fehlt/null = 0, sonst ganze Zahl >= 0. */
+function laenge(x: unknown, feld: string): number {
+  if (x === undefined || x === null) return 0
+  if (typeof x !== 'number' || !Number.isInteger(x) || x < 0) {
+    throw new Error(`${feld} ist keine gueltige Laenge`)
+  }
+  return x
+}
+
 /**
  * Zerlegt einen Bytestrom in Wyoming-Ereignisse. Haelt unvollstaendige Reste
  * ueber mehrere schieben()-Aufrufe hinweg fest -- Daten aus einem TCP-Socket
@@ -62,13 +75,18 @@ export class WyomingLeser {
       } catch {
         throw new Error('kein gueltiges JSON in der Kopfzeile')
       }
-
-      const dLen = kopf.data_length ?? 0
-      const pLen = kopf.payload_length ?? 0
+      // Gueltiges JSON ist noch kein Kopf: `null` liess kopf.data_length einen
+      // TypeError werfen, eine Laenge wie "abc" ergab gesamt = NaN -- dann
+      // verbrauchte die Schleife nichts und lief ewig (Daemon haengt).
+      if (!istObjekt(kopf) || typeof kopf.type !== 'string') {
+        throw new Error('Kopfzeile ist kein Wyoming-Ereignis')
+      }
+      const dLen = laenge(kopf.data_length, 'data_length')
+      const pLen = laenge(kopf.payload_length, 'payload_length')
       const gesamt = nl + 1 + dLen + pLen
       if (this.puffer.length < gesamt) break // noch nicht alles da
 
-      let daten = kopf.data ?? {}
+      let daten: unknown = kopf.data ?? {}
       if (dLen > 0) {
         try {
           daten = JSON.parse(this.puffer.subarray(nl + 1, nl + 1 + dLen).toString('utf-8'))
@@ -76,6 +94,7 @@ export class WyomingLeser {
           throw new Error('kein gueltiges JSON im Datenfeld')
         }
       }
+      if (!istObjekt(daten)) throw new Error('Datenfeld ist kein Objekt')
       const payload = pLen > 0 ? Buffer.from(this.puffer.subarray(nl + 1 + dLen, gesamt)) : null
       this.puffer = this.puffer.subarray(gesamt)
       ergebnisse.push({ type: kopf.type, data: daten, payload })

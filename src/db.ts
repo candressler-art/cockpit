@@ -8,7 +8,7 @@
 import { DatabaseSync } from 'node:sqlite'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
-import type { AgentState, CockpitEvent, PermissionRequest } from './typen.js'
+import type { AgentState, CockpitEvent, LimitStand, PermissionRequest } from './typen.js'
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -81,22 +81,51 @@ CREATE INDEX IF NOT EXISTS idx_perm_offen ON permissions (run_id, decided_at);
 -- Reset gesperrt war, wurde sofort wieder probiert. Verstoesst gegen die
 -- Grundregel oben ("kein Zustand im Speicher, der nicht auch hier steht").
 CREATE TABLE IF NOT EXISTS konten_sperren (
-  name TEXT PRIMARY KEY,
-  bis  INTEGER NOT NULL
+  name  TEXT PRIMARY KEY,
+  bis   INTEGER NOT NULL,
+  grund TEXT NOT NULL DEFAULT 'limit'
 );
 
 CREATE TABLE IF NOT EXISTS konten_vorzug (
   id   INTEGER PRIMARY KEY CHECK (id = 1),
   name TEXT
 );
+
+-- Letzter bekannter Nutzungsstand je Konto (siehe kontenNutzung.ts, konten.ts
+-- nutzungMelden). Bisher reiner In-Memory-Zustand: ein Daemon-Neustart liess
+-- jedes Konto ohne jede Messung dastehen -- balanciert wie ein nie genutztes
+-- Konto (0 %, siehe KontoBalancing), selbst wenn es in Wahrheit mitten im
+-- Wochenlimit steckte und der erste Poll nach dem Neustart nur an einem
+-- abgelaufenen Token (401) oder einem HTTP 429 des Nutzungs-Endpunkts
+-- scheiterte. Beobachtet auf servertwo nach dem Rollout der ersten Nacht.
+CREATE TABLE IF NOT EXISTS konten_nutzung (
+  name                    TEXT PRIMARY KEY,
+  status                  TEXT NOT NULL,
+  rate_limit_type         TEXT,
+  resets_at               INTEGER,
+  fuenf_stunden_anteil    REAL,
+  fuenf_stunden_resets_at INTEGER,
+  sieben_tage_anteil      REAL,
+  sieben_tage_resets_at   INTEGER,
+  gemessen_am             INTEGER NOT NULL,
+  quelle                  TEXT NOT NULL
+);
 `
+
+/** Wie lange ein Schreibzugriff auf eine fremde Sperre wartet (ms). */
+export const DB_WARTEN_MS = 5000
 
 export class CockpitDb {
   private db: DatabaseSync
 
   constructor(pfad: string) {
     mkdirSync(dirname(pfad), { recursive: true })
-    this.db = new DatabaseSync(pfad)
+    // timeout = busy_timeout: haelt ein fremder Prozess (sqlite3 in der
+    // Shell, ein Backup) kurz die Schreibsperre, warten statt sofort
+    // "database is locked" zu werfen -- aus einem Ereignis-Handler des
+    // Supervisors heraus haette das den ganzen Daemon beendet. Blockiert die
+    // Ereignisschleife hoechstens so lange; das ist das kleinere Uebel.
+    this.db = new DatabaseSync(pfad, { timeout: DB_WARTEN_MS })
     // WAL: der Daemon schreibt laufend, das Frontend liest gleichzeitig.
     this.db.exec('PRAGMA journal_mode = WAL')
     this.db.exec('PRAGMA synchronous = NORMAL')
@@ -130,6 +159,17 @@ export class CockpitDb {
         /* Spalte war schon da (neu angelegte Datenbank) */
       }
       stand = 1
+    }
+
+    if (stand < 2) {
+      // Sperrgrund (siehe SperrGrund in konten.ts). Bestandszeilen bekommen
+      // 'limit' -- die vorsichtige Lesart, die nie vorzeitig aufgehoben wird.
+      try {
+        this.db.exec("ALTER TABLE konten_sperren ADD COLUMN grund TEXT NOT NULL DEFAULT 'limit'")
+      } catch {
+        /* Spalte war schon da (neu angelegte Datenbank) */
+      }
+      stand = 2
     }
 
     this.db.prepare('UPDATE schema_version SET version = ?').run(stand)
@@ -312,13 +352,24 @@ export class CockpitDb {
   }
 
   /** Merkt eine Kontosperre dauerhaft, ueberlebt einen Daemon-Neustart. */
-  kontoSperren(name: string, bis: number): void {
+  kontoSperren(name: string, bis: number, grund: 'limit' | 'anmeldung' = 'limit'): void {
     this.db
       .prepare(
-        `INSERT INTO konten_sperren (name, bis) VALUES (?, ?)
-         ON CONFLICT (name) DO UPDATE SET bis = excluded.bis`,
+        `INSERT INTO konten_sperren (name, bis, grund) VALUES (?, ?, ?)
+         ON CONFLICT (name) DO UPDATE SET bis = excluded.bis, grund = excluded.grund`,
       )
-      .run(name, bis)
+      .run(name, bis, grund)
+  }
+
+  /** Sperrgrund je Konto (siehe SperrGrund in konten.ts). */
+  kontoSperrGruendeLesen(): Record<string, 'limit' | 'anmeldung'> {
+    const rows = this.db.prepare(`SELECT name, grund FROM konten_sperren`).all() as {
+      name: string
+      grund: string
+    }[]
+    const out: Record<string, 'limit' | 'anmeldung'> = {}
+    for (const r of rows) out[r.name] = r.grund === 'anmeldung' ? 'anmeldung' : 'limit'
+    return out
   }
 
   /** Manuell gesetztes Vorzugskonto, oder null ohne Vorzug. */
@@ -337,6 +388,68 @@ export class CockpitDb {
          ON CONFLICT (id) DO UPDATE SET name = excluded.name`,
       )
       .run(name)
+  }
+
+  /** Letzter bekannter Nutzungsstand je Konto, Name -> (Stand, Quelle). */
+  kontoNutzungLesen(): Record<string, { stand: LimitStand; quelle: 'usage_api' | 'rate_limit_event' }> {
+    const rows = this.db.prepare(`SELECT * FROM konten_nutzung`).all() as {
+      name: string
+      status: string
+      rate_limit_type: string | null
+      resets_at: number | null
+      fuenf_stunden_anteil: number | null
+      fuenf_stunden_resets_at: number | null
+      sieben_tage_anteil: number | null
+      sieben_tage_resets_at: number | null
+      gemessen_am: number
+      quelle: string
+    }[]
+    const out: Record<string, { stand: LimitStand; quelle: 'usage_api' | 'rate_limit_event' }> = {}
+    for (const r of rows) {
+      out[r.name] = {
+        stand: {
+          status: r.status,
+          rateLimitType: r.rate_limit_type,
+          resetsAt: r.resets_at,
+          fuenfStundenAnteil: r.fuenf_stunden_anteil,
+          fuenfStundenResetsAt: r.fuenf_stunden_resets_at,
+          siebenTageAnteil: r.sieben_tage_anteil,
+          siebenTageResetsAt: r.sieben_tage_resets_at,
+          gemessenAm: r.gemessen_am,
+        },
+        quelle: r.quelle === 'rate_limit_event' ? 'rate_limit_event' : 'usage_api',
+      }
+    }
+    return out
+  }
+
+  /** Merkt den Nutzungsstand eines Kontos dauerhaft, ueberlebt einen Daemon-Neustart. */
+  kontoNutzungSpeichern(name: string, stand: LimitStand, quelle: 'usage_api' | 'rate_limit_event'): void {
+    this.db
+      .prepare(
+        `INSERT INTO konten_nutzung (
+           name, status, rate_limit_type, resets_at,
+           fuenf_stunden_anteil, fuenf_stunden_resets_at,
+           sieben_tage_anteil, sieben_tage_resets_at,
+           gemessen_am, quelle
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (name) DO UPDATE SET
+           status = excluded.status,
+           rate_limit_type = excluded.rate_limit_type,
+           resets_at = excluded.resets_at,
+           fuenf_stunden_anteil = excluded.fuenf_stunden_anteil,
+           fuenf_stunden_resets_at = excluded.fuenf_stunden_resets_at,
+           sieben_tage_anteil = excluded.sieben_tage_anteil,
+           sieben_tage_resets_at = excluded.sieben_tage_resets_at,
+           gemessen_am = excluded.gemessen_am,
+           quelle = excluded.quelle`,
+      )
+      .run(
+        name, stand.status, stand.rateLimitType, stand.resetsAt,
+        stand.fuenfStundenAnteil, stand.fuenfStundenResetsAt,
+        stand.siebenTageAnteil, stand.siebenTageResetsAt,
+        stand.gemessenAm, quelle,
+      )
   }
 
   close(): void {

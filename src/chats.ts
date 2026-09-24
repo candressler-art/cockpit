@@ -18,6 +18,7 @@ import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { USAGE_LIMIT_ERROR_PREFIXES } from '@anthropic-ai/claude-agent-sdk'
 import { verlaufNormalisieren, type Nachricht } from './nachrichten.js'
+import { DB_WARTEN_MS } from './db.js'
 
 const SPIEGEL = process.env.COCKPIT_SESSIONS ?? '/var/lib/cockpit/sessions-desktop'
 
@@ -110,7 +111,8 @@ const INDEX_VERSION = 2
 
 function handle(pfad: string): DatabaseSync {
   if (!db) {
-    db = new DatabaseSync(pfad)
+    // Gleiche Datei wie CockpitDb -- gleiches Warten auf fremde Sperren.
+    db = new DatabaseSync(pfad, { timeout: DB_WARTEN_MS })
     db.exec('PRAGMA journal_mode = WAL')
     db.exec('CREATE TABLE IF NOT EXISTS chats_meta (version INTEGER NOT NULL)')
     const v = (db.prepare('SELECT version FROM chats_meta LIMIT 1').get() as { version: number } | undefined)?.version ?? 0

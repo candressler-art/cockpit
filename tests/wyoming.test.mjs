@@ -83,5 +83,31 @@ const pruefe = (name, bedingung) => {
   pruefe('transcript-Text lesbar', e?.data?.text === 'Hallo Welt')
 }
 
+// --- 7. Kaputte Gegenstelle: sauberer Fehler statt Absturz oder Endlosschleife
+// Kopfzeile `null` warf vorher einen TypeError im Socket-Handler (in stimme.ts
+// ungefangen -> ganzer Daemon weg), eine nicht-numerische data_length liess
+// die Schleife ohne Fortschritt ewig laufen (Daemon haengt).
+{
+  const faelle = [
+    ['Kopfzeile null', 'null\n'],
+    ['Kopfzeile Zahl', '42\n'],
+    ['Kopfzeile ohne type', '{"data":{}}\n'],
+    ['data_length kein Zahlwert', '{"type":"x","data_length":"abc"}\n'],
+    ['data_length negativ', '{"type":"x","data_length":-5}\nabcdefgh\n'],
+    ['payload_length gebrochen', '{"type":"x","payload_length":1.5}\nab'],
+    ['Datenfeld null', '{"type":"x","data_length":4}\nnull'],
+    ['data inline Liste', '{"type":"x","data":[1]}\n'],
+  ]
+  for (const [name, roh] of faelle) {
+    let fehler = null
+    try {
+      new WyomingLeser().schieben(Buffer.from(roh))
+    } catch (e) {
+      fehler = e
+    }
+    pruefe(`${name}: wirft sauberen Fehler`, fehler instanceof Error && !(fehler instanceof TypeError))
+  }
+}
+
 console.log(`\n${ok}/${gesamt} bestanden`)
 if (ok !== gesamt) process.exit(1)

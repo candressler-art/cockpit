@@ -99,16 +99,47 @@ export interface NutzungsAbfrage {
   quelle: 'usage_api'
 }
 
+// --- Backoff bei 429 ---------------------------------------------------
+//
+// daemon.ts fragt alle 10 Minuten jedes angemeldete Konto ab. Ohne eigenes
+// Backoff wuerde ein Konto, das der Endpunkt selbst mit 429 abweist, exakt
+// im selben 10-Minuten-Takt weitergefragt -- bei einem echten Ratenlimit auf
+// diesem Endpunkt (unabhaengig vom Nutzungsfenster des Kontos selbst) haelt
+// das den Zustand nur unnoetig am Leben, statt ihm Zeit zum Abklingen zu
+// geben. Der Backoff verdoppelt sich je aufeinanderfolgendem 429 (10 min,
+// 20, 40, ... gedeckelt bei 2h) und wird bei der naechsten erfolgreichen
+// Antwort (ok ODER 401, also jeder Fall ausser 429/Netzwerkfehler) wieder
+// auf null gesetzt -- ein abgelaufenes Token ist kein Grund, das naechste
+// Konto laenger zu verzoegern.
+const BACKOFF_BASIS_MS = 10 * 60_000
+const BACKOFF_DECKEL_MS = 2 * 60 * 60_000
+const naechsterVersuch = new Map<string, number>()
+const fehlerFolge = new Map<string, number>()
+
+/**
+ * Reine Backoff-Rechnung, getrennt vom Map-Zustand oben, damit sie sich ohne
+ * Netzwerk-Mock und ohne auf echte Minuten zu warten testen laesst.
+ * `bisherigeFolge` ist die Zahl der VORHERIGEN aufeinanderfolgenden 429
+ * (0 beim ersten) -- Ergebnis ist die Wartezeit VOR dem naechsten Versuch.
+ */
+export function naechsteBackoffMs(bisherigeFolge: number): number {
+  return Math.min(BACKOFF_BASIS_MS * 2 ** bisherigeFolge, BACKOFF_DECKEL_MS)
+}
+
 /**
  * Fragt den Nutzungsstand eines Kontos ab, ohne dass dafuer ein Agent laufen
  * muss. Liefert null, wenn keine Anmeldung vorliegt, das Token abgelaufen
- * ist, der Endpunkt nicht erreichbar ist oder die Antwort nicht auswertbar
- * war -- der Aufrufer faellt dann auf rate_limit_event zurueck. Das Token
- * selbst wird an keiner Stelle geloggt, auch nicht bei einem Fehler.
+ * ist, der Endpunkt nicht erreichbar ist, ein 429-Backoff noch laeuft oder
+ * die Antwort nicht auswertbar war -- der Aufrufer faellt dann auf
+ * rate_limit_event zurueck. Das Token selbst wird an keiner Stelle geloggt,
+ * auch nicht bei einem Fehler.
  */
 export async function nutzungAbfragen(konto: Konto): Promise<NutzungsAbfrage | null> {
   const creds = credentialsLesen(konto.configDir)
   if (!creds) return null
+
+  const gesperrtBis = naechsterVersuch.get(konto.name)
+  if (typeof gesperrtBis === 'number' && Date.now() < gesperrtBis) return null
 
   let antwort: Response
   try {
@@ -127,13 +158,28 @@ export async function nutzungAbfragen(konto: Konto): Promise<NutzungsAbfrage | n
   }
 
   if (!antwort.ok) {
-    // 401 ist der haeufigste Fall (Token abgelaufen) -- keine Warnung mit
-    // vollem Text noetig, das ist ein Normalfall und kein Betriebsfehler.
-    if (antwort.status !== 401) {
-      console.warn(`[konten] Nutzungsabfrage fuer '${konto.name}': HTTP ${antwort.status}`)
+    if (antwort.status === 429) {
+      const bisherigeFolge = fehlerFolge.get(konto.name) ?? 0
+      const backoffMs = naechsteBackoffMs(bisherigeFolge)
+      fehlerFolge.set(konto.name, bisherigeFolge + 1)
+      naechsterVersuch.set(konto.name, Date.now() + backoffMs)
+      console.warn(
+        `[konten] Nutzungsabfrage fuer '${konto.name}': HTTP 429, naechster Versuch in ${Math.round(backoffMs / 60_000)} min`,
+      )
+    } else {
+      // 401 ist der haeufigste uebrige Fall (Token abgelaufen) -- keine
+      // Warnung mit vollem Text noetig, das ist ein Normalfall und kein
+      // Betriebsfehler. Kein 429 mehr: Backoff zuruecksetzen.
+      fehlerFolge.delete(konto.name)
+      naechsterVersuch.delete(konto.name)
+      if (antwort.status !== 401) {
+        console.warn(`[konten] Nutzungsabfrage fuer '${konto.name}': HTTP ${antwort.status}`)
+      }
     }
     return null
   }
+  fehlerFolge.delete(konto.name)
+  naechsterVersuch.delete(konto.name)
 
   let body: unknown
   try {
