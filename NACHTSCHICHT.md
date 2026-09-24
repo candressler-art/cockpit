@@ -127,24 +127,8 @@ Nacht 1 (bis "Logbuch nach Durchgang 12") ist live. Seitdem, **bitte pruefen**:
 - `2685036` Test "keine Messung" vs. "0%" (`tests/server.test.mjs`).
 - `3cd4a73` 429-Backoff (max 2h), Reset-Zeit aus CLI-Fehlertext.
 - `aebf9e8` Nutzungsstand persistiert (`konten_nutzung`).
-- `e340d9a` Chats: Nutzungslimit-Meldung nicht mehr als falsche Antwort angezeigt
-- `d56b87c` Tabs: inaktive Flaechen verdecken aktiven Tab nicht mehr
-- `98435ae` Konten-Balancing: Nutzung je Konto messen, niedrigstes Wochenkonto zuerst
-- `b8f3dc7` Sprachausgabe: in Desktop-App ohne Klick hoerbar, Fehler nicht mehr stumm
-- `dd0525c` Kontowechsel: auch bei kaputtem Token wechseln, nicht nur bei Nutzungslimit
-- `defba1c` Konten: Hauptkonto-E-Mail nicht mehr aus echtem Home gelesen, wenn CLAUDE_CONFIG_DIR gesetzt
-- `0126820` Chats: Kontowechsel bis Sperre aller Konten beendet Poll nicht mehr haengend
-- `88c7947` Oberflaeche: Playwright als devDependency (visuelle Tab-Tests 1280/375px, kein Bug gefunden)
-- `9cc5557` Daemon: laufVergessen() nach Orchestrator- und Einzellauf aufrufen (Speicherleck behoben)
-- `e473f82` Orchestrator: ausgeschoepftes Leseanfrage-Limit endet klar statt irrefuehrend
-- `48b5a62` Orchestrator: Leseanfrage (DATEI/GREP) lehnt zu grosse Dateien ab
-- `e7f3994` Zentrale: Agenten-Panel zeigt laufende Agenten auch ohne Lauf-Tab-Besuch
-- `3cecb58` Vault: 3D-Agentenanzeige nutzt vom Server vorbereiteten ?run=-Parameter
-- `7236ca4` Konten: Sperren und Vorzug ueberleben jetzt einen Daemon-Neustart (SQLite-Persistenz)
-- `b4fd253` Oberflaeche: deutsche Meldung statt roher TypeError bei nicht erreichbarem Daemon
-- `50db464` Discord: !stop erkennt normalen Chat nicht mehr faelschlich als Befehl
-- Durchgang 12: kein neuer Fund; verbliebener Restpunkt (deutsche Fehlermeldung)
-  erstmals visuell im Browser bestaetigt, kein Bug.
+- Nacht 1 (D1-D12, live, von Can gesehen): 21 Commits `50db464`..`e340d9a`
+  -- `git log --oneline 50db464^..e340d9a` fuer die Liste.
 
 ## Gepruefte Bereiche ohne Fund (nicht doppelt untersuchen)
 
