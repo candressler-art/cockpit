@@ -25,6 +25,24 @@ const SYSTEM_PROMPT =
   'Ueberschriften, keinen Code -- schreib alles als Fliesstext, notfalls mit ' +
   '"erstens", "zweitens". Ist eine Frage unklar, frag knapp nach, statt zu raten.'
 
+/**
+ * Eine Runde laeuft noch -- die neue wird abgewiesen statt parallel
+ * gestartet. Die Oberflaeche sperrt zwar selbst (gespraechImGang), aber nur
+ * je Fenster: App und Handy zugleich, oder ein Neuladen, waehrend die alte
+ * Anfrage noch denkt, kamen bisher beide durch. Beide Agenten liefen dann
+ * unter demselben Schluessel im Supervisor -- der zweite ueberschrieb den
+ * AbortController des ersten (der liess sich nicht mehr stoppen), und die
+ * zurueckgegebene sessionId konnte die der jeweils anderen Runde sein.
+ */
+export class GespraechBelegt extends Error {
+  constructor() {
+    super('Das Gespräch antwortet gerade noch auf die vorige Frage')
+  }
+}
+
+/** Laeuft gerade eine Runde? Ein Daemon hat genau ein Sprachgespraech. */
+let rundeImGang = false
+
 export interface GespraechAntwort {
   text: string
   sessionId: string | null
@@ -36,6 +54,22 @@ export interface GespraechAntwort {
  * Konversation ohne Vorgeschichte.
  */
 export async function gespraechAntworten(
+  supervisor: Supervisor,
+  text: string,
+  resume: string | undefined,
+): Promise<GespraechAntwort> {
+  // Pruefen und belegen ohne await dazwischen -- sonst kaemen zwei
+  // gleichzeitige Anfragen beide an der Pruefung vorbei.
+  if (rundeImGang) throw new GespraechBelegt()
+  rundeImGang = true
+  try {
+    return await rundeFuehren(supervisor, text, resume)
+  } finally {
+    rundeImGang = false
+  }
+}
+
+async function rundeFuehren(
   supervisor: Supervisor,
   text: string,
   resume: string | undefined,

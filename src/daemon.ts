@@ -16,7 +16,7 @@ import { standLesen, type SystemStand } from './system.js'
 import { rollenLaden, rollenListe } from './rollen.js'
 import { sprechenGecacht } from './stimme.js'
 import { erkennen } from './hoeren.js'
-import { gespraechAntworten } from './gespraech.js'
+import { GespraechBelegt, gespraechAntworten } from './gespraech.js'
 import {
   chatsIndizieren, chatsSuchen, chatLesen, chatKopfLesen,
   fortsetzungLesen, fortsetzungVorbereiten, fortsetzungAktualisieren,
@@ -841,6 +841,7 @@ const server = createServer(async (req, res) => {
         const antwort = await gespraechAntworten(supervisor, text, resume)
         return json(200, antwort)
       } catch (e) {
+        if (e instanceof GespraechBelegt) return json(409, { fehler: e.message })
         return json(500, { fehler: String(e) })
       }
     }
