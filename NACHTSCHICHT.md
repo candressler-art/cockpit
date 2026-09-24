@@ -6,63 +6,29 @@ fruehere Fassung dieser Datei (bis Durchgang 12, vor dem Kuerzen hier).
 
 ## Fuer Can (Kurzfassung)
 
-- Nacht 1 (bis "Logbuch nach Durchgang 12") ist live. **D13-D16** haben
-  Deine Beobachtungsliste abgearbeitet: Messwerte ueberleben Neustart
-  (`aebf9e8`), 429-Backoff + Reset-Zeit aus CLI-Text (`3cd4a73`), Anmelde-
-  sperre faellt nach `/login` beim naechsten Poll (`7f5c455`, DB-Schema v2),
-  Modus "manuell" nur bei wirksamem Vorzug (`7b891d2`), neutraler
-  Fortsetzungsprompt (`9e4ae1b`). **Bitte pruefen:** Server-Tab zeigt
-  "Anmeldefehler · gesperrt bis ...".
-- **Durchgang 17:** Die Oberflaeche hatte **keinen Abbrechen-Knopf** (nur
-  Discord `!stop`). Jetzt "Stoppen" im Lauf-Tab (nur sichtbar, solange ein
-  Agent arbeitet; zweiter Klick bestaetigt), `/api/abbrechen` meldet bei
-  Einzellaeufen nicht mehr faelschlich 404 (`886ad89`). Dabei gefunden: ein
-  gestoppter Agent landete als `failed` ("Operation aborted") statt
-  `stopped`, und haette nach Kontofehler sogar das naechste Konto probiert
-  (`f3b5f04`). **Bitte pruefen:** Knopf in der Desktop-App (Kopfzeile rechts,
-  am Handy ganz links).
-- **Durchgang 18:** Chats-Tab hat jetzt ebenfalls "Stoppen" fuer einen
-  laufenden Zug (ersetzt waehrenddessen "Senden", `da2ac07`). Kaputte
-  URL-Kodierung liefert 400, Verzeichnispfade 404 statt 500; API-Fehler
-  kommen als JSON (`f5407cc`). **Bitte pruefen:** Stopp im Chat in der App.
-- **Durchgang 19:** Restpunkt aus D18 bestaetigt und behoben: nach
-  "Stoppen" sofort wieder senden gab 409, solange der alte Zug auslief.
-  Jetzt wartet der Server kurz (max. 10 s) darauf; zwei gleichzeitige
-  Sendungen kommen nicht mehr beide durch (`59a3eca`). **Bitte pruefen:**
-  Chat stoppen und direkt neu senden (mit echtem Agent nicht testbar hier).
-- **Durchgang 20:** Vertipptes Arbeitsverzeichnis in der Zentrale ergab
-  einen Lauf, der mit "native binary ... failed to launch" (libc!)
-  scheiterte. Jetzt sofort "Start abgelehnt: /x gibt es auf diesem Host
-  nicht"; unsinnige Zahlen (Runden "abc" -> Lauf endete sofort ohne Arbeit)
-  ebenfalls 400 (`c0d49e3`).
-- **Durchgang 21/22:** Wer im Lauf-Tab einen alten Lauf ansah, dessen
-  ganze Oberflaeche (Zentrale, Vault, Sprachhinweise) bekam nur noch
-  Ereignisse DIESES Laufs -- Freigaben/Lauf-Ende eines neuen Laufs kamen
-  nicht an. Jetzt bekommt jeder Tab alles, der Lauf-Tab filtert selbst;
-  Laufauswahl zeigt anderswo gestartete Laeufe ohne Neuladen (`501e649`).
-  **Bitte pruefen:** Lauf-Tab auf altem Lauf, per Discord/Zentrale neuen
-  starten -> Freigabe wird angesagt, Lauf erscheint in der Auswahl.
-- **Durchgang 23 (Nachtrag Beszel):** "8 °C" bei serverone war die
-  **Thread-Zahl** (`systems.info.t`, i7-6700 = 8), belegt an einer Kopie der
-  Hub-DB (Beszel 0.9.1). Temperatur/RAM-/Plattengroesse/Container kommen
-  jetzt aus `system_stats`/`container_stats`. servertwo als "lokal" ist
-  Absicht, aber CPU null beim ersten Abruf war ein Fehler (lokales null
-  ueberschrieb Beszel) -- jetzt feldweise gemischt (`f82a1e6`). Zwei Hosts
-  bei 1280/375 per Playwright ok. **Bitte pruefen:** nach Ausrollen zeigt
-  serverone ~20-30 °C und "von 31.2 GB"; bleibt die Temperatur leer, darf
-  der Beszel-Nutzer `system_stats` nicht lesen (Log: "Beszel-Abfrage
-  fehlgeschlagen ... (system_stats)").
-- **Durchgang 24 (Daemon-Robustheit):** Eine einzige WebSocket-Nachricht
-  `null` (gueltiges JSON, kein Objekt) **beendete den ganzen Daemon**
-  (`af5945a`, dazu maxPayload 64 KB). Ebenso haette ein werfender
-  Discord-Befehl (z. B. DB-Fehler bei `!status`) den Prozess beendet
-  (`15c19cf`). Zu grosser/kaputter Anfragekoerper meldet jetzt 413/400 mit
-  Klartext statt "prompt fehlt" (`77bf285`).
+Nacht 1 (bis "Logbuch nach Durchgang 12") ist live. Seitdem, **bitte pruefen**:
+- **D13-D16 Konten:** Messwerte ueberleben Neustart, 429-Backoff, Reset-Zeit
+  aus CLI-Text, Anmeldesperre faellt nach `/login` (DB-Schema v2), "manuell"
+  nur bei wirksamem Vorzug. Pruefen: Server-Tab "Anmeldefehler · gesperrt bis".
+- **D17-D19 Stoppen:** Stopp-Knopf im Lauf-Tab (Kopfzeile rechts, Handy
+  links) und im Chats-Tab; gestoppter Agent endet als `stopped`, kein
+  Kontowechsel danach; nach Stopp sofort neu senden ohne 409. Pruefen in der
+  App mit echtem Agent (hier nicht moeglich).
+- **D20:** vertipptes Arbeitsverzeichnis / unsinnige Zahlen -> sofort 400.
+- **D21/22:** Lauf-Tab auf altem Lauf blockierte Ereignisse neuer Laeufe fuer
+  die ganze Oberflaeche. Pruefen: alter Lauf offen, neuen starten ->
+  Freigabe wird angesagt, Lauf erscheint in der Auswahl.
+- **D23 Beszel:** "8 °C" war die Thread-Zahl; Temperatur/RAM/Platte jetzt aus
+  `system_stats`. Pruefen: serverone ~20-30 °C; bleibt leer -> Beszel-Nutzer
+  darf `system_stats` nicht lesen (Log "Beszel-Abfrage fehlgeschlagen").
+- **D24:** WS-Nachricht `null` und werfender Discord-Befehl beendeten den
+  ganzen Daemon; kaputter Anfragekoerper -> 413/400 mit Klartext.
+- **D25:** eine kaputte Piper-Antwort (Kopfzeile `null`) **beendete den
+  ganzen Daemon**, eine unsinnige Laengenangabe liess ihn endlos haengen --
+  jetzt 503 (`e85ec1a`). WAV mit absurder Abtastrate an /api/hoeren blaehte
+  sich auf GB auf -- jetzt abgelehnt (`54857ed`). Logbuch auf ~150 Zeilen.
 
 ## Offene Punkte (naechste Durchgaenge, Prioritaet 1 zuerst)
-
-0. **Diese Datei ist auf ~225 Zeilen gewachsen** (Ziel ~150): naechster
-   Durchgang zuerst "Fuer Can" D13-D23 zu je 1-2 Zeilen zusammenfassen.
 
 1. **Weitere Multi-Konto-Luecken** selbst suchen. Erledigt: Abmeldung
    mitten im Lauf (D15), Vorzug auf geloeschtes Konto und Wortlaut des
@@ -78,11 +44,15 @@ fruehere Fassung dieser Datei (bis Durchgang 12, vor dem Kuerzen hier).
 4. Chat-Stopp/Neu-Senden (D18/D19) nur mit Unit-Test und Attrappen-Konten
    geprueft (Attrappe endet sofort mit "Not logged in", kein echter
    laufender Agent zum Stoppen) -- in der App gegenpruefen.
+   Noch ungeprueft aus D25: daemon.ts `.catch(() => db.runBeenden(...))`
+   nach Lauf-Ende -- wirft die DB dort ein zweites Mal, gibt es eine
+   unhandledRejection (sehr selten, Platte voll o. ae.). Discord-Ausgaenge
+   geprueft: Embed-Grenzen werden durch kuerzen() eingehalten.
 5. Prioritaet 2/3 laut Aufgabenstellung: Oberflaeche weiter feinschleifen
    (Konsistenz, Handy, Tastatur, Ladezustaende), mehr End-to-End-Szenarien,
    Daemon-Robustheit bei Last/Fehlern -- bisher nur das oben Gelistete tief
    geprueft, nicht erschoepfend. D24 hat Absturzpfade gesucht (WS, Discord,
-   Anfragekoerper); ungeprueft: unhandledRejection-Pfade in orchestrator.ts/
+   Anfragekoerper), D25 Sprachdienste (Piper/Whisper); ungeprueft: unhandledRejection-Pfade in orchestrator.ts/
    supervisor.ts (keine globale Absicherung per process.on -- bewusst nicht
    eingebaut, weil sie echte Fehler verschleiern kann).
 
@@ -101,58 +71,26 @@ fruehere Fassung dieser Datei (bis Durchgang 12, vor dem Kuerzen hier).
   ihn von Hand neu anstossen. Bewusst nicht automatisiert (Tradeoffs:
   Ressourcenbindung durch wartende Laeufe, Sichtbarkeit "wartet" vs. "tot").
 
-## Erledigt (chronologisch, mit Commit)
+## Erledigt (neueste zuerst, Details im Commit)
 
-- `77bf285` / `af5945a` / `15c19cf` Daemon: AnfrageFehler+koerperAuswerten
-  (`src/httpFehler.ts`), folgenLesen (`src/eingaben.ts`), Discord-catch;
-  Tests in httpFehler/eingaben/discord.test.mjs, Testinstanz per curl/ws
-  gegengeprueft (vorher: Absturz bei WS "null" reproduziert).
-
-- `f82a1e6` Serverlast: `beszelAbbilden()`/`eigenenHostMischen()` in
-  `src/system.ts`, `tests/system.test.mjs`; Testinstanz gegen Beszel-Stub
-  (`/tmp/nachtschicht/beszelstub.mjs`) inkl. Hub-Ausfall; Bilder
-  `nachtschicht-bilder/zweihosts23*.mjs`. Handy-Kopfzeile ist bewusst
-  waagerecht wischbar (Neuer Lauf/Stimmwahl rechts ausserhalb) -- kein Bug.
-
-- `501e649` Live-Strom ungefiltert an alle Klienten (`verteilen()` ohne
-  runId), Lauf-Tab: fremd()/seq-Dedup/Nachzuegler-Puffer, Laufliste frischt
-  sich auf; Zentrale-Agenten Schluessel Lauf+Agent; Rueckstau -> trennen.
-  Testinstanz per WS + Playwright (`nachtschicht-bilder/laufwechsel22.mjs`).
-
-- `c0d49e3` Daemon: cwd/Zahlen bei /api/lauf, /api/orchestrator vorab
-  pruefen (`src/eingaben.ts`, `tests/eingaben.test.mjs`; Testinstanz: 400er
-  fuer fehlendes/Datei-cwd und NaN, gueltiger Lauf wie gehabt 202).
-- `59a3eca` Chats: nach Stopp sofort senden ohne 409 (`src/chatZuege.ts`,
-  `tests/chatZuege.test.mjs`; Testinstanz: 3 parallele POSTs -> 202/409/409).
-- `da2ac07` Chats-Tab: Stopp-Knopf fuer laufenden Zug (Skript
-  `nachtschicht-bilder/chatstopp18.mjs`, 1280/375 per Playwright).
-- `f5407cc` Daemon: URIError -> 400, EISDIR/ENOTDIR -> 404, /api-Fehler als
-  JSON (`src/httpFehler.ts`, `tests/httpFehler.test.mjs`).
-
-- `886ad89` Lauf-Tab: Stopp-Knopf (1280/375 per Playwright geprueft,
-  Skript `nachtschicht-bilder/stopp_ui.mjs`); /api/abbrechen ok+gestoppt
-  auch ohne Orchestrator; Einzellauf endet als 'stopped'.
-- `f3b5f04` Supervisor: 'stopped' haelt gegen spaete Nachrichten, kein
-  Kontowechsel nach Abbruch (`tests/abbruch.test.mjs`).
-- `9e4ae1b` Konten: Fortsetzungsprompt neutral ("Kontowechsel").
-- `7b891d2` Konten: `modus` in /api/konten nur 'manuell', wenn der Vorzug
-  wirken kann (Konto vorhanden + angemeldet); gespeicherter Wert bleibt.
-- `7f5c455` Konten: Anmeldesperre faellt nach erfolgreichem Nutzungs-Poll
-  weg (Sperrgrund limit/anmeldung, DB-Migration v2 am alten Testbestand
-  live geprueft, Karte bei 375/1280px per Playwright geprueft).
-- `2685036` Server-Tab: Regressionstest fuer "keine Messung" vs. "0%" (war
-  inhaltlich schon korrekt seit `98435ae`, jetzt mit Test in
-  `tests/server.test.mjs` -- kontoKarte()/nutzungHerkunft()/pz() dafuer aus
-  `web/tabs/server.js` benannt exportiert).
-- `3cd4a73` Konten: 429-Backoff beim Nutzungspoll (naechsteBackoffMs(),
-  verdoppelt sich je Folge-429, gedeckelt bei 2h), Reset-Zeit aus dem
-  CLI-Fehlertext lesen, wenn Wochenlimit-Format mit Datum+Zeitzone vorliegt
-  (resetzeitAusFehlertext(), ueber Intl, kein Zeitzonen-Tabellen-Paket noetig).
-- `aebf9e8` Konten: Nutzungsstand ueberlebt jetzt einen Daemon-Neustart (neue
-  Tabelle `konten_nutzung`, `nutzungBeimLadenFiltern()` verwirft dabei
-  Fenster mit laengst vergangenem Reset-Zeitpunkt). Live gegen die
-  Testinstanz geprueft: nach Neustart mit vorher persistierter 100%-Messung
-  fuer `haupt` empfiehlt `/api/konten` korrekt `dritt`, nicht mehr `haupt`.
+- `e85ec1a` WyomingLeser prueft Kopf/Laengen/Datenfeld, stimme.ts nutzt ihn
+  (Absturz alt/neu in Testinstanz mit Stub `/tmp/nachtschicht/piperstub.mjs`).
+- `54857ed` /api/hoeren: Abtastrate nur 3-768 kHz (`src/hoeren.ts`).
+- `77bf285` `af5945a` `15c19cf` Daemon: Anfragekoerper 413/400, WS "null",
+  Discord-catch (`src/httpFehler.ts`, `src/eingaben.ts`).
+- `f82a1e6` Beszel-Felder + feldweises Mischen (`src/system.ts`; Stub
+  `/tmp/nachtschicht/beszelstub.mjs`). Handy-Kopfzeile wischbar = Absicht.
+- `501e649` Live-Strom ungefiltert an alle Klienten, Lauf-Tab filtert selbst.
+- `c0d49e3` cwd/Zahlen bei /api/lauf, /api/orchestrator vorab pruefen.
+- `59a3eca` Chats: nach Stopp sofort senden (`src/chatZuege.ts`).
+- `da2ac07` Chats-Tab Stopp-Knopf. `886ad89` Lauf-Tab Stopp-Knopf.
+- `f5407cc` URIError 400, EISDIR/ENOTDIR 404, /api-Fehler als JSON.
+- `f3b5f04` 'stopped' haelt, kein Kontowechsel nach Abbruch.
+- `9e4ae1b` neutraler Fortsetzungsprompt. `7b891d2` modus 'manuell' nur wirksam.
+- `7f5c455` Anmeldesperre faellt nach erfolgreichem Poll (DB v2).
+- `2685036` Test "keine Messung" vs. "0%" (`tests/server.test.mjs`).
+- `3cd4a73` 429-Backoff (max 2h), Reset-Zeit aus CLI-Fehlertext.
+- `aebf9e8` Nutzungsstand persistiert (`konten_nutzung`).
 - `e340d9a` Chats: Nutzungslimit-Meldung nicht mehr als falsche Antwort angezeigt
 - `d56b87c` Tabs: inaktive Flaechen verdecken aktiven Tab nicht mehr
 - `98435ae` Konten-Balancing: Nutzung je Konto messen, niedrigstes Wochenkonto zuerst
