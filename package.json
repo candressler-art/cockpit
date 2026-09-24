@@ -11,7 +11,7 @@
     "build": "tsc",
     "start": "node dist/daemon.js",
     "dev": "tsc --watch --preserveWatchOutput",
-    "test": "node tests/protokoll.test.mjs && node tests/warten.test.mjs && node tests/orchestrator.test.mjs && node tests/konten.test.mjs && node tests/db.test.mjs && node tests/discord.test.mjs && node tests/wav.test.mjs && node tests/wyoming.test.mjs && node tests/audio.test.mjs && node tests/chats.test.mjs"
+    "test": "node tests/protokoll.test.mjs && node tests/warten.test.mjs && node tests/orchestrator.test.mjs && node tests/konten.test.mjs && node tests/db.test.mjs && node tests/discord.test.mjs && node tests/wav.test.mjs && node tests/wyoming.test.mjs && node tests/audio.test.mjs && node tests/chats.test.mjs && node tests/server.test.mjs"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.277",
