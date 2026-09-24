@@ -41,6 +41,11 @@ Nacht 1 (bis "Logbuch nach Durchgang 12") ist live. Seitdem, **bitte pruefen**:
   Konto nur pauschal 5 h gesperrt und lief danach erneut ins Wochenlimit.
   Jetzt naechstes Vorkommen der Uhrzeit/des Wochentags (`8408224`).
   Pruefen: Server-Tab "gesperrt bis" nach einem Limit passt zur CLI-Meldung.
+- **D29:** Nachlieferung im Live-Strom war bei 5000 Ereignissen gedeckelt
+  (grosse Laeufe: Loch im Lauf-Tab) und trennte langsame Klienten (Handy)
+  mitten im Nachtrag -- ganze Oberflaeche "getrennt". Jetzt seitenweise mit
+  Warten auf den Puffer (`9aa5caf`). Pruefen: grossen alten Lauf im
+  Lauf-Tab am Handy oeffnen -> vollstaendig, keine "getrennt"-Pille.
 
 ## Offene Punkte (naechste Durchgaenge, Prioritaet 1 zuerst)
 
@@ -71,8 +76,10 @@ Nacht 1 (bis "Logbuch nach Durchgang 12") ist live. Seitdem, **bitte pruefen**:
    in daemon.ts/supervisor.ts/orchestrator.ts/discord.ts/kontenNutzungPuls
    durchgesehen -- alle haben Faenger, kein weiterer Absturzpfad gefunden.
    D28: feste Schluessel geprueft -- /api/lauf, Konsole, Discord-!lauf
-   nutzen je Aufruf frische Ids, kein weiterer Fall. Kleinigkeit ohne
-   Folgen: /api/lauf/:id?seit=abc liefert still leere Ereignisse (NaN).
+   nutzen je Aufruf frische Ids, kein weiterer Fall. D29: Live-Strom-
+   Nachlieferung (Last) behoben; /api/lauf ?seit=abc -> 400 (`995a94c`).
+   Noch offen: Zentrale holt /api/lauf/<id> nur fuer die Agenten, bekommt
+   aber bis zu 5000 Ereignisse mit (nur Verschwendung, kein Fehler).
 
 ## Entscheidungen fuer Can (noch offen, keine Selbstentscheidung getroffen)
 
@@ -90,6 +97,11 @@ Nacht 1 (bis "Logbuch nach Durchgang 12") ist live. Seitdem, **bitte pruefen**:
   Ressourcenbindung durch wartende Laeufe, Sichtbarkeit "wartet" vs. "tot").
 
 ## Erledigt (neueste zuerst, Details im Commit)
+
+- `9aa5caf` `src/nachlieferung.ts` (Senden + Nachlieferung aus daemon.ts),
+  `tests/nachlieferung.test.mjs`; Repro-Skripte `/tmp/nachtschicht/d29/`
+  (`fuellen.mjs` 12000 Ereignisse, `wstest.mjs <pause-ms>`).
+- `995a94c` /api/lauf/:id?seit= per zahlLesen geprueft.
 
 - `8408224` resetzeitAusFehlertext: Uhrzeit/Wochentag ohne Datum (Formate
   aus echten Sitzungen gezaehlt: `grep -rhoa "You've hit your..."`).
