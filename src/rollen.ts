@@ -14,10 +14,23 @@
 
 import { readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
+import type { AgentDefinition } from '@anthropic-ai/claude-agent-sdk'
+import { mcpAufloesen } from './mcp.js'
 
 export interface Fachrolle {
   id: string
   name: string
+  /** Ein Zeichen fuer die Oberflaeche (Liste, Chat-Karte). */
+  symbol: string
+  /** Farbe fuer Graph, Karten und Chat -- steht bei der Rolle, nicht im Code der Oberflaeche. */
+  farbe: string | null
+  /**
+   * Wann diese Rolle gerufen werden soll -- UND wann ausdruecklich nicht.
+   * Wird zur `description` des Subagenten: danach entscheidet Claude im Chat,
+   * ob es den Spezialisten ueberhaupt braucht.
+   */
+  einsatz: string
+  /** Modell-Alias oder volle ID; 'inherit' heisst: das Modell des Aufrufers. */
   modell: string | null
   /** Leer bedeutet: keine Einschraenkung (SDK-Vorgabe). Nicht: keine Werkzeuge. */
   werkzeuge: string[] | null
@@ -53,9 +66,13 @@ function zerlegen(id: string, roh: string): Fachrolle {
   const mcpRoh = kopf.get('mcp') ?? ''
   const systemPrompt = (m[2] ?? '').trim()
   if (!systemPrompt) throw new Error(`rollen/${id}.md: Prompt ist leer`)
+  const farbe = kopf.get('farbe') ?? ''
   return {
     id,
     name,
+    symbol: kopf.get('symbol') || '•',
+    farbe: /^#[0-9a-fA-F]{3,8}$/.test(farbe) ? farbe : null,
+    einsatz: kopf.get('einsatz') || kopf.get('beschreibung') || '',
     modell: kopf.get('modell') || null,
     werkzeuge: werkzeugeRoh ? werkzeugeRoh.split(',').map((w) => w.trim()).filter(Boolean) : null,
     beschreibung: kopf.get('beschreibung') ?? '',
@@ -113,4 +130,45 @@ export function workerRollen(): Omit<Fachrolle, 'systemPrompt'>[] {
 
 export function istBekannt(id: string): boolean {
   return rollen.has(id)
+}
+
+/**
+ * Werkzeugnamen aus der Rechteliste einer Rolle. Die Liste in rollen/*.md
+ * sind Freigaberegeln ('Bash(git log:*)'), ein Subagent braucht aber
+ * Werkzeugnamen ('Bash'). Die Einschraenkung auf lesende Befehle geht dabei
+ * verloren -- sie haelt dann der Berechtigungsmodus des Chats (Bash fragt
+ * im Modus "Nachfragen" ohnehin) und der Rollenprompt. MCP-Werkzeuge kommen
+ * ueber mcpServers, nicht ueber diese Liste.
+ */
+export function werkzeugNamen(regeln: string[] | null): string[] | undefined {
+  if (!regeln) return undefined
+  const namen = regeln
+    .filter((r) => !r.startsWith('mcp__'))
+    .map((r) => r.replace(/\(.*\)$/, '').trim())
+    .filter(Boolean)
+  return [...new Set(namen)]
+}
+
+/**
+ * Die Fachrollen als Claude-Code-Subagenten fuer einen Chat.
+ *
+ * Das ist der Weg, auf dem Spezialisten "nur genutzt werden, wenn sie
+ * gebraucht werden": Claude sieht im Chat die `description` jeder Rolle (aus
+ * `einsatz`) und delegiert selbst, wenn eine Aufgabe dazu passt -- genau wie
+ * bei den Subagenten der normalen CLI. Der Orchestrator ist keine davon.
+ */
+export function agentDefinitionen(ausgeschaltet: string[] = []): Record<string, AgentDefinition> {
+  const aus: Record<string, AgentDefinition> = {}
+  for (const r of rollen.values()) {
+    if (r.id === 'orchestrator' || ausgeschaltet.includes(r.id)) continue
+    const mcp = mcpAufloesen(r.mcp)
+    aus[r.id] = {
+      description: `${r.name}: ${r.einsatz}`,
+      prompt: r.systemPrompt,
+      ...(r.modell ? { model: r.modell } : {}),
+      ...(werkzeugNamen(r.werkzeuge) ? { tools: werkzeugNamen(r.werkzeuge) } : {}),
+      ...(mcp && Object.keys(mcp).length ? { mcpServers: [mcp as Record<string, never>] } : {}),
+    }
+  }
+  return aus
 }

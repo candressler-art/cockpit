@@ -1,6 +1,9 @@
 ---
 name: Orchestrator
+symbol: ✦
+farbe: #6fe3ff
 modell: opus
+einsatz: Leitet Team-Auftraege. Wird nie als Spezialist gerufen.
 werkzeuge:
 beschreibung: Beauftragt, prueft und entscheidet. Sieht keine Dateien, nur Reports.
 ---

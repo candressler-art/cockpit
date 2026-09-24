@@ -1,0 +1,328 @@
+// Tokenverbrauch je Tag, ueber alle Konten und alle Rechner zusammen -- die
+// Grundlage fuer das Nutzungsraster (Heatmap) in der Oberflaeche.
+//
+// Quelle sind die Sitzungsdateien selbst, nicht die Laufdatenbank: nur sie
+// kennen auch das, was am Desktop in Claude Code lief (per Syncthing
+// gespiegelt), was der Nachtschicht-Loop per `claude -p` verbraucht hat und
+// was Subagenten gekostet haben (die stehen in eigenen Dateien unter
+// <sitzung>/subagents/). Jede Assistant-Antwort traegt ihr `usage`.
+//
+// Zwei Fallen, beide real:
+//  - Eine Antwort mit mehreren Inhaltsbloecken steht als MEHRERE Zeilen in
+//    der Datei, jede mit demselben message.id und demselben usage. Ohne
+//    Entdoppelung zaehlt eine Antwort mit Text + drei Werkzeugaufrufen
+//    vierfach.
+//  - Eine fortgesetzte Sitzung ist eine KOPIE der Spiegeldatei
+//    (chats.ts, fortsetzungVorbereiten) -- ihre alten Antworten stuenden
+//    sonst zweimal in der Statistik.
+// Beides loest derselbe Schluessel: message.id + requestId, INSERT OR IGNORE.
+//
+// Eingelesen wird inkrementell: je Datei steht der Byte-Versatz der letzten
+// vollstaendigen Zeile in nutzung_dateien. Sitzungsdateien wachsen nur am
+// Ende; eine kuerzer gewordene Datei wird von vorn gelesen.
+
+import { DatabaseSync } from 'node:sqlite'
+import { open, readdir, realpath, stat } from 'node:fs/promises'
+import { join } from 'node:path'
+
+const SCHEMA = `
+CREATE TABLE IF NOT EXISTS nutzung_dateien (
+  pfad    TEXT PRIMARY KEY,
+  versatz INTEGER NOT NULL,
+  mtime   INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS nutzung (
+  schluessel      TEXT PRIMARY KEY,
+  tag             TEXT NOT NULL,
+  ts              INTEGER NOT NULL,
+  stunde          INTEGER NOT NULL,
+  modell          TEXT,
+  projekt         TEXT,
+  sitzung         TEXT,
+  ein             INTEGER NOT NULL,
+  aus             INTEGER NOT NULL,
+  cache_schreiben INTEGER NOT NULL,
+  cache_lesen     INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_nutzung_tag ON nutzung (tag);
+`
+
+/** Zeitzone fuer die Tagesgrenze -- Cans Tag endet um Mitternacht in Berlin, nicht in UTC. */
+const ZEITZONE = process.env.COCKPIT_ZEITZONE ?? 'Europe/Berlin'
+
+// sv-SE formatiert als YYYY-MM-DD -- genau der Schluessel, der sich als Text
+// richtig sortiert.
+const TAG_FORMAT = new Intl.DateTimeFormat('sv-SE', {
+  timeZone: ZEITZONE, year: 'numeric', month: '2-digit', day: '2-digit',
+})
+const STUNDE_FORMAT = new Intl.DateTimeFormat('en-GB', {
+  timeZone: ZEITZONE, hour: 'numeric', hourCycle: 'h23',
+})
+
+export function tagVon(ms: number): string {
+  return TAG_FORMAT.format(new Date(ms))
+}
+
+export function stundeVon(ms: number): number {
+  // formatToParts statt format(): je nach Locale haengt sonst ein "Uhr" dran
+  // (de-DE: "14 Uhr"), und Number() wird NaN.
+  const teil = STUNDE_FORMAT.formatToParts(new Date(ms)).find((p) => p.type === 'hour')
+  const h = Number(teil?.value)
+  return Number.isInteger(h) ? h % 24 : 0
+}
+
+export interface NutzungsZeile {
+  schluessel: string
+  tag: string
+  ts: number
+  stunde: number
+  modell: string | null
+  projekt: string | null
+  sitzung: string | null
+  ein: number
+  aus: number
+  cacheSchreiben: number
+  cacheLesen: number
+}
+
+const zahl = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.round(v) : 0)
+
+/**
+ * Eine Dateizeile auswerten. null fuer alles, was keine abgerechnete Antwort
+ * ist (Nutzereingaben, Metazeilen, synthetische Antworten der CLI).
+ */
+export function zeileAuswerten(roh: string): NutzungsZeile | null {
+  // Billige Vorpruefung: die allermeisten Zeilen sind keine Antworten mit
+  // usage, und JSON.parse auf 250 MB kostet sonst unnoetig.
+  if (!roh.includes('"usage"')) return null
+  let d: Record<string, unknown>
+  try {
+    d = JSON.parse(roh) as Record<string, unknown>
+  } catch {
+    return null
+  }
+  if (d.type !== 'assistant') return null
+  const m = d.message as Record<string, unknown> | undefined
+  const u = m?.usage as Record<string, unknown> | undefined
+  if (!m || !u) return null
+  const modell = typeof m.model === 'string' ? m.model : null
+  if (modell === '<synthetic>') return null
+  const ts = typeof d.timestamp === 'string' ? Date.parse(d.timestamp) : NaN
+  if (Number.isNaN(ts)) return null
+  const id = typeof m.id === 'string' ? m.id : typeof d.uuid === 'string' ? d.uuid : null
+  if (!id) return null
+  const cwd = typeof d.cwd === 'string' ? d.cwd : null
+  return {
+    schluessel: `${id}:${typeof d.requestId === 'string' ? d.requestId : ''}`,
+    tag: tagVon(ts),
+    ts,
+    stunde: stundeVon(ts),
+    modell,
+    projekt: cwd ? (cwd.split('/').filter(Boolean).pop() ?? '/') : null,
+    sitzung: typeof d.sessionId === 'string' ? d.sessionId : null,
+    ein: zahl(u.input_tokens),
+    aus: zahl(u.output_tokens),
+    cacheSchreiben: zahl(u.cache_creation_input_tokens),
+    cacheLesen: zahl(u.cache_read_input_tokens),
+  }
+}
+
+let db: DatabaseSync | null = null
+let dbPfadOffen: string | null = null
+
+function handle(pfad: string): DatabaseSync {
+  if (!db || dbPfadOffen !== pfad) {
+    db = new DatabaseSync(pfad)
+    dbPfadOffen = pfad
+    db.exec('PRAGMA journal_mode = WAL')
+    db.exec(SCHEMA)
+  }
+  return db
+}
+
+/** Alle *.jsonl unter einer Wurzel, bis zu `tiefe` Ebenen (Projekt/Sitzung/subagents/datei). */
+async function dateienSammeln(wurzel: string, tiefe = 4): Promise<string[]> {
+  const aus: string[] = []
+  async function gehe(dir: string, rest: number): Promise<void> {
+    let eintraege: import('node:fs').Dirent[]
+    try {
+      eintraege = await readdir(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const e of eintraege) {
+      const voll = join(dir, e.name)
+      if (e.isFile() && e.name.endsWith('.jsonl')) aus.push(voll)
+      else if ((e.isDirectory() || e.isSymbolicLink()) && rest > 0) await gehe(voll, rest - 1)
+    }
+  }
+  await gehe(wurzel, tiefe)
+  return aus
+}
+
+/** Liest ab `versatz` bis zur letzten vollstaendigen Zeile. */
+async function neueZeilenLesen(pfad: string, versatz: number, groesse: number): Promise<{ zeilen: string[]; neuerVersatz: number }> {
+  const fh = await open(pfad, 'r')
+  try {
+    const laenge = groesse - versatz
+    const puffer = Buffer.alloc(laenge)
+    const { bytesRead } = await fh.read(puffer, 0, laenge, versatz)
+    const bis = puffer.lastIndexOf(0x0a, bytesRead - 1)
+    if (bis < 0) return { zeilen: [], neuerVersatz: versatz }
+    const text = puffer.subarray(0, bis).toString('utf-8')
+    return { zeilen: text.split('\n'), neuerVersatz: versatz + bis + 1 }
+  } finally {
+    await fh.close()
+  }
+}
+
+/**
+ * Neue Antworten aus allen Wurzeln einlesen. Mehrere Wurzeln duerfen auf
+ * dieselben Dateien zeigen (das projects/ eines Zusatzkontos ist ein Link auf
+ * das des Hauptkontos) -- entdoppelt wird ueber den echten Pfad.
+ */
+export async function nutzungIndizieren(dbPfad: string, wurzeln: string[]): Promise<{ dateien: number; neu: number }> {
+  const h = handle(dbPfad)
+  const bekannt = new Map<string, { versatz: number; mtime: number }>()
+  for (const r of h.prepare('SELECT pfad, versatz, mtime FROM nutzung_dateien').all() as
+    { pfad: string; versatz: number; mtime: number }[]) {
+    bekannt.set(r.pfad, { versatz: r.versatz, mtime: r.mtime })
+  }
+
+  const gesehen = new Set<string>()
+  for (const w of wurzeln) {
+    for (const f of await dateienSammeln(w)) {
+      try {
+        gesehen.add(await realpath(f))
+      } catch {
+        // Datei zwischen readdir und realpath verschwunden -- naechstes Mal.
+      }
+    }
+  }
+
+  const einfuegen = h.prepare(
+    `INSERT INTO nutzung (schluessel, tag, ts, stunde, modell, projekt, sitzung, ein, aus, cache_schreiben, cache_lesen)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?)
+     ON CONFLICT (schluessel) DO UPDATE SET
+       aus = MAX(aus, excluded.aus), ein = MAX(ein, excluded.ein),
+       cache_schreiben = MAX(cache_schreiben, excluded.cache_schreiben),
+       cache_lesen = MAX(cache_lesen, excluded.cache_lesen)`,
+  )
+  const dateiMerken = h.prepare(
+    `INSERT INTO nutzung_dateien (pfad, versatz, mtime) VALUES (?,?,?)
+     ON CONFLICT (pfad) DO UPDATE SET versatz = excluded.versatz, mtime = excluded.mtime`,
+  )
+
+  let neu = 0
+  for (const pfad of gesehen) {
+    let s
+    try {
+      s = await stat(pfad)
+    } catch {
+      continue
+    }
+    const alt = bekannt.get(pfad)
+    let versatz = alt?.versatz ?? 0
+    if (versatz > s.size) versatz = 0 // Datei neu geschrieben
+    if (versatz === s.size) continue
+    let ergebnis
+    try {
+      ergebnis = await neueZeilenLesen(pfad, versatz, s.size)
+    } catch {
+      continue
+    }
+    h.exec('BEGIN')
+    try {
+      for (const z of ergebnis.zeilen) {
+        const n = zeileAuswerten(z)
+        if (!n) continue
+        const r = einfuegen.run(
+          n.schluessel, n.tag, n.ts, n.stunde, n.modell, n.projekt, n.sitzung,
+          n.ein, n.aus, n.cacheSchreiben, n.cacheLesen,
+        )
+        if (Number(r.changes) > 0) neu++
+      }
+      dateiMerken.run(pfad, ergebnis.neuerVersatz, Math.round(s.mtimeMs))
+      h.exec('COMMIT')
+    } catch (e) {
+      h.exec('ROLLBACK')
+      throw e
+    }
+  }
+  return { dateien: gesehen.size, neu }
+}
+
+export interface TagesNutzung {
+  tag: string
+  /** Verarbeitete Tokens ohne Cache-Lesen: Eingabe + Ausgabe + Cache-Schreiben. */
+  tokens: number
+  ein: number
+  aus: number
+  cacheSchreiben: number
+  cacheLesen: number
+  antworten: number
+  sitzungen: number
+}
+
+export interface NutzungsBericht {
+  zeitzone: string
+  heute: string
+  tage: TagesNutzung[]
+  modelle: { modell: string; tokens: number; antworten: number }[]
+  projekte: { projekt: string; tokens: number; antworten: number }[]
+  stunden: number[]
+}
+
+/**
+ * Was als "Tokens" zaehlt: alles, was das Modell tatsaechlich verarbeitet hat,
+ * OHNE Cache-Lesen. Das waere sonst ueber 90 % der Summe und fast kostenlos --
+ * ein Tag mit einer langen, aber ruhigen Sitzung saehe dann aus wie ein Tag
+ * voller Arbeit.
+ */
+const TOKENS_SQL = 'SUM(ein + aus + cache_schreiben)'
+
+/**
+ * Auswertung fuer die Oberflaeche. `tage` ist dicht NICHT aufgefuellt --
+ * fehlende Tage sind Tage ohne Nutzung, das Raster fuellt sie selbst.
+ */
+export function nutzungLesen(dbPfad: string, abTag: string, jetzt = Date.now()): NutzungsBericht {
+  const h = handle(dbPfad)
+  const tage = (h.prepare(
+    `SELECT tag, ${TOKENS_SQL} AS tokens, SUM(ein) AS ein, SUM(aus) AS aus,
+            SUM(cache_schreiben) AS cs, SUM(cache_lesen) AS cl,
+            COUNT(*) AS antworten, COUNT(DISTINCT sitzung) AS sitzungen
+     FROM nutzung WHERE tag >= ? GROUP BY tag ORDER BY tag`,
+  ).all(abTag) as Record<string, number | string>[]).map((r) => ({
+    tag: String(r.tag),
+    tokens: Number(r.tokens ?? 0),
+    ein: Number(r.ein ?? 0),
+    aus: Number(r.aus ?? 0),
+    cacheSchreiben: Number(r.cs ?? 0),
+    cacheLesen: Number(r.cl ?? 0),
+    antworten: Number(r.antworten ?? 0),
+    sitzungen: Number(r.sitzungen ?? 0),
+  }))
+
+  const modelle = (h.prepare(
+    `SELECT COALESCE(modell, '?') AS modell, ${TOKENS_SQL} AS tokens, COUNT(*) AS antworten
+     FROM nutzung WHERE tag >= ? GROUP BY modell ORDER BY tokens DESC LIMIT 8`,
+  ).all(abTag) as Record<string, number | string>[]).map((r) => ({
+    modell: String(r.modell), tokens: Number(r.tokens ?? 0), antworten: Number(r.antworten ?? 0),
+  }))
+
+  const projekte = (h.prepare(
+    `SELECT COALESCE(projekt, '?') AS projekt, ${TOKENS_SQL} AS tokens, COUNT(*) AS antworten
+     FROM nutzung WHERE tag >= ? GROUP BY projekt ORDER BY tokens DESC LIMIT 10`,
+  ).all(abTag) as Record<string, number | string>[]).map((r) => ({
+    projekt: String(r.projekt), tokens: Number(r.tokens ?? 0), antworten: Number(r.antworten ?? 0),
+  }))
+
+  const stunden = new Array<number>(24).fill(0)
+  for (const r of h.prepare(
+    `SELECT stunde, ${TOKENS_SQL} AS tokens FROM nutzung WHERE tag >= ? GROUP BY stunde`,
+  ).all(abTag) as { stunde: number; tokens: number }[]) {
+    if (r.stunde >= 0 && r.stunde < 24) stunden[r.stunde] = Number(r.tokens ?? 0)
+  }
+
+  return { zeitzone: ZEITZONE, heute: tagVon(jetzt), tage, modelle, projekte, stunden }
+}
