@@ -35,6 +35,13 @@ fruehere Fassung dieser Datei (bis Durchgang 12, vor dem Kuerzen hier).
   scheiterte. Jetzt sofort "Start abgelehnt: /x gibt es auf diesem Host
   nicht"; unsinnige Zahlen (Runden "abc" -> Lauf endete sofort ohne Arbeit)
   ebenfalls 400 (`c0d49e3`).
+- **Durchgang 21/22:** Wer im Lauf-Tab einen alten Lauf ansah, dessen
+  ganze Oberflaeche (Zentrale, Vault, Sprachhinweise) bekam nur noch
+  Ereignisse DIESES Laufs -- Freigaben/Lauf-Ende eines neuen Laufs kamen
+  nicht an. Jetzt bekommt jeder Tab alles, der Lauf-Tab filtert selbst;
+  Laufauswahl zeigt anderswo gestartete Laeufe ohne Neuladen (`501e649`).
+  **Bitte pruefen:** Lauf-Tab auf altem Lauf, per Discord/Zentrale neuen
+  starten -> Freigabe wird angesagt, Lauf erscheint in der Auswahl.
 
 ## Offene Punkte (naechste Durchgaenge, Prioritaet 1 zuerst)
 
@@ -73,6 +80,11 @@ fruehere Fassung dieser Datei (bis Durchgang 12, vor dem Kuerzen hier).
   Ressourcenbindung durch wartende Laeufe, Sichtbarkeit "wartet" vs. "tot").
 
 ## Erledigt (chronologisch, mit Commit)
+
+- `501e649` Live-Strom ungefiltert an alle Klienten (`verteilen()` ohne
+  runId), Lauf-Tab: fremd()/seq-Dedup/Nachzuegler-Puffer, Laufliste frischt
+  sich auf; Zentrale-Agenten Schluessel Lauf+Agent; Rueckstau -> trennen.
+  Testinstanz per WS + Playwright (`nachtschicht-bilder/laufwechsel22.mjs`).
 
 - `c0d49e3` Daemon: cwd/Zahlen bei /api/lauf, /api/orchestrator vorab
   pruefen (`src/eingaben.ts`, `tests/eingaben.test.mjs`; Testinstanz: 400er
@@ -154,6 +166,8 @@ COCKPIT_DISCORD_TOKEN= BESZEL_URL= node dist/daemon.js
   zweit-test}`, alle mit `projects/`-Symlink auf
   `/tmp/nachtschicht/claude/projects` -- Sessions teilen sich mit `haupt`,
   `resume` nach Kontowechsel funktioniert.
+- **Vor dem Start pruefen, ob 8798 frei ist** -- D21 hatte seine Instanz
+  nicht beendet (D22 fand sie noch laufen).
 - **PID-Check vor `kill` immer** mit `ps -p <pid> -o cmd --no-headers`
   gegenpruefen -- `pgrep -af 'dist/daemon.js'` matcht auch den eigenen
   Claude-Prompt/Bash-Wrapper, nicht nur den echten Node-Prozess.
