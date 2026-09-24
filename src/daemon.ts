@@ -576,11 +576,14 @@ const server = createServer(async (req, res) => {
     if (pfad.startsWith('/api/lauf/') && req.method === 'GET') {
       const teile = pfad.split('/').filter(Boolean)
       const runId = teile[2] ?? ''
-      const seit = Number(url.searchParams.get('seit') ?? 0)
+      // Frueher Number(...) ohne Pruefung: ?seit=abc wurde NaN, und die
+      // Abfrage (seq > NaN) lieferte still gar nichts statt eines Fehlers.
+      const seit = zahlLesen(url.searchParams.get('seit'), 'seit', { min: 0, ganzzahlig: true })
+      if (seit.fehler) return json(400, { fehler: seit.fehler })
       return json(200, {
         runId,
         agenten: db.agentenLesen(runId),
-        ereignisse: db.ereignisseSeit(runId, seit),
+        ereignisse: db.ereignisseSeit(runId, seit.zahl ?? 0),
         freigaben: db.offeneFreigaben(runId),
       })
     }
