@@ -61,6 +61,9 @@ fruehere Fassung dieser Datei (bis Durchgang 12, vor dem Kuerzen hier).
 
 ## Offene Punkte (naechste Durchgaenge, Prioritaet 1 zuerst)
 
+0. **Diese Datei ist auf ~225 Zeilen gewachsen** (Ziel ~150): naechster
+   Durchgang zuerst "Fuer Can" D13-D23 zu je 1-2 Zeilen zusammenfassen.
+
 1. **Weitere Multi-Konto-Luecken** selbst suchen. Erledigt: Abmeldung
    mitten im Lauf (D15), Vorzug auf geloeschtes Konto und Wortlaut des
    Fortsetzungsprompts (D16). Keine konkrete Idee mehr offen -- naechster
