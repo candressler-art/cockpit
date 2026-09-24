@@ -36,6 +36,11 @@ Nacht 1 (bis "Logbuch nach Durchgang 12") ist live. Seitdem, **bitte pruefen**:
   -- erste nicht mehr stoppbar, sessionId evtl. vertauscht. Jetzt 409
   (`17c97e5`). Pruefen: in der Zentrale erscheint dann "Antwort nicht
   bekommen: Das Gespräch antwortet gerade noch ...".
+- **D28:** die CLI schreibt Reset-Zeiten meist ohne Datum ("resets 4am
+  (Europe/Berlin)", auch beim Wochenlimit) -- das wurde nicht erkannt, das
+  Konto nur pauschal 5 h gesperrt und lief danach erneut ins Wochenlimit.
+  Jetzt naechstes Vorkommen der Uhrzeit/des Wochentags (`8408224`).
+  Pruefen: Server-Tab "gesperrt bis" nach einem Limit passt zur CLI-Meldung.
 
 ## Offene Punkte (naechste Durchgaenge, Prioritaet 1 zuerst)
 
@@ -65,8 +70,9 @@ Nacht 1 (bis "Logbuch nach Durchgang 12") ist live. Seitdem, **bitte pruefen**:
    Anfragekoerper), D25 Sprachdienste (Piper/Whisper). D27: Promise-Ketten
    in daemon.ts/supervisor.ts/orchestrator.ts/discord.ts/kontenNutzungPuls
    durchgesehen -- alle haben Faenger, kein weiterer Absturzpfad gefunden.
-   Naechste Idee: gleichzeitige Anfragen auf anderen festen Schluesseln
-   (Konsole nutzt eigene Ids je Befehl -- vermutlich ok, nicht geprueft).
+   D28: feste Schluessel geprueft -- /api/lauf, Konsole, Discord-!lauf
+   nutzen je Aufruf frische Ids, kein weiterer Fall. Kleinigkeit ohne
+   Folgen: /api/lauf/:id?seit=abc liefert still leere Ereignisse (NaN).
 
 ## Entscheidungen fuer Can (noch offen, keine Selbstentscheidung getroffen)
 
@@ -85,6 +91,8 @@ Nacht 1 (bis "Logbuch nach Durchgang 12") ist live. Seitdem, **bitte pruefen**:
 
 ## Erledigt (neueste zuerst, Details im Commit)
 
+- `8408224` resetzeitAusFehlertext: Uhrzeit/Wochentag ohne Datum (Formate
+  aus echten Sitzungen gezaehlt: `grep -rhoa "You've hit your..."`).
 - `17c97e5` /api/gespraech: zweite Runde waehrend der ersten -> 409
   (`src/gespraech.ts`, `tests/gespraech.test.mjs`).
 - `c537153` DB busy_timeout 5 s (db.ts, chats.ts), laufAbschliessen() in
