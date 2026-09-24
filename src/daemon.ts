@@ -25,6 +25,7 @@ import { vaultIndizieren, vaultGraphLesen, vaultBeobachten, vaultDa, VAULT } fro
 import { vaultZugriffErlaubt } from './vaultZugriff.js'
 import { konsoleBefehl, cwdPruefen } from './konsole.js'
 import { nutzungAbfragen } from './kontenNutzung.js'
+import { fehlerStatus } from './httpFehler.js'
 import { existsSync } from 'node:fs'
 
 const PORT = Number(process.env.COCKPIT_PORT ?? 8765)
@@ -857,9 +858,16 @@ const server = createServer(async (req, res) => {
     })
     return res.end(inhalt)
   } catch (e) {
-    const code = (e as { code?: string }).code === 'ENOENT' ? 404 : 500
+    const code = fehlerStatus(e)
+    // Schon angefangene Antwort nicht ein zweites Mal beginnen -- writeHead
+    // wuerde selbst werfen, und das hier ist der letzte Fanghaken.
+    if (res.headersSent) return res.end()
+    const text = code === 404 ? 'nicht gefunden' : code === 400 ? 'ungueltige Anfrage' : `Fehler: ${String(e)}`
+    // Die Tabs rufen bei /api/ immer .json() auf -- Klartext kaeme dort als
+    // Parse-Fehler an statt als lesbare Meldung.
+    if (pfad.startsWith('/api/')) return json(code, { fehler: text })
     res.writeHead(code, { 'content-type': 'text/plain; charset=utf-8' })
-    res.end(code === 404 ? 'nicht gefunden' : `Fehler: ${String(e)}`)
+    res.end(text)
   }
 })
 
