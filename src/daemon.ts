@@ -28,6 +28,7 @@ import { cwdPruefen, folgenLesen, zahlLesen } from './eingaben.js'
 import { nutzungAbfragen } from './kontenNutzung.js'
 import { AnfrageFehler, fehlerStatus, koerperAuswerten } from './httpFehler.js'
 import { ChatZuege } from './chatZuege.js'
+import { nachliefern, senden as klientSenden, type Klient } from './nachlieferung.js'
 import { existsSync } from 'node:fs'
 
 const PORT = Number(process.env.COCKPIT_PORT ?? 8765)
@@ -238,36 +239,12 @@ interface PermissionRequestLike { runId: string }
 
 // --- WebSocket-Verteilung ----------------------------------------------------
 
-interface Klient {
-  sock: WebSocket
-  runId: string | null
-}
 const klienten = new Set<Klient>()
+const klientEntfernen = (k: Klient) => { klienten.delete(k) }
 
-/**
- * Ab hier gilt ein Klient als ueberfahren.
- *
- * Ein Handy im schlechten Netz nimmt die Ereignisse eines schnellen Laufs
- * nicht schnell genug ab; der Puffer im Prozess waechst dann unbegrenzt.
- * Zwei Megabyte sind rund ein Tausendfaches einer normalen Nachricht --
- * wer so weit hinterherhaengt, hat den Anschluss ohnehin verloren und holt
- * ihn beim Wiederverbinden per Backfill nach.
- */
-const MAX_RUECKSTAU = 2 * 1024 * 1024
-
+// Rueckstau-Grenze und Nachlieferung stehen in nachlieferung.ts.
 function senden(k: Klient, typ: string, daten: unknown): void {
-  if (k.sock.readyState !== 1) return
-  if (k.sock.bufferedAmount > MAX_RUECKSTAU) {
-    // Trennen statt nur diese Nachricht verwerfen: sonst kaemen die
-    // spaeteren an, der Klient zoege seine letzte seq darueber hinaus, und
-    // das Loch bliebe auch nach dem Wiederverbinden (Nachlieferung ab seq).
-    // So verbindet er neu und holt alles nach, was ihm fehlt.
-    console.warn('[cockpit] Klient haengt zurueck, Verbindung getrennt bei:', typ)
-    k.sock.terminate()
-    klienten.delete(k)
-    return
-  }
-  k.sock.send(JSON.stringify({ typ, daten }))
+  klientSenden(k, typ, daten, klientEntfernen)
 }
 
 /**
@@ -953,22 +930,21 @@ wss.on('connection', (sock) => {
     if (!f) return
     // Der Klient sagt, welchem Lauf er folgt und was er schon hat -- daraufhin
     // bekommt er den Rueckstand nachgeliefert. Ohne diesen Backfill fehlt nach
-    // jedem Verbindungsabbruch ein Stueck Verlauf.
-    try {
-      klient.runId = f.runId
-      if (klient.runId) {
-        for (const e of db.ereignisseSeit(klient.runId, f.seit)) senden(klient, 'ereignis', e)
-        senden(klient, 'agenten', db.agentenLesen(klient.runId))
-        senden(klient, 'freigaben', db.offeneFreigaben(klient.runId))
-      }
-      const stand = supervisor.limitStandLesen()
-      if (stand) senden(klient, 'limit', stand)
-      senden(klient, 'bereit', { runId: klient.runId })
-    } catch (e) {
-      // Wie im HTTP-Handler: ein Fehler beim Beantworten trifft diesen
-      // Klienten, nicht den Daemon (eine Ausnahme hier waere unbehandelt).
-      console.error('[cockpit] WebSocket-Nachricht nicht verarbeitet:', e)
-    }
+    // jedem Verbindungsabbruch ein Stueck Verlauf. Seitenweise und mit
+    // Ruecksicht auf den Puffer, siehe nachlieferung.ts.
+    void nachliefern(klient, f.runId, f.seit, {
+      seite: (runId, ab, anzahl) => db.ereignisseSeit(runId, ab, anzahl),
+      abschluss: (runId) => {
+        const teile: Array<[string, unknown]> = []
+        if (runId) {
+          teile.push(['agenten', db.agentenLesen(runId)], ['freigaben', db.offeneFreigaben(runId)])
+        }
+        const stand = supervisor.limitStandLesen()
+        if (stand) teile.push(['limit', stand])
+        teile.push(['bereit', { runId }])
+        return teile
+      },
+    }, klientEntfernen).catch((e) => console.error('[cockpit] WebSocket-Nachricht nicht verarbeitet:', e))
   })
 
   sock.on('close', () => klienten.delete(klient))
