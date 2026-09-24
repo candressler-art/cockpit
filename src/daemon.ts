@@ -89,7 +89,7 @@ function orchestratorLaufStarten(o: {
   orchestratoren.set(runId, orch)
   letzterLauf = { runId, cwd: o.cwd }
   orch.on('orchestrator', (e: { runId: string; art?: string; daten?: Record<string, unknown> }) => {
-    verteilen('orchestrator', e, e.runId)
+    verteilen('orchestrator', e)
     if (e.art === 'frage' && e.daten?.frage) {
       void discord?.frageStellen(runId, String(e.daten.frage))
     }
@@ -103,7 +103,7 @@ function orchestratorLaufStarten(o: {
       const status =
         ende.grund === 'fertig' ? 'done' : ende.grund === 'abgebrochen' ? 'stopped' : 'failed'
       db.runBeenden(runId, status, JSON.stringify(ende))
-      verteilen('lauf_ende', { runId, ende }, runId)
+      verteilen('lauf_ende', { runId, ende })
       const gew = supervisor.agentenListe(runId).reduce((x, a) => x + a.weightedTokens, 0)
       const text = 'text' in ende ? ende.text : 'frage' in ende ? ende.frage : ''
       void discord?.laufBeendet(runId, ende.grund, String(text ?? ''), gew)
@@ -258,24 +258,38 @@ const MAX_RUECKSTAU = 2 * 1024 * 1024
 function senden(k: Klient, typ: string, daten: unknown): void {
   if (k.sock.readyState !== 1) return
   if (k.sock.bufferedAmount > MAX_RUECKSTAU) {
-    console.warn('[cockpit] Klient haengt zurueck, Nachricht verworfen:', typ)
+    // Trennen statt nur diese Nachricht verwerfen: sonst kaemen die
+    // spaeteren an, der Klient zoege seine letzte seq darueber hinaus, und
+    // das Loch bliebe auch nach dem Wiederverbinden (Nachlieferung ab seq).
+    // So verbindet er neu und holt alles nach, was ihm fehlt.
+    console.warn('[cockpit] Klient haengt zurueck, Verbindung getrennt bei:', typ)
+    k.sock.terminate()
+    klienten.delete(k)
     return
   }
   k.sock.send(JSON.stringify({ typ, daten }))
 }
 
-function verteilen(typ: string, daten: unknown, runId: string | null): void {
-  for (const k of klienten) {
-    if (runId && k.runId && k.runId !== runId) continue
-    senden(k, typ, daten)
-  }
+/**
+ * An alle Klienten, ungefiltert.
+ *
+ * Frueher bekam ein Klient, der einem Lauf folgte, nur noch dessen
+ * Ereignisse -- aus der Zeit, als der Lauf-Tab die einzige Ansicht war.
+ * Heute teilen sich alle Tabs eine Verbindung, und Zentrale, Vault und die
+ * Sprachhinweise (Freigabe, Lauf-Ende) brauchen ALLE Laeufe: wer im Lauf-Tab
+ * einen alten Lauf ansah, verpasste sonst die Freigabe des neuen. Das
+ * `folgen` steuert deshalb nur noch die Nachlieferung; der Lauf-Tab filtert
+ * selbst, was zu ihm gehoert.
+ */
+function verteilen(typ: string, daten: unknown): void {
+  for (const k of [...klienten]) senden(k, typ, daten)
 }
 
-supervisor.on('ereignis', (e: CockpitEvent) => verteilen('ereignis', e, e.runId))
-supervisor.on('agent', (a: { runId: string }) => verteilen('agent', a, a.runId))
-supervisor.on('freigabe', (f: { runId: string }) => verteilen('freigabe', f, f.runId))
+supervisor.on('ereignis', (e: CockpitEvent) => verteilen('ereignis', e))
+supervisor.on('agent', (a: { runId: string }) => verteilen('agent', a))
+supervisor.on('freigabe', (f: { runId: string }) => verteilen('freigabe', f))
 // Der Limitstand gilt kontoweit, nicht je Lauf -- also an alle Klienten.
-supervisor.on('limit', (l: unknown) => verteilen('limit', l, null))
+supervisor.on('limit', (l: unknown) => verteilen('limit', l))
 
 // --- Auslastung der Server ---------------------------------------------------
 //
@@ -287,7 +301,7 @@ let letzterSystemStand: SystemStand | null = null
 async function systemPuls(): Promise<void> {
   try {
     letzterSystemStand = await standLesen()
-    verteilen('system', letzterSystemStand, null)
+    verteilen('system', letzterSystemStand)
   } catch (e) {
     console.warn('[cockpit] Systemstand nicht ermittelbar:', String(e))
   }
@@ -655,8 +669,8 @@ const server = createServer(async (req, res) => {
       // Antwortet sofort mit der Freigabe-Id. Das Ergebnis kommt ueber den
       // Live-Strom nach -- ein Befehl kann zwei Minuten laufen, und so lange
       // eine HTTP-Verbindung offenzuhalten waere die schlechtere Wahl.
-      const { id } = konsoleBefehl(supervisor, befehl, cwd, (e) => verteilen('konsole', e, null))
-      verteilen('konsole', { id, phase: 'freigabe', befehl, cwd }, null)
+      const { id } = konsoleBefehl(supervisor, befehl, cwd, (e) => verteilen('konsole', e))
+      verteilen('konsole', { id, phase: 'freigabe', befehl, cwd })
       return json(202, { id })
     }
 

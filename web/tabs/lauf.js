@@ -10,6 +10,10 @@ const limitEl = $('#limit')
 
 let runId = new URLSearchParams(location.search).get('run') || null
 let letzteSeq = 0
+// Solange logNeuLaden() den Verlauf holt: live Angekommenes hier parken und
+// danach anhaengen (doppelte fallen ueber seq heraus). Sofort anhaengen
+// hiesse, es mit dem Leeren des Logs gleich wieder zu verlieren.
+let nachzuegler = null
 let agenten = new Map()
 let freigaben = new Map()
 let gewaehlterAgent = null
@@ -54,17 +58,34 @@ function horchenAnmelden() {
     }
   })
 
-  abonnieren('ereignis', (d) => ereignisAnhaengen(d))
-  abonnieren('agent', (d) => agentSetzen(d))
-  abonnieren('agenten', (d) => d.forEach((a) => agentSetzen(umbenennen(a))))
-  abonnieren('freigabe', (d) => freigabeSetzen(d))
-  abonnieren('freigaben', (d) => d.forEach((f) => freigabeSetzen(umbenennen(f))))
+  // Alles, was nicht zum angezeigten Lauf gehoert, faellt hier heraus: der
+  // Daemon schickt einem Klienten, der (noch) keinem Lauf folgt, die
+  // Ereignisse ALLER Laeufe, und beim Laufwechsel kommen bis zum neuen
+  // `folgen` noch Nachzuegler des alten.
+  abonnieren('ereignis', (d) => {
+    if (fremd(d)) return
+    if (nachzuegler) nachzuegler.push(d)
+    else ereignisAnhaengen(d)
+  })
+  abonnieren('agent', (d) => {
+    if (!fremd(d)) agentSetzen(d)
+    else if (!gesehen.has(d.runId)) { gesehen.add(d.runId); listeAuffrischen() }
+  })
+  abonnieren('agenten', (d) => d.map(umbenennen).filter((a) => !fremd(a)).forEach(agentSetzen))
+  abonnieren('freigabe', (d) => { if (!fremd(d)) freigabeSetzen(d) })
+  abonnieren('freigaben', (d) => d.map(umbenennen).filter((f) => !fremd(f)).forEach(freigabeSetzen))
   abonnieren('limit', (d) => limitZeichnen(d))
   // 'orchestrator' wird bewusst ignoriert: dieselben Schritte kommen als
   // persistiertes 'protocol'-Ereignis durch, und die ueberleben einen
   // Neustart. Zwei Quellen fuer dieselbe Zeile hiesse sie doppelt zu zeigen.
-  abonnieren('lauf_ende', (d) => endeAnhaengen(d.ende))
+  abonnieren('lauf_ende', (d) => {
+    if (!fremd(d)) endeAnhaengen(d.ende)
+    listeAuffrischen()
+  })
 }
+
+/** Gehoert die Nachricht zu einem anderen als dem angezeigten Lauf? */
+const fremd = (o) => o?.runId != null && o.runId !== runId
 
 // Die REST-Antworten kommen in SQL-Schreibweise (snake_case), der Live-Strom in
 // camelCase. Hier auf eine Form bringen, damit die Anzeige nur eine kennt.
@@ -82,7 +103,10 @@ function umbenennen(o) {
 }
 
 function ereignisAnhaengen(e, lebend = true) {
-  if (e.seq > letzteSeq) letzteSeq = e.seq
+  // Schon gezeigt: Nachlieferung nach (Wieder-)Verbinden oder Laufwechsel
+  // ueberlappt mit dem, was per REST schon da ist. seq zaehlt je Lauf.
+  if (e.seq <= letzteSeq) return
+  letzteSeq = e.seq
   // Nur bei laufenden Ereignissen aufleuchten lassen; beim Nachladen eines
   // alten Laufs waere ein Gewitter aus Animationen nur Unruhe.
   if (lebend && e.kind !== 'protocol') graph?.puls(e.agentId)
@@ -302,23 +326,50 @@ async function entscheiden(id, erlaubt) {
 
 async function logNeuLaden() {
   if (!runId) return
+  nachzuegler = []
+  let r
+  try {
+    r = await fetch(api(`/api/lauf/${runId}?seit=0`)).then((x) => x.json())
+  } catch (e) {
+    nachzuegler = null
+    throw e
+  }
   logEl.innerHTML = ''
-  const r = await fetch(api(`/api/lauf/${runId}?seit=0`)).then((x) => x.json())
   agenten = new Map(r.agenten.map((a) => { const b = umbenennen(a); return [b.agentId, b] }))
   freigaben = new Map(r.freigaben.map((f) => { const b = umbenennen(f); return [b.id, b] }))
   letzteSeq = 0
   for (const e of r.ereignisse) ereignisAnhaengen(e, false)
+  for (const e of nachzuegler) if (!fremd(e)) ereignisAnhaengen(e)
+  nachzuegler = null
   agentenZeichnen(); freigabenZeichnen(); budgetZeichnen()
   graph?.setzen([...agenten.values()])
   zeitachse?.setzen([...agenten.values()])
   zeitachse?.setzen([...agenten.values()])
 }
 
-async function laeufeLaden() {
+// Laeufe, deren Agent-Meldungen schon einmal eine Auffrischung ausgeloest
+// haben. Chats haben keinen Eintrag in der Laufliste -- ohne dieses Gedaechtnis
+// fragte jede ihrer Statusmeldungen die Liste erneut ab.
+const gesehen = new Set()
+let auffrischen = null
+
+/**
+ * Die Laufauswahl nachziehen, wenn anderswo (Zentrale, Discord, API) ein Lauf
+ * gestartet wurde oder einer endete -- sonst fehlt er bis zum Neuladen, und
+ * der Status in der Liste bleibt auf "running" stehen.
+ */
+function listeAuffrischen() {
+  clearTimeout(auffrischen)
+  auffrischen = setTimeout(() => void laeufeLaden({ still: true }), 400)
+}
+
+/** `still`: Auffrischen im Hintergrund -- bei Fehler das Log nicht ueberschreiben. */
+async function laeufeLaden({ still = false } = {}) {
   let r
   try {
     r = await fetch(api('/api/laeufe')).then((x) => x.json())
   } catch (e) {
+    if (still) return
     // Haeufigster Fall in der App: der Daemon laeuft nicht. Das gehoert
     // gesagt, nicht als leeres Fenster praesentiert.
     verbindungEl.textContent = `kein Daemon auf ${basis()}`
@@ -332,20 +383,25 @@ async function laeufeLaden() {
   }
   laufwahlEl.innerHTML = ''
   for (const l of r.laeufe) {
+    gesehen.add(l.run_id)
     const o = document.createElement('option')
     o.value = l.run_id
     o.textContent = `${l.label} · ${zeit(l.started_at)} · ${l.status}`
     laufwahlEl.appendChild(o)
   }
-  if (!runId && r.laeufe.length > 0) runId = r.laeufe[0].run_id
-  if (runId) laufwahlEl.value = runId
+  // Im Hintergrund nie selbst einen Lauf waehlen: nach "Neu" soll die
+  // Ansicht leer bleiben, bis man startet oder waehlt.
+  if (!still && !runId && r.laeufe.length > 0) runId = r.laeufe[0].run_id
+  // Nach "Neu" (runId null) keine Option vorwaehlen -- sonst stuende der
+  // juengste Lauf scheinbar gewaehlt da und liesse sich nicht anwaehlen.
+  laufwahlEl.value = runId ?? ''
 }
 
 laufwahlEl.onchange = async () => {
   runId = laufwahlEl.value
   history.replaceState(null, '', `?run=${runId}`)
   await logNeuLaden()
-  senden({ typ: 'folgen', runId, seit: 0 })
+  senden({ typ: 'folgen', runId, seit: letzteSeq })
 }
 
 $('#neu').onclick = () => { runId = null; agenten.clear(); freigaben.clear(); logEl.innerHTML = ''
@@ -444,6 +500,9 @@ export default {
     horchenAnmelden()
     await laeufeLaden()
     if (runId) await logNeuLaden()
+    // Ist die Verbindung schon vor laeufeLaden() aufgegangen, folgt der
+    // Klient noch "keinem Lauf" (= allen) -- jetzt den gewaehlten nennen.
+    if (runId) senden({ typ: 'folgen', runId, seit: letzteSeq })
     try { limitZeichnen((await fetch(api('/api/gesundheit')).then((r) => r.json())).limit) } catch {}
   },
 
