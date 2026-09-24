@@ -136,8 +136,12 @@ export class DiscordAdapter extends EventEmitter {
       }
     })
 
-    this.client.on(Events.InteractionCreate, (i) => void this.interaktion(i))
-    this.client.on(Events.MessageCreate, (m) => void this.nachricht(m))
+    // Mit catch: wirft ein Listener im Daemon (etwa die DB bei !status),
+    // waere das sonst eine unbehandelte Ablehnung -- und die beendet Node
+    // samt Daemon. Ein Discord-Befehl darf die Zentrale nicht umbringen.
+    const melden = (e: unknown) => console.error('[discord] Verarbeitung fehlgeschlagen:', e)
+    this.client.on(Events.InteractionCreate, (i) => void this.interaktion(i).catch(melden))
+    this.client.on(Events.MessageCreate, (m) => void this.nachricht(m).catch(melden))
     this.client.on(Events.Error, (e) => console.error('[discord] Fehler:', e.message))
 
     await this.client.login(this.konfig.token)
