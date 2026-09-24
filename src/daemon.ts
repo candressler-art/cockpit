@@ -26,6 +26,7 @@ import { vaultZugriffErlaubt } from './vaultZugriff.js'
 import { konsoleBefehl, cwdPruefen } from './konsole.js'
 import { nutzungAbfragen } from './kontenNutzung.js'
 import { fehlerStatus } from './httpFehler.js'
+import { ChatZuege } from './chatZuege.js'
 import { existsSync } from 'node:fs'
 
 const PORT = Number(process.env.COCKPIT_PORT ?? 8765)
@@ -41,12 +42,14 @@ const supervisor = new Supervisor(db)
 const orchestratoren = new Map<string, Orchestrator>()
 
 /**
- * Welche Chat-Sitzung gerade weiterschreibt -- sessionId -> startSeq (die
- * hoechste seq VOR diesem Zug, ab der die Oberflaeche pollt). Verhindert
- * einen zweiten gleichzeitigen Zug auf dieselbe Sitzung (409) und sagt der
- * Oberflaeche beim Neuladen, ob sie sofort mitpollen soll.
+ * Welche Chat-Sitzung gerade weiterschreibt -- samt startSeq (die hoechste
+ * seq VOR diesem Zug, ab der die Oberflaeche pollt). Verhindert einen zweiten
+ * gleichzeitigen Zug auf dieselbe Sitzung (409) und sagt der Oberflaeche beim
+ * Neuladen, ob sie sofort mitpollen soll.
  */
-const chatLaeuft = new Map<string, number>()
+const chatZuege = new ChatZuege()
+/** So lange darf ein schon gestoppter Chat-Zug auslaufen, bevor 409 kommt. */
+const CHAT_AUSLAUF_WARTEN_MS = 10_000
 
 /**
  * Startet einen Orchestrator-Lauf. Gemeinsam genutzt von HTTP und Discord,
@@ -664,7 +667,12 @@ const server = createServer(async (req, res) => {
       const k = (await koerperLesen(req)) as Record<string, unknown> | null
       const text = String(k?.text ?? '').trim()
       if (!text) return json(400, { fehler: 'text fehlt' })
-      if (chatLaeuft.has(id)) return json(409, { fehler: 'Diese Sitzung schreibt gerade schon weiter' })
+      const besetzt = () => json(409, { fehler: 'Diese Sitzung schreibt gerade schon weiter' })
+      // Direkt nach "Stoppen" steht der Agent schon auf 'stopped', laeuft
+      // aber noch aus -- dann kurz warten statt 409 (siehe chatZuege.ts).
+      const laufIdVorher = fortsetzungLesen(DB_PFAD, id)?.laufId ?? `chat-${id}`
+      const statusVorher = supervisor.agentenListe(laufIdVorher).find((a) => a.agentId === 'chat')?.status
+      if (!(await chatZuege.freiWerden(id, statusVorher, CHAT_AUSLAUF_WARTEN_MS))) return besetzt()
 
       const kopf = chatKopfLesen(DB_PFAD, id)
       if (!kopf) return json(404, { fehler: 'Sitzung unbekannt' })
@@ -672,13 +680,14 @@ const server = createServer(async (req, res) => {
       const f = await fortsetzungVorbereiten(DB_PFAD, id, process.env.HOME ?? '/opt/cockpit')
       if (!f) return json(404, { fehler: 'Sitzung unbekannt' })
 
+      // Zweite Pruefung ohne await dazwischen: zwei gleichzeitige Anfragen
+      // kommen beide an den awaits oben vorbei, aber nur eine hierueber.
+      if (chatZuege.laeuft(id)) return besetzt()
       const startSeq = db.letzteSeq(f.laufId)
-      chatLaeuft.set(id, startSeq)
-      json(202, { laufId: f.laufId, cwd: f.cwd, startSeq })
 
-      // Nicht awaiten: die Antwort ist schon raus, der Zug laeuft weiter und
+      // Nicht awaiten: die Antwort geht gleich raus, der Zug laeuft weiter und
       // die Oberflaeche verfolgt ihn per Poll auf /api/lauf/<laufId>.
-      void (async () => {
+      chatZuege.starten(id, startSeq, async () => {
         try {
           const r = await supervisor.agentStarten({
             runId: f.laufId,
@@ -702,11 +711,9 @@ const server = createServer(async (req, res) => {
           // Darf den Daemon nicht mitreissen -- ein gestorbener Chat-Zug ist
           // Sache dieser Sitzung, nicht des ganzen Prozesses.
           console.warn(`[chats] Weiterschreiben ${id.slice(0, 8)} fehlgeschlagen:`, String(e))
-        } finally {
-          chatLaeuft.delete(id)
         }
-      })()
-      return
+      })
+      return json(202, { laufId: f.laufId, cwd: f.cwd, startSeq })
     }
 
     if (pfad === '/api/chats' && req.method === 'GET') {
@@ -744,8 +751,8 @@ const server = createServer(async (req, res) => {
           fortsetzung: {
             laufId,
             cwd: zielCwd,
-            laeuft: chatLaeuft.has(id),
-            startSeq: chatLaeuft.get(id) ?? db.letzteSeq(laufId),
+            laeuft: chatZuege.laeuft(id),
+            startSeq: chatZuege.startSeq(id) ?? db.letzteSeq(laufId),
           },
         },
       })
