@@ -26,14 +26,17 @@ fruehere Fassung dieser Datei (bis Durchgang 12, vor dem Kuerzen hier).
   Limitsperren bleiben (`7f5c455`). **Bitte pruefen:** Server-Tab zeigt
   "Anmeldefehler · gesperrt bis ..."; DB-Schema geht beim ersten Start auf
   Version 2 (Spalte `konten_sperren.grund`, Bestand = 'limit').
+- **Durchgang 16:** zwei kleine Konto-Randfaelle: Modus zeigt nur noch
+  "manuell", wenn der Vorzug auf ein vorhandenes, angemeldetes Konto zeigt
+  (`7b891d2`); Fortsetzungsprompt sagt "Kontowechsel" statt immer
+  "Nutzungslimit" (`9e4ae1b`).
 
 ## Offene Punkte (naechste Durchgaenge, Prioritaet 1 zuerst)
 
 1. **Weitere Multi-Konto-Luecken** selbst suchen. Erledigt: Abmeldung
-   mitten im Lauf (D15). Noch offen/Ideen: Vorzug auf ein inzwischen
-   geloeschtes Konto (Anzeige "manuell" ohne Wirkung); Fortsetzungsprompt
-   sagt auch bei Anmeldefehler "durch ein Nutzungslimit unterbrochen"
-   (harmlos, nur Wortlaut).
+   mitten im Lauf (D15), Vorzug auf geloeschtes Konto und Wortlaut des
+   Fortsetzungsprompts (D16). Keine konkrete Idee mehr offen -- naechster
+   Durchgang kann zu Prioritaet 2/3 (Punkt 4) wechseln.
 2. **Chat-Sitzungen wachsen minimal im Supervisor-Speicher:** ein Eintrag
    pro NEU ERSTELLTER Sitzung bleibt fuer immer in `supervisor.agenten`
    (viel kleiner als das in Durchgang 6 behobene Leck, da Fortschreiben nur
@@ -59,6 +62,9 @@ fruehere Fassung dieser Datei (bis Durchgang 12, vor dem Kuerzen hier).
 
 ## Erledigt (chronologisch, mit Commit)
 
+- `9e4ae1b` Konten: Fortsetzungsprompt neutral ("Kontowechsel").
+- `7b891d2` Konten: `modus` in /api/konten nur 'manuell', wenn der Vorzug
+  wirken kann (Konto vorhanden + angemeldet); gespeicherter Wert bleibt.
 - `7f5c455` Konten: Anmeldesperre faellt nach erfolgreichem Nutzungs-Poll
   weg (Sperrgrund limit/anmeldung, DB-Migration v2 am alten Testbestand
   live geprueft, Karte bei 375/1280px per Playwright geprueft).
