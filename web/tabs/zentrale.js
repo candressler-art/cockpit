@@ -304,7 +304,11 @@ async function sprechenTesten() {
 /** Wie stark das System arbeitet: treibt den Herzschlag. */
 function lastAnteil() {
   const aktive = letzteAgenten.filter((a) => AKTIV.has(a.status)).length
-  const cpu = letztesSystem?.hosts?.[0]?.cpuProzent ?? 0
+  // Der eigene Host (lokal gemessen), nicht einfach der erste: mit zwei
+  // Hosts steht alphabetisch serverone vorn, die Agenten laufen aber hier.
+  const hosts = letztesSystem?.hosts ?? []
+  const eigener = hosts.find((h) => h.quelle === 'lokal') ?? hosts[0]
+  const cpu = eigener?.cpuProzent ?? 0
   return Math.min(1, aktive * 0.34 + cpu / 160)
 }
 

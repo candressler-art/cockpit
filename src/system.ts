@@ -178,50 +178,126 @@ async function anmelden(): Promise<string | null> {
 }
 
 interface BeszelSystem {
+  id?: string
   name?: string
   status?: string
   info?: Record<string, unknown>
 }
 
+interface BeszelStats {
+  system?: string
+  created?: string
+  stats?: unknown
+}
+
 function zahl(v: unknown): number | null {
+  if (v === null || v === undefined || v === '') return null
   const n = Number(v)
   return Number.isFinite(n) ? n : null
+}
+
+/**
+ * Waermster plausibler Sensor aus Beszels Sensortabelle ({name: Grad}).
+ * Gleiche Regel wie tempLokal(): Maximum, Unplausibles verworfen.
+ */
+export function tempAusSensoren(t: unknown): number | null {
+  if (!t || typeof t !== 'object') return null
+  const werte = Object.values(t as Record<string, unknown>)
+    .map(zahl)
+    .filter((n): n is number => n !== null && n > 0 && n < 150)
+  return werte.length ? Math.max(...werte) : null
+}
+
+/** Stats-Datensaetze aelter als das gelten nicht mehr als aktueller Stand. */
+const STATS_HOECHSTALTER_MS = 10 * 60 * 1000
+
+/**
+ * Neuester Datensatz je System. Die Liste kommt nach created absteigend,
+ * der erste Treffer je System gewinnt; zu alte (Agent ausgefallen) zaehlen nicht.
+ */
+function neuesteJeSystem(items: BeszelStats[], jetzt: number): Map<string, BeszelStats> {
+  const m = new Map<string, BeszelStats>()
+  for (const it of items) {
+    if (!it.system || m.has(it.system)) continue
+    // PocketBase schreibt "2026-09-24 19:26:52.712Z" -- mit Leerzeichen.
+    const zeit = Date.parse(String(it.created ?? '').replace(' ', 'T'))
+    if (!Number.isFinite(zeit) || jetzt - zeit > STATS_HOECHSTALTER_MS) continue
+    m.set(it.system, it)
+  }
+  return m
+}
+
+/**
+ * Beszel-Antworten auf HostStand abbilden. Achtung, die Kurznamen bedeuten
+ * je Sammlung Verschiedenes (Beszel 0.9):
+ *  - systems.info: cpu, mp (RAM %), dp (Platte %), u (Uptime s) -- aber
+ *    t = Anzahl Threads, m = CPU-Modell, c = Kerne. Hier stand frueher
+ *    t als Temperatur: serverone (8 Threads) meldete "8 °C".
+ *  - system_stats.stats: m/d = RAM/Platte gesamt in GB, t = Sensortabelle.
+ *  - container_stats.stats: Liste der Container.
+ */
+export function beszelAbbilden(
+  systeme: BeszelSystem[],
+  systemStats: BeszelStats[],
+  containerStats: BeszelStats[],
+  jetzt = Date.now(),
+): HostStand[] {
+  const st = neuesteJeSystem(systemStats, jetzt)
+  const ct = neuesteJeSystem(containerStats, jetzt)
+  return systeme.map((s) => {
+    const i = s.info ?? {}
+    const roh = st.get(String(s.id))?.stats
+    const x = (roh && typeof roh === 'object' ? roh : {}) as Record<string, unknown>
+    const ram = zahl(x.m)
+    const platte = zahl(x.d)
+    const cs = ct.get(String(s.id))?.stats
+    return {
+      name: String(s.name ?? 'unbekannt'),
+      quelle: 'beszel' as const,
+      status: s.status === 'up' ? ('ok' as const) : ('unbekannt' as const),
+      cpuProzent: zahl(i.cpu),
+      ramProzent: zahl(i.mp),
+      ramGesamtMb: ram === null ? null : Math.round(ram * 1024),
+      plattenProzent: zahl(i.dp),
+      plattenGesamtGb: platte === null ? null : Math.round(platte),
+      tempC: tempAusSensoren(x.t),
+      uptimeSek: zahl(i.u),
+      container: Array.isArray(cs) ? cs.length : null,
+      gemessenAm: jetzt,
+    }
+  })
+}
+
+async function beszelListe<T>(t: string, pfad: string): Promise<T[] | null> {
+  const r = await fetch(`${HUB}/api/collections/${pfad}`, {
+    headers: { Authorization: t },
+    signal: AbortSignal.timeout(8000),
+  })
+  if (!r.ok) {
+    console.warn(`[system] Beszel-Abfrage fehlgeschlagen: HTTP ${r.status} (${pfad.split('/')[0]})`)
+    // Token koennte abgelaufen sein -- beim naechsten Lauf neu anmelden.
+    if (r.status === 401 || r.status === 403) { token = null; tokenBis = 0 }
+    return null
+  }
+  return ((await r.json()) as { items?: T[] }).items ?? []
 }
 
 export async function beszelLesen(): Promise<HostStand[]> {
   const t = await anmelden()
   if (!t) return []
   try {
-    const r = await fetch(`${HUB}/api/collections/systems/records?perPage=50`, {
-      headers: { Authorization: t },
-      signal: AbortSignal.timeout(8000),
-    })
-    if (!r.ok) {
-      console.warn(`[system] Beszel-Abfrage fehlgeschlagen: HTTP ${r.status}`)
-      // Token koennte abgelaufen sein -- beim naechsten Lauf neu anmelden.
-      if (r.status === 401 || r.status === 403) { token = null; tokenBis = 0 }
-      return []
-    }
-    const d = (await r.json()) as { items?: BeszelSystem[] }
-    return (d.items ?? []).map((s) => {
-      // Beszels Feldnamen sind kurz: cpu, mp (memory percent), dp (disk
-      // percent), t (temperature), u (uptime), m (memory GB), d (disk GB).
-      const i = s.info ?? {}
-      return {
-        name: String(s.name ?? 'unbekannt'),
-        quelle: 'beszel' as const,
-        status: s.status === 'up' ? ('ok' as const) : ('unbekannt' as const),
-        cpuProzent: zahl(i.cpu),
-        ramProzent: zahl(i.mp),
-        ramGesamtMb: zahl(i.m) === null ? null : Math.round((zahl(i.m) as number) * 1024),
-        plattenProzent: zahl(i.dp),
-        plattenGesamtGb: zahl(i.d),
-        tempC: zahl(i.t),
-        uptimeSek: zahl(i.u),
-        container: zahl(i.dc),
-        gemessenAm: Date.now(),
-      }
-    })
+    // Die Stats-Sammlungen bekommen je Minute einen 1m-Datensatz pro System;
+    // die neuesten 50 decken damit weit mehr als die zwei Server ab. Fehlen
+    // sie (Rechte, aeltere Hub-Version), bleiben nur Gesamtgroessen,
+    // Temperatur und Container leer -- die Prozentwerte kommen aus systems.
+    const neueste = "records?filter=(type%3D'1m')&sort=-created&perPage=50&fields=system,created,stats"
+    const [systeme, sysStats, contStats] = await Promise.all([
+      beszelListe<BeszelSystem>(t, 'systems/records?perPage=50'),
+      beszelListe<BeszelStats>(t, `system_stats/${neueste}`).catch(() => null),
+      beszelListe<BeszelStats>(t, `container_stats/${neueste}`).catch(() => null),
+    ])
+    if (!systeme) return []
+    return beszelAbbilden(systeme, sysStats ?? [], contStats ?? [])
   } catch (e) {
     console.warn('[system] Beszel-Abfrage warf:', String(e))
     return []
@@ -236,16 +312,38 @@ export interface SystemStand {
   gemessenAm: number
 }
 
+/**
+ * Eigener Host: lokal gemessen bevorzugt (frisch, Beszels Werte sind bis zu
+ * eine Minute alt), aber feldweise -- ein lokal fehlender Wert (erste
+ * CPU-Messung nach dem Start ist immer null, VM ohne Thermalzone) wird aus
+ * Beszel gefuellt statt Beszels Zahl mit null zu ueberschreiben.
+ */
+export function eigenenHostMischen(beszel: HostStand, lokal: HostStand): HostStand {
+  const aus = <K extends keyof HostStand>(k: K): HostStand[K] => lokal[k] ?? beszel[k]
+  return {
+    name: lokal.name,
+    quelle: 'lokal',
+    status: 'ok',
+    cpuProzent: aus('cpuProzent'),
+    ramProzent: aus('ramProzent'),
+    ramGesamtMb: aus('ramGesamtMb'),
+    plattenProzent: aus('plattenProzent'),
+    plattenGesamtGb: aus('plattenGesamtGb'),
+    tempC: aus('tempC'),
+    uptimeSek: aus('uptimeSek'),
+    // Container zaehlt nur Beszel (lokal gibt es keinen Docker-Zugriff).
+    container: beszel.container,
+    gemessenAm: lokal.gemessenAm,
+  }
+}
+
 export async function standLesen(): Promise<SystemStand> {
   const [beszel, lokal] = await Promise.all([beszelLesen(), lokalLesen()])
   const hosts = [...beszel]
   // Der eigene Host wird lokal gemessen bevorzugt: die Werte sind frisch,
   // Beszels sind bis zu eine Minute alt. Beszel bleibt fuer alle anderen.
   const i = hosts.findIndex((h) => h.name === lokal.name)
-  if (i >= 0) {
-    const vorher = hosts[i] as HostStand
-    hosts[i] = { ...vorher, ...lokal, container: vorher.container }
-  }
+  if (i >= 0) hosts[i] = eigenenHostMischen(hosts[i] as HostStand, lokal)
   else hosts.push(lokal)
   hosts.sort((a, b) => a.name.localeCompare(b.name))
   return {
