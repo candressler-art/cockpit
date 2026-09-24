@@ -16,6 +16,10 @@ const PORT = Number(process.env.WHISPER_PORT ?? 10300)
 const TIMEOUT_MS = Number(process.env.WHISPER_TIMEOUT_MS ?? 20_000)
 
 const ZIEL_RATE = 16000
+// Grenzen eines AudioContext laut Web-Audio-Spezifikation -- mehr kann der
+// Browser gar nicht liefern, weniger blaeht das Resampeln hoechstens ~5-fach.
+const MIN_RATE = 3000
+const MAX_RATE = 768_000
 /**
  * PCM-Menge je Wyoming-Rahmen. Klein genug, dass ein einzelner Rahmen nicht
  * unnoetig gross wird, gross genug, dass eine kurze Aeusserung (ein paar
@@ -51,6 +55,13 @@ export function erkennen(wav: Buffer, sprache = 'de'): Promise<Erkennung> {
     return Promise.reject(
       new HoerenFehler(`nur mono unterstuetzt (bekam ${gelesen.kanaele} Kanäle)`),
     )
+  }
+
+  // Die Rate steht ungeprueft in der WAV-Kopfzeile. 100 Hz haette das PCM
+  // beim Resampeln 160-fach aufgeblaeht (bei 10 MB Koerper ~1.6 GB und
+  // Sekunden blockierter Event-Loop).
+  if (gelesen.rate < MIN_RATE || gelesen.rate > MAX_RATE) {
+    return Promise.reject(new HoerenFehler(`Abtastrate ${gelesen.rate} Hz nicht unterstuetzt`))
   }
 
   const pcm = pcm16Resampeln(gelesen.pcm, gelesen.rate, ZIEL_RATE)
