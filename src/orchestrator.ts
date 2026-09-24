@@ -487,10 +487,13 @@ export class Orchestrator extends EventEmitter {
         this.melden(k.runId, 'antwort', { runde, text: antworttext })
 
         // Die Antwort geht als naechster Auftrag an den Worker, zusammen mit
-        // der Frage -- ohne sie fehlt dem Worker der Zusammenhang.
+        // der Frage -- ohne sie fehlt dem Worker der Zusammenhang. Noch
+        // wartende Auftraege (mehr als parallelitaet) bleiben dahinter in der
+        // Schlange, wie im Fall A unten; frueher fielen sie hier still weg.
         auftraege = [
           `Der Mensch wurde gefragt:\n\n${frage}\n\nSeine Antwort:\n\n${antworttext}\n\n` +
             `Arbeite auf dieser Grundlage weiter und berichte.`,
+          ...auftraege.slice(stapel.length),
         ]
         verlauf.push({ runde, statusKurz: `Antwort erhalten: ${antworttext.slice(0, 120)}` })
         continue

@@ -70,6 +70,22 @@ const konfig = {
     ende.grund === 'fehler' && /Anfangsauftrag/.test(ende.text) && sv.gestartet.length === 0)
 }
 
+// --- Rueckfrage: wartende Auftraege bleiben nach der Antwort in der Schlange
+{
+  const sv = attrappe([
+    'STATUS-KURZ: frage\nENTSCHEIDUNG-NOETIG: A oder B?',
+    'STATUS-KURZ: weiter\nNAECHSTER-PROMPT:\n',
+    'STATUS-KURZ: fertig\nPROJEKT-FERTIG: ok',
+  ])
+  const o = new Orchestrator(sv, null)
+  o.on('orchestrator', (m) => { if (m.art === 'warten') setImmediate(() => o.antwortGeben('A')) })
+  const ende = await o.fahren({
+    ...konfig, anfangsPrompt: 'Auftrag 1\n---WORKER---\nAuftrag 2', antwortTimeoutMs: 5000,
+  })
+  pruefe('Lauf mit Rueckfrage endet als fertig', ende.grund === 'fertig')
+  pruefe('wartender Auftrag 2 lief nach der Antwort (Runde 3)', sv.gestartet.includes('worker-r3'))
+}
+
 // --- normaler Ablauf bleibt unveraendert -----------------------------------
 {
   const sv = attrappe([
