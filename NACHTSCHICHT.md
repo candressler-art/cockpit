@@ -19,11 +19,21 @@ fruehere Fassung dieser Datei (bis Durchgang 12, vor dem Kuerzen hier).
   Durchgang 1 korrekt, `98435ae`, hatte nur keinen Test, jetzt `2685036`).
   Damit ist Cans Beobachtungsliste abgearbeitet. Naechster Schwerpunkt:
   Punkt 1 unten (weitere Multi-Konto-Luecken selbst suchen).
+- **Durchgang 15:** Luecke "Konto abgemeldet/Token tot mitten im Lauf"
+  durchgegangen. Der Wechsel selbst klappte schon; aber nach Deinem
+  `/login` blieb das Konto 5h gesperrt. Jetzt hebt der naechste
+  erfolgreiche Nutzungs-Poll (<=10 min) eine reine Anmeldesperre auf,
+  Limitsperren bleiben (`7f5c455`). **Bitte pruefen:** Server-Tab zeigt
+  "Anmeldefehler · gesperrt bis ..."; DB-Schema geht beim ersten Start auf
+  Version 2 (Spalte `konten_sperren.grund`, Bestand = 'limit').
 
 ## Offene Punkte (naechste Durchgaenge, Prioritaet 1 zuerst)
 
-1. **Weitere Multi-Konto-Luecken** selbst suchen (z.B. Konto wird waehrend
-   eines langen Laufs abgemeldet). **Noch nicht begonnen.**
+1. **Weitere Multi-Konto-Luecken** selbst suchen. Erledigt: Abmeldung
+   mitten im Lauf (D15). Noch offen/Ideen: Vorzug auf ein inzwischen
+   geloeschtes Konto (Anzeige "manuell" ohne Wirkung); Fortsetzungsprompt
+   sagt auch bei Anmeldefehler "durch ein Nutzungslimit unterbrochen"
+   (harmlos, nur Wortlaut).
 2. **Chat-Sitzungen wachsen minimal im Supervisor-Speicher:** ein Eintrag
    pro NEU ERSTELLTER Sitzung bleibt fuer immer in `supervisor.agenten`
    (viel kleiner als das in Durchgang 6 behobene Leck, da Fortschreiben nur
@@ -38,11 +48,10 @@ fruehere Fassung dieser Datei (bis Durchgang 12, vor dem Kuerzen hier).
 
 ## Entscheidungen fuer Can (noch offen, keine Selbstentscheidung getroffen)
 
-- **Anmeldefehler-Sperre:** aktuell 5 Stunden (`KONTO_SPERRE_VORGABE_MS`),
-  gleich wie ein echtes Nutzungslimit. Evtl. zu lang, wenn Du ein Konto
-  sofort per `/login` neu anmeldest -- es gibt aktuell KEINEN Weg, eine
-  Sperre manuell aufzuheben. Optionen: kuerzeres Backoff nur fuer
-  Anmeldefehler, oder ein "Sperre aufheben"-Endpunkt/Knopf.
+- **Anmeldefehler-Sperre:** seit D15 faellt sie nach erneutem `/login`
+  automatisch (naechster erfolgreicher Poll, konservativ: nur Anmelde-,
+  nie Limitsperren). Einen manuellen "Sperre aufheben"-Knopf gibt es
+  weiterhin nicht -- willst Du einen?
 - **Keine automatische Wiederaufnahme**, wenn alle Konten gesperrt waren und
   spaeter wieder frei werden -- ein `failed`-Lauf bleibt `failed`, Du musst
   ihn von Hand neu anstossen. Bewusst nicht automatisiert (Tradeoffs:
@@ -50,6 +59,9 @@ fruehere Fassung dieser Datei (bis Durchgang 12, vor dem Kuerzen hier).
 
 ## Erledigt (chronologisch, mit Commit)
 
+- `7f5c455` Konten: Anmeldesperre faellt nach erfolgreichem Nutzungs-Poll
+  weg (Sperrgrund limit/anmeldung, DB-Migration v2 am alten Testbestand
+  live geprueft, Karte bei 375/1280px per Playwright geprueft).
 - `2685036` Server-Tab: Regressionstest fuer "keine Messung" vs. "0%" (war
   inhaltlich schon korrekt seit `98435ae`, jetzt mit Test in
   `tests/server.test.mjs` -- kontoKarte()/nutzungHerkunft()/pz() dafuer aus
