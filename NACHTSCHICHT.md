@@ -42,6 +42,16 @@ fruehere Fassung dieser Datei (bis Durchgang 12, vor dem Kuerzen hier).
   Laufauswahl zeigt anderswo gestartete Laeufe ohne Neuladen (`501e649`).
   **Bitte pruefen:** Lauf-Tab auf altem Lauf, per Discord/Zentrale neuen
   starten -> Freigabe wird angesagt, Lauf erscheint in der Auswahl.
+- **Durchgang 23 (Nachtrag Beszel):** "8 °C" bei serverone war die
+  **Thread-Zahl** (`systems.info.t`, i7-6700 = 8), belegt an einer Kopie der
+  Hub-DB (Beszel 0.9.1). Temperatur/RAM-/Plattengroesse/Container kommen
+  jetzt aus `system_stats`/`container_stats`. servertwo als "lokal" ist
+  Absicht, aber CPU null beim ersten Abruf war ein Fehler (lokales null
+  ueberschrieb Beszel) -- jetzt feldweise gemischt (`f82a1e6`). Zwei Hosts
+  bei 1280/375 per Playwright ok. **Bitte pruefen:** nach Ausrollen zeigt
+  serverone ~20-30 °C und "von 31.2 GB"; bleibt die Temperatur leer, darf
+  der Beszel-Nutzer `system_stats` nicht lesen (Log: "Beszel-Abfrage
+  fehlgeschlagen ... (system_stats)").
 
 ## Offene Punkte (naechste Durchgaenge, Prioritaet 1 zuerst)
 
@@ -80,6 +90,12 @@ fruehere Fassung dieser Datei (bis Durchgang 12, vor dem Kuerzen hier).
   Ressourcenbindung durch wartende Laeufe, Sichtbarkeit "wartet" vs. "tot").
 
 ## Erledigt (chronologisch, mit Commit)
+
+- `f82a1e6` Serverlast: `beszelAbbilden()`/`eigenenHostMischen()` in
+  `src/system.ts`, `tests/system.test.mjs`; Testinstanz gegen Beszel-Stub
+  (`/tmp/nachtschicht/beszelstub.mjs`) inkl. Hub-Ausfall; Bilder
+  `nachtschicht-bilder/zweihosts23*.mjs`. Handy-Kopfzeile ist bewusst
+  waagerecht wischbar (Neuer Lauf/Stimmwahl rechts ausserhalb) -- kein Bug.
 
 - `501e649` Live-Strom ungefiltert an alle Klienten (`verteilen()` ohne
   runId), Lauf-Tab: fremd()/seq-Dedup/Nachzuegler-Puffer, Laufliste frischt
