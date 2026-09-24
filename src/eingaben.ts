@@ -49,3 +49,30 @@ export function zahlLesen(
   if (n < o.min) return { fehler: `${name} muss mindestens ${o.min} sein` }
   return { zahl: n }
 }
+
+/**
+ * Eine WebSocket-Nachricht "folgen" lesen: welchem Lauf der Klient folgt und
+ * ab welcher seq er Rueckstand braucht. Alles andere -> null (ignorieren).
+ *
+ * Frueher las der Daemon `JSON.parse(roh).typ` direkt -- gueltiges JSON, das
+ * kein Objekt ist ("null"), warf dann im 'message'-Handler, und eine
+ * unbehandelte Ausnahme dort beendet den ganzen Daemon. Eine krumme Nachricht
+ * aus einem Tab darf die Zentrale nicht umbringen.
+ */
+export function folgenLesen(roh: string): { runId: string | null; seit: number } | null {
+  let n: unknown
+  try {
+    n = JSON.parse(roh)
+  } catch {
+    return null
+  }
+  if (!n || typeof n !== 'object' || Array.isArray(n)) return null
+  const o = n as Record<string, unknown>
+  if (o.typ !== 'folgen') return null
+  const seit = Number(o.seit ?? 0)
+  return {
+    runId: o.runId ? String(o.runId) : null,
+    // NaN/negativ haette sonst die SQL-Abfrage (seq > ?) mit Unsinn gefuettert.
+    seit: Number.isFinite(seit) && seit > 0 ? Math.floor(seit) : 0,
+  }
+}

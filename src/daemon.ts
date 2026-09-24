@@ -24,7 +24,7 @@ import {
 import { vaultIndizieren, vaultGraphLesen, vaultBeobachten, vaultDa, VAULT } from './vault.js'
 import { vaultZugriffErlaubt } from './vaultZugriff.js'
 import { konsoleBefehl } from './konsole.js'
-import { cwdPruefen, zahlLesen } from './eingaben.js'
+import { cwdPruefen, folgenLesen, zahlLesen } from './eingaben.js'
 import { nutzungAbfragen } from './kontenNutzung.js'
 import { AnfrageFehler, fehlerStatus, koerperAuswerten } from './httpFehler.js'
 import { ChatZuege } from './chatZuege.js'
@@ -905,6 +905,10 @@ const server = createServer(async (req, res) => {
 const wss = new WebSocketServer({
   server,
   path: '/ws',
+  // Tabs schicken nur kurze "folgen"-Nachrichten. Ohne Deckel puffert ws bis
+  // 100 MiB je Nachricht (Voreinstellung) -- zu viel fuer eine Maschine, die
+  // sich der Daemon mit Agenten teilt. Groesseres schliesst die Verbindung (1009).
+  maxPayload: 64 * 1024,
   // WebSockets unterliegen nicht der Same-Origin-Policy: ohne diese Pruefung
   // koennte eine beliebige offene Webseite eine Verbindung aufbauen und alles
   // mitlesen, was die Agenten ausgeben -- Dateiinhalte eingeschlossen. Das ist
@@ -927,26 +931,25 @@ wss.on('connection', (sock) => {
   klienten.add(klient)
 
   sock.on('message', (roh) => {
-    let n: Record<string, unknown>
-    try {
-      n = JSON.parse(String(roh)) as Record<string, unknown>
-    } catch {
-      return
-    }
+    const f = folgenLesen(String(roh))
+    if (!f) return
     // Der Klient sagt, welchem Lauf er folgt und was er schon hat -- daraufhin
     // bekommt er den Rueckstand nachgeliefert. Ohne diesen Backfill fehlt nach
     // jedem Verbindungsabbruch ein Stueck Verlauf.
-    if (n.typ === 'folgen') {
-      klient.runId = n.runId ? String(n.runId) : null
-      const seit = Number(n.seit ?? 0)
+    try {
+      klient.runId = f.runId
       if (klient.runId) {
-        for (const e of db.ereignisseSeit(klient.runId, seit)) senden(klient, 'ereignis', e)
+        for (const e of db.ereignisseSeit(klient.runId, f.seit)) senden(klient, 'ereignis', e)
         senden(klient, 'agenten', db.agentenLesen(klient.runId))
         senden(klient, 'freigaben', db.offeneFreigaben(klient.runId))
       }
       const stand = supervisor.limitStandLesen()
       if (stand) senden(klient, 'limit', stand)
       senden(klient, 'bereit', { runId: klient.runId })
+    } catch (e) {
+      // Wie im HTTP-Handler: ein Fehler beim Beantworten trifft diesen
+      // Klienten, nicht den Daemon (eine Ausnahme hier waere unbehandelt).
+      console.error('[cockpit] WebSocket-Nachricht nicht verarbeitet:', e)
     }
   })
 
