@@ -201,6 +201,7 @@ function sitzungZeichnen(d) {
     <div class="chateingabe">
       <textarea id="chattext" rows="1" placeholder="Nachricht… (Enter sendet, Shift+Enter Zeilenumbruch)"></textarea>
       <button id="chatsenden">Senden</button>
+      <button class="nein" id="chatstopp" hidden title="Diesen Zug abbrechen -- die Sitzung bleibt fortsetzbar">Stoppen</button>
     </div>`
 
   // Der Verlauf wurde eben komplett neu aufgebaut -- die alte Arbeitsanzeige
@@ -217,6 +218,8 @@ function sitzungZeichnen(d) {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void nachrichtSenden() }
   })
   lese.querySelector('#chatsenden').onclick = () => void nachrichtSenden()
+  lese.querySelector('#chatstopp').onclick = () => void zugStoppen()
+  stoppZeigen(pollAktiv)
 
   verlaufAnsEndeScrollen()
   feld.focus()
@@ -309,10 +312,61 @@ async function nachrichtSenden() {
   }
 }
 
+// --- Zug stoppen ----------------------------------------------------------
+// Wie im Lauf-Tab: zwei Klicks statt confirm() (in WebKitGTK unzuverlaessig,
+// am Handy soll ein versehentlicher Tipp nichts abbrechen). Das Ende meldet
+// der Poll wie jedes andere -- der Agent landet als 'stopped', danach ist
+// die Eingabe wieder frei und die Sitzung laesst sich normal fortsetzen.
+
+let stoppFrage = null
+
+function stoppZeigen(sichtbar) {
+  const knopf = wurzel?.querySelector('#chatstopp')
+  if (!knopf) return
+  knopf.hidden = !sichtbar
+  // Senden ist waehrend eines Zuges ohnehin gesperrt -- statt zwei Knoepfe
+  // nebeneinander (am Handy zu eng) tauscht Stoppen den Platz mit Senden.
+  const senden = wurzel.querySelector('#chatsenden')
+  if (senden) senden.hidden = sichtbar
+  if (!sichtbar) stoppZuruecksetzen()
+}
+
+function stoppZuruecksetzen() {
+  clearTimeout(stoppFrage)
+  stoppFrage = null
+  const knopf = wurzel?.querySelector('#chatstopp')
+  if (knopf) knopf.textContent = 'Stoppen'
+}
+
+async function zugStoppen() {
+  const knopf = wurzel.querySelector('#chatstopp')
+  if (!knopf || !aktLaufId) return
+  if (!stoppFrage) {
+    knopf.textContent = 'Wirklich?'
+    stoppFrage = setTimeout(stoppZuruecksetzen, 3000)
+    return
+  }
+  stoppZuruecksetzen()
+  knopf.disabled = true
+  try {
+    await fetch(api('/api/abbrechen'), {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ runId: aktLaufId, agentId: 'chat' }),
+    })
+    // Auch bei 404 (Zug gerade von selbst fertig) nichts weiter: der naechste
+    // Poll-Tick sieht den Endzustand und gibt die Eingabe frei.
+  } catch {
+    // Daemon weg -- die Verbindungsanzeige sagt das bereits.
+  } finally {
+    knopf.disabled = false
+  }
+}
+
 // --- Live-Antwort per Poll ---------------------------------------------------
 
 function pollStarten() {
   pollAktiv = true
+  stoppZeigen(true)
   if (pollTimer || !sichtbarFlag) return
   pollTimer = setInterval(() => void pollSchritt(), 1200)
   void pollSchritt()
@@ -324,6 +378,7 @@ function pollTimerStoppen() {
 
 function pollGanzStoppen() {
   pollAktiv = false
+  stoppZeigen(false)
   pollTimerStoppen()
 }
 
@@ -352,10 +407,14 @@ async function pollSchritt() {
 
   pollGanzStoppen()
   arbeitetVerbergen()
-  const fehlertext = agent.status !== 'done' ? (agent.lastError || `Sitzung endete: ${agent.status}`) : null
+  // Ein gestoppter Zug meldet als lastError nur das rohe "Operation aborted"
+  // der SDK -- der Nutzer hat selbst gestoppt, das braucht keinen Fehlertext.
+  const gestoppt = agent.status === 'stopped'
+  const fehlertext = agent.status !== 'done' && !gestoppt ? (agent.lastError || `Sitzung endete: ${agent.status}`) : null
   await sitzungNeuLaden(id)
   if (offen !== id) return
   if (fehlertext) fehlerZeileAnhaengen(fehlertext)
+  if (gestoppt) statuszeileAnhaengen('■ Zug gestoppt — Sitzung lässt sich normal fortsetzen')
   eingabeSperren(false)
   wurzel.querySelector('#chattext')?.focus()
 }
