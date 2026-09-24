@@ -287,11 +287,11 @@ const JETZT_MS = JETZT_S * 1000
 
 // --- 13b. resetzeitAusFehlertext: Reset-Zeit aus der CLI-Meldung parsen ----
 //
-// Format aus der Aufgabenstellung: "You've hit your weekly limit · resets
-// Sep 26, 4am (Europe/Berlin)". Nur DIESES Format (Datum + Zeitzone in
-// Klammern) wird geparst -- die kuerzere Session-Limit-Meldung ("resets
-// 8:10pm", siehe tests/chats.test.mjs) bewusst nicht, siehe Kommentar an der
-// Funktion selbst.
+// Formate aus echten Sitzungen: mit Datum ("resets Sep 26, 4am
+// (Europe/Berlin)"), nur Uhrzeit ("resets 4am (Europe/Berlin)" -- auch beim
+// WOCHENlimit, die haeufigste Form) und Wochentag. Voraussetzung ist immer
+// die Zeitzone in Klammern -- ohne sie ("resets 8:10pm", siehe
+// tests/chats.test.mjs) bewusst kein Treffer, siehe Funktionskommentar.
 {
   // 2026-09-24 12:00 UTC "heute" -- Berlin ist im September in CEST (UTC+2),
   // 4 Uhr Berlin = 2 Uhr UTC.
@@ -319,6 +319,50 @@ const JETZT_MS = JETZT_S * 1000
   // eine geratene Zeitzone.
   const r = resetzeitAusFehlertext("You've hit your session limit · resets 8:10pm", Date.now())
   pruefe('Session-Limit-Text ohne Zeitzone: kein Treffer', r === null)
+}
+{
+  // Nur Uhrzeit, noch heute: 24.9. 12:00 UTC = 14:00 Berlin, "4:50pm" ist
+  // 16:50 Berlin = 14:50 UTC desselben Tages. Frueher kein Treffer -- das
+  // Konto blieb pauschal 5 h gesperrt statt 2 h 50 min.
+  const jetzt = Date.UTC(2026, 8, 24, 12, 0, 0)
+  const r = resetzeitAusFehlertext("You've hit your session limit · resets 4:50pm (Europe/Berlin)", jetzt)
+  pruefe('Session-Limit mit Zeitzone, ohne Datum: heute 16:50 Berlin', r === Date.UTC(2026, 8, 24, 14, 50, 0))
+}
+{
+  // Wochenlimit nur mit Uhrzeit: 4 Uhr Berlin liegt schon hinter 14:00 --
+  // also morgen frueh. Frueher: kein Treffer, Vorgabe 5 h, das Konto galt ab
+  // 19 Uhr wieder als frei und lief sofort wieder ins Wochenlimit.
+  const jetzt = Date.UTC(2026, 8, 24, 12, 0, 0)
+  const r = resetzeitAusFehlertext("You've hit your weekly limit · resets 4am (Europe/Berlin)", jetzt)
+  pruefe('Wochenlimit nur mit Uhrzeit: naechster Morgen 4 Uhr Berlin', r === Date.UTC(2026, 8, 25, 2, 0, 0))
+}
+{
+  // Ueber Monatsende: 30.9. 23:00 Berlin, "4am" -> 1.10. 4 Uhr Berlin.
+  const jetzt = Date.UTC(2026, 8, 30, 21, 0, 0)
+  const r = resetzeitAusFehlertext('resets 4am (Europe/Berlin)', jetzt)
+  pruefe('Uhrzeit ohne Datum ueber Monatsende', r === Date.UTC(2026, 9, 1, 2, 0, 0))
+}
+{
+  // Knapp verstrichen (gerundete Anzeige, Verzoegerung): NICHT erst morgen --
+  // sonst waere ein eben zurueckgesetztes Session-Limit 24 h gesperrt.
+  const jetzt = Date.UTC(2026, 8, 24, 14, 53, 0)
+  const r = resetzeitAusFehlertext('resets 4:50pm (Europe/Berlin)', jetzt)
+  pruefe('knapp verstrichene Uhrzeit bleibt heute (Konto sofort frei)', r === Date.UTC(2026, 8, 24, 14, 50, 0))
+}
+{
+  // Wochentag mit Zeitzone: Do 24.9.2026 -> "Mon 12:00am" = Mo 28.9. 0 Uhr
+  // Berlin = So 27.9. 22 Uhr UTC.
+  const jetzt = Date.UTC(2026, 8, 24, 12, 0, 0)
+  const r = resetzeitAusFehlertext('resets Mon 12:00am (Europe/Berlin)', jetzt)
+  pruefe('Wochentag mit Zeitzone: naechster Montag 0 Uhr', r === Date.UTC(2026, 8, 27, 22, 0, 0))
+  // Heutiger Wochentag, Uhrzeit schon vorbei -> eine Woche spaeter.
+  const r2 = resetzeitAusFehlertext('resets Thu 9am (Europe/Berlin)', jetzt)
+  pruefe('heutiger Wochentag, Zeit vorbei: naechste Woche', r2 === Date.UTC(2026, 9, 1, 7, 0, 0))
+}
+{
+  // Wochentag OHNE Zeitzone (so in echten Sitzungen gesehen): kein Treffer.
+  const r = resetzeitAusFehlertext("You've hit your weekly limit · resets Mon 12:00am", Date.now())
+  pruefe('Wochentag ohne Zeitzone: kein Treffer', r === null)
 }
 {
   // Text ohne jede Reset-Angabe.

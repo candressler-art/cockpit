@@ -327,9 +327,9 @@ export class Supervisor extends EventEmitter {
         // anderen Konto ueberschrieben sein. Und passend zum Fenster, das
         // wirklich griff (5h/7d), nicht immer 5h. Fehlt ein passender
         // Messwert (z.B. noch kein Poll seit dem letzten Reset gelaufen),
-        // steht die Reset-Zeit oft im Fehlertext der CLI selbst (Wochenlimit
-        // mit Datum+Zeitzone, siehe resetzeitAusFehlertext) -- genauer als
-        // die pauschale Vorgabe.
+        // steht die Reset-Zeit oft im Fehlertext der CLI selbst ("resets
+        // 4:50pm (Europe/Berlin)", siehe resetzeitAusFehlertext) -- genauer
+        // als die pauschale Vorgabe.
         const standDesKontos = this.konten.nutzungLesen(konto.name)?.stand ?? null
         const textFallback = resetzeitAusFehlertext(fehler ?? '', Date.now())
         const reset = sperrzeitpunktAusLimitstand(standDesKontos, Date.now(), KONTO_SPERRE_VORGABE_MS, textFallback)

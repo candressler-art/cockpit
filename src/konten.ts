@@ -608,57 +608,101 @@ function tzVersatzMinuten(zone: string, zeitpunktMs: number): number | null {
   }
 }
 
+const WOCHENTAGE: Record<string, number> = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 }
+
+/**
+ * Wie weit eine Reset-Zeit OHNE Datum ("resets 4:50pm (...)") in der
+ * Vergangenheit liegen darf, bevor sie als "morgen" gilt. Die CLI rundet die
+ * angezeigte Zeit, und zwischen Meldung und Auswertung vergeht etwas Zeit --
+ * ohne Toleranz wuerde ein Session-Limit, das gerade eben zurueckgesetzt
+ * wurde, das Konto volle 24 Stunden sperren. Eine Zeit knapp in der
+ * Vergangenheit heisst nur: Konto gilt sofort wieder als frei, der naechste
+ * Versuch liefert notfalls eine frische Meldung.
+ */
+const RESET_OHNE_DATUM_TOLERANZ_MS = 10 * 60 * 1000
+
 /**
  * Liest eine Reset-Zeit direkt aus dem Fehlertext der CLI, wenn kein
- * rate_limit_event und keine Poll-Messung sie liefert -- Beispiel (Wochen-
- * limit): "You've hit your weekly limit · resets Sep 26, 4am (Europe/Berlin)".
- * Nur dieses Format mit EXPLIZITER IANA-Zeitzone wird geparst: die kuerzere
- * Session-Limit-Meldung ("resets 8:10pm", ohne Datum und ohne Zeitzone,
- * siehe tests/chats.test.mjs) bliebe reine Raterei -- welcher Tag, welche
- * Zeitzone --, deshalb bewusst NICHT geparst; dafuer bleibt die pauschale
+ * rate_limit_event und keine Poll-Messung sie liefert. Formate, wie sie in
+ * echten Sitzungen stehen (gezaehlt in /var/lib/cockpit/sessions-desktop):
+ *   - "You've hit your weekly limit · resets Sep 26, 4am (Europe/Berlin)"
+ *   - "You've hit your weekly limit · resets 4am (Europe/Berlin)"   (ohne Datum)
+ *   - "You've hit your session limit · resets 4:50pm (Europe/Berlin)"
+ *   - Wochentag statt Datum ("resets Mon 12:00am (...)")
+ * Ohne Datum ist das naechste Vorkommen dieser Uhrzeit gemeint (bzw. dieses
+ * Wochentags), gerechnet in der genannten Zone. Voraussetzung ist immer die
+ * EXPLIZITE IANA-Zeitzone in Klammern: Meldungen ohne Zone ("resets
+ * 8:10pm", "resets Mon 12:00am", siehe tests/chats.test.mjs) blieben reine
+ * Raterei, deshalb bewusst NICHT geparst; dafuer bleibt die pauschale
  * Vorgabe (vorgabeMs) die einzige Quelle.
  *
- * Das Jahr fehlt im Text; da ein Wochenlimit immer in der Zukunft liegt,
- * wird das laufende Jahr angenommen und nur dann um eins erhoeht, wenn das
+ * Mit Datum fehlt das Jahr; da ein Reset immer in der Zukunft liegt, wird
+ * das laufende Jahr angenommen und nur dann um eins erhoeht, wenn das
  * Ergebnis sonst mehr als einen Tag in der Vergangenheit laege (Jahreswechsel).
  */
 export function resetzeitAusFehlertext(text: string, jetzt: number): number | null {
   const treffer = text.match(
-    /resets\s+([A-Za-z]{3,9})\s+(\d{1,2}),?\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)\s*\(([\w/+-]+)\)/i,
+    /resets\s+(?:(sun|mon|tue|wed|thu|fri|sat)[a-z]*\.?,?\s+|([A-Za-z]{3,9})\s+(\d{1,2}),?\s*)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\s*\(([\w/+-]+)\)/i,
   )
   if (!treffer) return null
-  const [, monatText, tagText, stundeText, minuteText, meridian, zone] = treffer
-  if (!monatText || !tagText || !stundeText || !meridian || !zone) return null
-  const monat = MONATSNAMEN[monatText.slice(0, 3).toLowerCase()]
-  if (monat === undefined) return null
-  const tag = Number(tagText)
+  const [, wochentagText, monatText, tagText, stundeText, minuteText, meridian, zone] = treffer
+  if (!stundeText || !meridian || !zone) return null
   let stunde = Number(stundeText) % 12
   if (meridian.toLowerCase() === 'pm') stunde += 12
   const minute = minuteText ? Number(minuteText) : 0
 
-  let jahrJetztRoh: string
+  // Kalenderdatum und Wochentag von "jetzt" in der genannten Zone.
+  let heute: Record<string, string>
   try {
-    jahrJetztRoh = new Intl.DateTimeFormat('en-US', { timeZone: zone, year: 'numeric' }).format(
-      new Date(jetzt),
+    heute = Object.fromEntries(
+      new Intl.DateTimeFormat('en-US', {
+        timeZone: zone, year: 'numeric', month: 'numeric', day: 'numeric', weekday: 'short',
+      }).formatToParts(new Date(jetzt)).map((t) => [t.type, t.value]),
     )
   } catch {
     return null // unbekannte Zeitzone -- lieber gar keine Zeit als eine falsche
   }
-  const jahrJetzt = Number(jahrJetztRoh)
-  if (!Number.isFinite(jahrJetzt)) return null
+  const jahrJetzt = Number(heute.year)
+  const monatJetzt = Number(heute.month) - 1
+  const tagJetzt = Number(heute.day)
+  const wochentagJetzt = WOCHENTAGE[String(heute.weekday).slice(0, 3).toLowerCase()]
+  if (!Number.isFinite(jahrJetzt) || !Number.isFinite(tagJetzt) || wochentagJetzt === undefined) return null
 
-  const zeitpunktFuer = (jahr: number): number | null => {
+  // Date.UTC rechnet Tagesueberlauf (32. Sep -> 2. Okt) selbst um.
+  const zeitpunktFuer = (jahr: number, monat: number, tag: number): number | null => {
     const grobUtc = Date.UTC(jahr, monat, tag, stunde, minute, 0)
     const versatz = tzVersatzMinuten(zone, grobUtc)
     if (versatz === null) return null
     return grobUtc - versatz * 60_000
   }
 
-  let ergebnis = zeitpunktFuer(jahrJetzt)
+  if (monatText && tagText) {
+    const monat = MONATSNAMEN[monatText.slice(0, 3).toLowerCase()]
+    if (monat === undefined) return null
+    const tag = Number(tagText)
+    let ergebnis = zeitpunktFuer(jahrJetzt, monat, tag)
+    if (ergebnis === null) return null
+    if (ergebnis < jetzt - 24 * 60 * 60 * 1000) {
+      const naechstesJahr = zeitpunktFuer(jahrJetzt + 1, monat, tag)
+      if (naechstesJahr !== null) ergebnis = naechstesJahr
+    }
+    return ergebnis
+  }
+
+  // Ohne Datum: heute (bzw. am naechsten genannten Wochentag), sonst eine
+  // Periode (Tag bzw. Woche) spaeter.
+  let tageVoraus = 0
+  let periode = 1
+  if (wochentagText) {
+    const ziel = WOCHENTAGE[wochentagText.slice(0, 3).toLowerCase()]
+    if (ziel === undefined) return null
+    tageVoraus = (ziel - wochentagJetzt + 7) % 7
+    periode = 7
+  }
+  let ergebnis = zeitpunktFuer(jahrJetzt, monatJetzt, tagJetzt + tageVoraus)
   if (ergebnis === null) return null
-  if (ergebnis < jetzt - 24 * 60 * 60 * 1000) {
-    const naechstesJahr = zeitpunktFuer(jahrJetzt + 1)
-    if (naechstesJahr !== null) ergebnis = naechstesJahr
+  if (ergebnis < jetzt - RESET_OHNE_DATUM_TOLERANZ_MS) {
+    ergebnis = zeitpunktFuer(jahrJetzt, monatJetzt, tagJetzt + tageVoraus + periode)
   }
   return ergebnis
 }
