@@ -17,6 +17,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { USAGE_LIMIT_ERROR_PREFIXES } from '@anthropic-ai/claude-agent-sdk'
+import { DB_WARTEN_MS } from './db.js'
 
 const SPIEGEL = process.env.COCKPIT_SESSIONS ?? '/var/lib/cockpit/sessions-desktop'
 
@@ -92,7 +93,8 @@ let db: DatabaseSync | null = null
 
 function handle(pfad: string): DatabaseSync {
   if (!db) {
-    db = new DatabaseSync(pfad)
+    // Gleiche Datei wie CockpitDb -- gleiches Warten auf fremde Sperren.
+    db = new DatabaseSync(pfad, { timeout: DB_WARTEN_MS })
     db.exec('PRAGMA journal_mode = WAL')
     db.exec(SCHEMA)
   }

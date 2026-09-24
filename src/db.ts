@@ -112,12 +112,20 @@ CREATE TABLE IF NOT EXISTS konten_nutzung (
 );
 `
 
+/** Wie lange ein Schreibzugriff auf eine fremde Sperre wartet (ms). */
+export const DB_WARTEN_MS = 5000
+
 export class CockpitDb {
   private db: DatabaseSync
 
   constructor(pfad: string) {
     mkdirSync(dirname(pfad), { recursive: true })
-    this.db = new DatabaseSync(pfad)
+    // timeout = busy_timeout: haelt ein fremder Prozess (sqlite3 in der
+    // Shell, ein Backup) kurz die Schreibsperre, warten statt sofort
+    // "database is locked" zu werfen -- aus einem Ereignis-Handler des
+    // Supervisors heraus haette das den ganzen Daemon beendet. Blockiert die
+    // Ereignisschleife hoechstens so lange; das ist das kleinere Uebel.
+    this.db = new DatabaseSync(pfad, { timeout: DB_WARTEN_MS })
     // WAL: der Daemon schreibt laufend, das Frontend liest gleichzeitig.
     this.db.exec('PRAGMA journal_mode = WAL')
     this.db.exec('PRAGMA synchronous = NORMAL')

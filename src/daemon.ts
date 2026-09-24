@@ -102,13 +102,13 @@ function orchestratorLaufStarten(o: {
     .then((ende) => {
       const status =
         ende.grund === 'fertig' ? 'done' : ende.grund === 'abgebrochen' ? 'stopped' : 'failed'
-      db.runBeenden(runId, status, JSON.stringify(ende))
+      laufAbschliessen(runId, status, JSON.stringify(ende))
       verteilen('lauf_ende', { runId, ende })
       const gew = supervisor.agentenListe(runId).reduce((x, a) => x + a.weightedTokens, 0)
       const text = 'text' in ende ? ende.text : 'frage' in ende ? ende.frage : ''
       void discord?.laufBeendet(runId, ende.grund, String(text ?? ''), gew)
     })
-    .catch((e) => db.runBeenden(runId, 'failed', String(e)))
+    .catch((e) => laufAbschliessen(runId, 'failed', String(e)))
     .finally(() => {
       orchestratoren.delete(runId)
       // Jeder Lauf bekommt eine frische runId (anders als Chat/Konsole/
@@ -287,6 +287,23 @@ function verteilen(typ: string, daten: unknown): void {
 
 supervisor.on('ereignis', (e: CockpitEvent) => verteilen('ereignis', e))
 supervisor.on('agent', (a: { runId: string }) => verteilen('agent', a))
+/**
+ * Endstatus eines Laufs schreiben, ohne zu werfen.
+ *
+ * Steht am Ende einer Promise-Kette ohne weiteren Faenger: warf runBeenden
+ * dort (Platte voll, Sperre laenger als DB_WARTEN_MS), wurde daraus eine
+ * unhandledRejection, und Node beendet dann den ganzen Daemon -- samt aller
+ * anderen laufenden Agenten. Ein fehlender Endstatus in der Laufliste ist
+ * das kleinere Uebel.
+ */
+function laufAbschliessen(runId: string, status: string, grund: string | null): void {
+  try {
+    db.runBeenden(runId, status, grund)
+  } catch (e) {
+    console.warn(`[cockpit] Endstatus fuer Lauf ${runId} nicht gespeichert:`, String(e))
+  }
+}
+
 supervisor.on('freigabe', (f: { runId: string }) => verteilen('freigabe', f))
 // Der Limitstand gilt kontoweit, nicht je Lauf -- also an alle Klienten.
 supervisor.on('limit', (l: unknown) => verteilen('limit', l))
@@ -570,9 +587,9 @@ const server = createServer(async (req, res) => {
           // sonst stuende der Abbruch als 'failed' ("Operation aborted") in
           // der Laufliste und saehe nach einem Absturz aus.
           const gestoppt = supervisor.agentenListe(runId).some((a) => a.status === 'stopped')
-          db.runBeenden(runId, gestoppt ? 'stopped' : r.fehler ? 'failed' : 'done', gestoppt ? 'von Hand abgebrochen' : r.fehler)
+          laufAbschliessen(runId, gestoppt ? 'stopped' : r.fehler ? 'failed' : 'done', gestoppt ? 'von Hand abgebrochen' : r.fehler)
         })
-        .catch((e) => db.runBeenden(runId, 'failed', String(e)))
+        .catch((e) => laufAbschliessen(runId, 'failed', String(e)))
         // Wie bei orchestratorLaufStarten: eine frische runId je Aufruf, sonst
         // bleibt der Agent dieses Laufs fuer immer in supervisor.agenten.
         .finally(() => supervisor.laufVergessen(runId))

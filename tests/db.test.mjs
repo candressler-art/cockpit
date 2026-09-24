@@ -3,6 +3,7 @@
 import { CockpitDb } from '../dist/db.js'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { spawn } from 'node:child_process'
 import { join } from 'node:path'
 
 let ok = 0, gesamt = 0
@@ -138,6 +139,28 @@ const dbPfad = join(verzeichnis, 'test.db')
   const nutzung = db.kontoNutzungLesen()
   pruefe('nach Neu-Oeffnen: Nutzung bleibt erhalten',
     nutzung.zweit?.stand.siebenTageAnteil === 0.7 && nutzung.zweit?.quelle === 'rate_limit_event')
+  db.close()
+}
+
+// --- Fremder Schreiber (z. B. sqlite3 in der Shell) haelt kurz die Sperre ---
+// Ohne busy_timeout warf jeder Schreibzugriff sofort "database is locked" --
+// aus einem Ereignis-Handler des Supervisors heraus beendete das den Daemon.
+{
+  const db = new CockpitDb(dbPfad)
+  db.runAnlegen('gesperrt', 'l', '/tmp')
+  const halter = spawn(process.execPath, ['--no-warnings', '-e', `
+    const { DatabaseSync } = require('node:sqlite')
+    const d = new DatabaseSync(${JSON.stringify(dbPfad)})
+    d.exec('BEGIN IMMEDIATE')
+    d.exec("UPDATE runs SET label = 'fremd' WHERE run_id = 'gesperrt'")
+    process.stdout.write('gesperrt\\n')
+    setTimeout(() => { d.exec('COMMIT'); process.exit(0) }, 300)
+  `], { stdio: ['ignore', 'pipe', 'inherit'] })
+  await new Promise((fertig) => halter.stdout.once('data', fertig))
+  let fehler = null
+  try { db.runBeenden('gesperrt', 'done', null) } catch (e) { fehler = String(e) }
+  pruefe('Schreiben wartet auf fremde Sperre statt zu werfen', fehler === null)
+  await new Promise((fertig) => halter.once('exit', fertig))
   db.close()
 }
 
