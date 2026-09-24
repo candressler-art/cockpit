@@ -23,7 +23,8 @@ import {
 } from './chats.js'
 import { vaultIndizieren, vaultGraphLesen, vaultBeobachten, vaultDa, VAULT } from './vault.js'
 import { vaultZugriffErlaubt } from './vaultZugriff.js'
-import { konsoleBefehl, cwdPruefen } from './konsole.js'
+import { konsoleBefehl } from './konsole.js'
+import { cwdPruefen, zahlLesen } from './eingaben.js'
 import { nutzungAbfragen } from './kontenNutzung.js'
 import { fehlerStatus } from './httpFehler.js'
 import { ChatZuege } from './chatZuege.js'
@@ -536,6 +537,8 @@ const server = createServer(async (req, res) => {
       const label = String(k?.label ?? 'Chat')
       const model = k?.model ? String(k.model) : undefined
       if (!prompt) return json(400, { fehler: 'prompt fehlt' })
+      const schlecht = cwdPruefen(cwd)
+      if (schlecht) return json(400, { fehler: schlecht })
 
       const runId = randomUUID()
       db.runAnlegen(runId, label, cwd)
@@ -583,19 +586,28 @@ const server = createServer(async (req, res) => {
       const anfangsPrompt = String(k?.anfangsPrompt ?? '').trim()
       const cwd = String(k?.cwd ?? '')
       if (!anfangsPrompt) return json(400, { fehler: 'anfangsPrompt fehlt' })
-      if (!cwd) return json(400, { fehler: 'cwd fehlt' })
+      const schlecht = cwdPruefen(cwd)
+      if (schlecht) return json(400, { fehler: schlecht })
+      const maxRunden = zahlLesen(k?.maxRunden, 'maxRunden', { min: 1, ganzzahlig: true })
+      const parallelitaet = zahlLesen(k?.parallelitaet, 'parallelitaet', { min: 1, ganzzahlig: true })
+      const maxBudgetUsd = zahlLesen(k?.maxBudgetUsd, 'maxBudgetUsd', { min: 0 })
+      // 0 heisst hier "keine Grenze" (siehe Orchestrator), deshalb min 0.
+      const tokenBudget = zahlLesen(k?.tokenBudget, 'tokenBudget', { min: 0, ganzzahlig: true })
+      const zahlFehler = maxRunden.fehler ?? parallelitaet.fehler ?? maxBudgetUsd.fehler ?? tokenBudget.fehler
+      if (zahlFehler) return json(400, { fehler: zahlFehler })
 
       const runId = orchestratorLaufStarten({
         label: String(k?.label ?? 'Orchestrator-Lauf'),
         cwd,
         anfangsPrompt,
         projektBlock: String(k?.projektBlock ?? '(kein Projektblock angegeben)'),
-        maxRunden: k?.maxRunden ? Number(k.maxRunden) : undefined,
-        parallelitaet: k?.parallelitaet ? Number(k.parallelitaet) : undefined,
+        maxRunden: maxRunden.zahl,
+        parallelitaet: parallelitaet.zahl,
         orchestratorModell: k?.orchestratorModell ? String(k.orchestratorModell) : undefined,
         workerModell: k?.workerModell ? String(k.workerModell) : undefined,
-        maxBudgetUsd: k?.maxBudgetUsd ? Number(k.maxBudgetUsd) : undefined,
-        tokenBudget: k?.tokenBudget !== undefined ? Number(k.tokenBudget) : undefined,
+        // Wie bisher: 0 bedeutet "kein Dollar-Limit", nicht "sofort aufhoeren".
+        maxBudgetUsd: maxBudgetUsd.zahl || undefined,
+        tokenBudget: tokenBudget.zahl,
       })
       return json(202, { runId })
     }
