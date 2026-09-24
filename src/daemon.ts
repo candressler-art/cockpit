@@ -29,6 +29,7 @@ import { nutzungAbfragen } from './kontenNutzung.js'
 import { AnfrageFehler, fehlerStatus, koerperAuswerten, textFeld } from './httpFehler.js'
 import { ChatZuege } from './chatZuege.js'
 import { nachliefern, senden as klientSenden, type Klient } from './nachlieferung.js'
+import { auftraegeTrennen } from './protokoll.js'
 import { existsSync } from 'node:fs'
 
 const PORT = Number(process.env.COCKPIT_PORT ?? 8765)
@@ -593,6 +594,9 @@ const server = createServer(async (req, res) => {
       const anfangsPrompt = (textFeld(k, 'anfangsPrompt') ?? '').trim()
       const cwd = textFeld(k, 'cwd') ?? ''
       if (!anfangsPrompt) return json(400, { fehler: 'anfangsPrompt fehlt' })
+      if (auftraegeTrennen(anfangsPrompt).length === 0) {
+        return json(400, { fehler: 'anfangsPrompt enthaelt nur Trenner, keinen Auftrag' })
+      }
       const schlecht = cwdPruefen(cwd)
       if (schlecht) return json(400, { fehler: schlecht })
       const maxRunden = zahlLesen(k?.maxRunden, 'maxRunden', { min: 1, ganzzahlig: true })

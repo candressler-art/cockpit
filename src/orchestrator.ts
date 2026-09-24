@@ -316,6 +316,11 @@ export class Orchestrator extends EventEmitter {
     // Orchestrators ausloesen, also nicht gezielt pruefen.
     let auftraege: string[] = auftraegeTrennen(k.anfangsPrompt)
     let runde = 0
+    // Eine Runde ohne Auftrag startet keinen Worker und endete frueher mit
+    // der irrefuehrenden Meldung "Worker lieferte keinen Report".
+    if (auftraege.length === 0) {
+      return { grund: 'fehler', text: 'Anfangsauftrag enthaelt keinen Auftrag (nur Trenner oder leer)' }
+    }
 
     while (runde < k.maxRunden) {
       if (this.abbruch) return { grund: 'abgebrochen' }
@@ -527,6 +532,12 @@ export class Orchestrator extends EventEmitter {
       // parallelitaet erlaubt, arbeitet die naechste Runde sie ab, statt sie
       // stillschweigend fallenzulassen.
       auftraege = [...neueAuftraege, ...auftraege.slice(stapel.length)]
+      if (auftraege.length === 0) {
+        return {
+          grund: 'formatfehler',
+          text: 'Orchestrator antwortete mit leerem NAECHSTER-PROMPT, und es wartet kein weiterer Auftrag.',
+        }
+      }
     }
 
     return { grund: 'rundenlimit' }

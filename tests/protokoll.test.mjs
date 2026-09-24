@@ -18,6 +18,8 @@ const faelle = [
   ['Trenner mit Leerzeichen', 'A\n  --- WORKER ---  \nB', 2],
   ['leere Abschnitte werden verworfen', 'A\n---WORKER---\n\n---WORKER---\nB', 2],
   ['Trenner mitten im Satz zaehlt nicht', 'Schreibe ---WORKER--- in die Datei.', 1],
+  ['nur Trenner ergibt keinen Auftrag', '\n--- WORKER ---\n', 0],
+  ['leerer Text ergibt keinen Auftrag', '   ', 0],
 ]
 let ok = 0
 for (const [name, text, erwartet] of faelle) {
