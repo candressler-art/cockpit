@@ -729,5 +729,52 @@ const SDK_LIMIT_PRAEFIXE = ["You've hit your", "You've reached your"]
     resetUnbekannt.fuenfStundenAnteil === 0.5 && resetUnbekannt.siebenTageAnteil === 1)
 }
 
+// --- 19. Sperrgrund: nur eine Anmeldesperre darf vorzeitig fallen ----------
+// Vorher blieb ein Konto nach einem Anmeldefehler die vollen 5 Stunden
+// gesperrt, auch wenn Can es sofort per /login neu angemeldet hatte.
+{
+  const jetzt = Date.now()
+  const kv = new KontenVerwaltung()
+  kv.sperren('zweit', jetzt + 100_000, 'anmeldung')
+  kv.sperren('dritt', jetzt + 100_000) // Vorgabe: 'limit'
+  pruefe('Anmeldesperre: wird aufgehoben', kv.anmeldeSperreAufheben('zweit') === true)
+  pruefe('Anmeldesperre: zweites Aufheben ist ein No-op', kv.anmeldeSperreAufheben('zweit') === false)
+  pruefe('Limitsperre: bleibt bestehen', kv.anmeldeSperreAufheben('dritt') === false)
+  pruefe('ungesperrtes Konto: nichts aufzuheben', kv.anmeldeSperreAufheben('haupt') === false)
+
+  // Eine Limitsperre ueberschreibt eine vorige Anmeldesperre -- und ist
+  // danach nicht mehr vorzeitig aufhebbar.
+  kv.sperren('zweit', jetzt + 100_000, 'anmeldung')
+  kv.sperren('zweit', jetzt + 200_000, 'limit')
+  pruefe('Limit nach Anmeldung: Grund wird ueberschrieben', kv.anmeldeSperreAufheben('zweit') === false)
+
+  // Persistenz: Grund wird mitgeschrieben und beim Start wieder gelesen;
+  // Aufheben schreibt Zeitpunkt 0 (beim Laden verworfen).
+  const sperren = {}, gruende = {}
+  const persistenz = {
+    kontoSperrenLesen: () => ({ ...sperren }),
+    kontoSperren: (name, bis, grund) => { sperren[name] = bis; gruende[name] = grund ?? 'limit' },
+    kontoSperrGruendeLesen: () => ({ ...gruende }),
+    kontoVorzugLesen: () => null,
+    kontoVorzugSetzen: () => {},
+    kontoNutzungLesen: () => ({}),
+    kontoNutzungSpeichern: () => {},
+  }
+  const kv1 = new KontenVerwaltung(persistenz)
+  kv1.sperren('zweit', jetzt + 100_000, 'anmeldung')
+  kv1.sperren('dritt', jetzt + 100_000, 'limit')
+  pruefe('Persistenz: Grund wird mitgeschrieben', gruende.zweit === 'anmeldung' && gruende.dritt === 'limit')
+  const kv2 = new KontenVerwaltung(persistenz)
+  pruefe('nach Neustart: Anmeldesperre weiterhin aufhebbar', kv2.anmeldeSperreAufheben('zweit') === true)
+  pruefe('Aufheben persistiert (Zeitpunkt 0)', sperren.zweit === 0)
+  pruefe('nach Neustart: Limitsperre weiterhin fest', kv2.anmeldeSperreAufheben('dritt') === false)
+
+  // Aeltere Persistenz ohne kontoSperrGruendeLesen: Sperre gilt als 'limit'.
+  const altePersistenz = { ...persistenz, kontoSperrGruendeLesen: undefined }
+  sperren.zweit = jetzt + 100_000
+  const kv3 = new KontenVerwaltung(altePersistenz)
+  pruefe('ohne Gruende-Lesen: Sperre gilt vorsichtig als Limit', kv3.anmeldeSperreAufheben('zweit') === false)
+}
+
 console.log(`\n${ok}/${gesamt} bestanden`)
 if (ok !== gesamt) process.exit(1)

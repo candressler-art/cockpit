@@ -42,6 +42,40 @@ const dbPfad = join(verzeichnis, 'test.db')
   db.close()
 }
 
+// --- Sperrgrund: wird gespeichert, Vorgabe 'limit' ---
+{
+  const db = new CockpitDb(dbPfad)
+  const gruende = db.kontoSperrGruendeLesen()
+  pruefe('Sperre ohne Grund gespeichert: gilt als limit', gruende.zweit === 'limit')
+  db.kontoSperren('vierte', 4_000_000, 'anmeldung')
+  pruefe('Anmeldesperre: Grund gespeichert', db.kontoSperrGruendeLesen().vierte === 'anmeldung')
+  db.kontoSperren('vierte', 5_000_000, 'limit')
+  pruefe('neue Sperre ueberschreibt den Grund', db.kontoSperrGruendeLesen().vierte === 'limit')
+  db.close()
+}
+
+// --- Bestandsdatenbank ohne Spalte grund: Migration traegt sie nach ---
+{
+  const { DatabaseSync } = await import('node:sqlite')
+  const altPfad = join(verzeichnis, 'alt.db')
+  const roh = new DatabaseSync(altPfad)
+  roh.exec(`CREATE TABLE konten_sperren (name TEXT PRIMARY KEY, bis INTEGER NOT NULL);
+    CREATE TABLE schema_version (version INTEGER NOT NULL);
+    INSERT INTO schema_version (version) VALUES (1);
+    INSERT INTO konten_sperren (name, bis) VALUES ('zweit', 9000000);`)
+  roh.close()
+  let db
+  try { db = new CockpitDb(altPfad) } catch (e) { console.log('   ', String(e)) }
+  pruefe('Migration: alte Datenbank laesst sich oeffnen', Boolean(db))
+  if (db) {
+    pruefe('Migration: alte Sperre bleibt, Grund limit',
+      db.kontoSperrenLesen().zweit === 9_000_000 && db.kontoSperrGruendeLesen().zweit === 'limit')
+    db.kontoSperren('zweit', 1, 'anmeldung')
+    pruefe('Migration: neue Spalte beschreibbar', db.kontoSperrGruendeLesen().zweit === 'anmeldung')
+    db.close()
+  }
+}
+
 // --- Vorzugskonto: setzen, aendern, aufheben ---
 {
   const db = new CockpitDb(dbPfad)

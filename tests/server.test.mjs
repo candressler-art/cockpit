@@ -60,6 +60,14 @@ const basisKonto = { name: 'zweit', configDir: '/x', angemeldet: true, email: 'a
   pruefe('nicht angemeldet: keine Messungs-Ringe im HTML', !abgemeldet.includes('kontomessungen'))
   pruefe('nicht angemeldet: Pill sagt das', abgemeldet.includes('nicht angemeldet'))
 }
+{
+  // Sperrgrund sichtbar: eine Anmeldesperre sagt das, eine Limitsperre nicht.
+  const bis = Date.now() + 3_600_000
+  const anmeldung = kontoKarte({ ...basisKonto, gesperrtBis: bis, sperrGrund: 'anmeldung', siebenTageAnteil: null, fuenfStundenAnteil: null, gemessenAm: null })
+  pruefe('Anmeldesperre: Pill nennt Anmeldefehler', anmeldung.includes('Anmeldefehler · gesperrt bis'))
+  const limit = kontoKarte({ ...basisKonto, gesperrtBis: bis, sperrGrund: 'limit', siebenTageAnteil: 1, fuenfStundenAnteil: 0.2, gemessenAm: Date.now() })
+  pruefe('Limitsperre: Pill ohne Anmeldefehler', limit.includes('gesperrt bis') && !limit.includes('Anmeldefehler'))
+}
 
 console.log(`\n${ok}/${gesamt} bestanden`)
 if (ok !== gesamt) process.exit(1)

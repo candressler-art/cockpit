@@ -125,7 +125,9 @@ export function kontoKarte(k) {
       ${!k.angemeldet
         ? '<span class="pill ab">nicht angemeldet</span>'
         : gesperrt
-          ? `<span class="pill heiss">${esc(resetText(k.gesperrtBis))}</span>`
+          ? k.sperrGrund === 'anmeldung'
+            ? `<span class="pill heiss" title="Anmeldefehler -- nach /login hebt die naechste erfolgreiche Nutzungsabfrage die Sperre auf">Anmeldefehler · ${esc(resetText(k.gesperrtBis))}</span>`
+            : `<span class="pill heiss">${esc(resetText(k.gesperrtBis))}</span>`
           : '<span class="pill an">frei</span>'}
     </header>
     <div class="kontozeile">

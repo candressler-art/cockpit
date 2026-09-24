@@ -81,8 +81,9 @@ CREATE INDEX IF NOT EXISTS idx_perm_offen ON permissions (run_id, decided_at);
 -- Reset gesperrt war, wurde sofort wieder probiert. Verstoesst gegen die
 -- Grundregel oben ("kein Zustand im Speicher, der nicht auch hier steht").
 CREATE TABLE IF NOT EXISTS konten_sperren (
-  name TEXT PRIMARY KEY,
-  bis  INTEGER NOT NULL
+  name  TEXT PRIMARY KEY,
+  bis   INTEGER NOT NULL,
+  grund TEXT NOT NULL DEFAULT 'limit'
 );
 
 CREATE TABLE IF NOT EXISTS konten_vorzug (
@@ -150,6 +151,17 @@ export class CockpitDb {
         /* Spalte war schon da (neu angelegte Datenbank) */
       }
       stand = 1
+    }
+
+    if (stand < 2) {
+      // Sperrgrund (siehe SperrGrund in konten.ts). Bestandszeilen bekommen
+      // 'limit' -- die vorsichtige Lesart, die nie vorzeitig aufgehoben wird.
+      try {
+        this.db.exec("ALTER TABLE konten_sperren ADD COLUMN grund TEXT NOT NULL DEFAULT 'limit'")
+      } catch {
+        /* Spalte war schon da (neu angelegte Datenbank) */
+      }
+      stand = 2
     }
 
     this.db.prepare('UPDATE schema_version SET version = ?').run(stand)
@@ -332,13 +344,24 @@ export class CockpitDb {
   }
 
   /** Merkt eine Kontosperre dauerhaft, ueberlebt einen Daemon-Neustart. */
-  kontoSperren(name: string, bis: number): void {
+  kontoSperren(name: string, bis: number, grund: 'limit' | 'anmeldung' = 'limit'): void {
     this.db
       .prepare(
-        `INSERT INTO konten_sperren (name, bis) VALUES (?, ?)
-         ON CONFLICT (name) DO UPDATE SET bis = excluded.bis`,
+        `INSERT INTO konten_sperren (name, bis, grund) VALUES (?, ?, ?)
+         ON CONFLICT (name) DO UPDATE SET bis = excluded.bis, grund = excluded.grund`,
       )
-      .run(name, bis)
+      .run(name, bis, grund)
+  }
+
+  /** Sperrgrund je Konto (siehe SperrGrund in konten.ts). */
+  kontoSperrGruendeLesen(): Record<string, 'limit' | 'anmeldung'> {
+    const rows = this.db.prepare(`SELECT name, grund FROM konten_sperren`).all() as {
+      name: string
+      grund: string
+    }[]
+    const out: Record<string, 'limit' | 'anmeldung'> = {}
+    for (const r of rows) out[r.name] = r.grund === 'anmeldung' ? 'anmeldung' : 'limit'
+    return out
   }
 
   /** Manuell gesetztes Vorzugskonto, oder null ohne Vorzug. */

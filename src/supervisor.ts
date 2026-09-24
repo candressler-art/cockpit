@@ -150,6 +150,11 @@ export class Supervisor extends EventEmitter {
     // der Limitfehler ohnehin und der Wechsel oben sperrt selbst.
     if (quelle === 'usage_api' && stand.status === 'rejected') {
       this.konten.sperren(name, sperrzeitpunktAusLimitstand(stand, Date.now(), KONTO_SPERRE_VORGABE_MS))
+    } else if (quelle === 'usage_api' && this.konten.anmeldeSperreAufheben(name)) {
+      // Der Poll kam mit genau dem Token dieses Kontos durch -- eine Sperre
+      // wegen eines Anmeldefehlers ist damit ueberholt (typisch: Can hat das
+      // Konto nach dem Fehler per /login neu angemeldet).
+      console.log(`[konten] Anmeldesperre fuer '${name}' aufgehoben: Nutzungsabfrage wieder erfolgreich`)
     }
   }
 
@@ -324,7 +329,11 @@ export class Supervisor extends EventEmitter {
         const standDesKontos = this.konten.nutzungLesen(konto.name)?.stand ?? null
         const textFallback = resetzeitAusFehlertext(fehler ?? '', Date.now())
         const reset = sperrzeitpunktAusLimitstand(standDesKontos, Date.now(), KONTO_SPERRE_VORGABE_MS, textFallback)
-        this.konten.sperren(konto.name, reset)
+        // Ein Anmeldefehler bekommt dieselbe Sperrdauer, aber einen eigenen
+        // Grund -- der naechste erfolgreiche Nutzungs-Poll darf ihn wieder
+        // aufheben (siehe nutzungMelden), eine Limitsperre nicht.
+        const grund = kontoFehlerLabel(fehler ?? '', USAGE_LIMIT_ERROR_PREFIXES) === 'Anmeldefehler' ? 'anmeldung' : 'limit'
+        this.konten.sperren(konto.name, reset, grund)
         const naechstes = this.konten.waehlen(versuchteKonten)
         if (!naechstes) break // alle Konten gesperrt -- altes Wartevehalten bleibt
 

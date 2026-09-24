@@ -31,6 +31,8 @@ export interface Konto {
 export interface KontoMitZustand extends Konto {
   /** null: frei. Sonst ms-Zeitstempel, bis zu dem das Konto gesperrt ist. */
   gesperrtBis: number | null
+  /** Warum gesperrt (null, wenn frei) -- siehe SperrGrund. */
+  sperrGrund: SperrGrund | null
   /** Manuell als Vorzug gesetzt (Uebersteuerung, siehe Uebersicht.modus). */
   bevorzugt: boolean
   /** Anteil 0..1 am 5h-Fenster, oder null, wenn nie gemessen. */
@@ -265,7 +267,10 @@ export function kontoWaehlen(
  */
 export interface KontenPersistenz {
   kontoSperrenLesen(): Record<string, number>
-  kontoSperren(name: string, bis: number): void
+  kontoSperren(name: string, bis: number, grund?: SperrGrund): void
+  /** Optional, damit aeltere Test-Attrappen ohne Grund weiter passen --
+   *  fehlt ein Eintrag, gilt die Sperre als 'limit' (die vorsichtige Lesart). */
+  kontoSperrGruendeLesen?(): Record<string, SperrGrund>
   kontoVorzugLesen(): string | null
   kontoVorzugSetzen(name: string | null): void
   kontoNutzungLesen(): Record<string, { stand: LimitStand; quelle: 'usage_api' | 'rate_limit_event' }>
@@ -300,9 +305,22 @@ export function nutzungBeimLadenFiltern(stand: LimitStand, jetzt: number): Limit
   }
 }
 
+/**
+ * Warum ein Konto gesperrt ist. 'limit': volles Nutzungsfenster -- die
+ * Sperre haelt bis zum Reset, egal was sonst passiert. 'anmeldung': die CLI
+ * meldete einen Anmeldefehler (Token abgelaufen und nicht erneuerbar,
+ * abgemeldet). So eine Sperre ist nur eine Vermutung ueber die naechsten
+ * Stunden -- meldet Can das Konto per /login neu an, belegt der naechste
+ * erfolgreiche Nutzungs-Poll, dass das Token wieder gilt, und hebt sie auf
+ * (anmeldeSperreAufheben). Vorher blieb ein frisch neu angemeldetes Konto
+ * die vollen 5 Stunden gesperrt, ohne Weg, das aufzuheben.
+ */
+export type SperrGrund = 'limit' | 'anmeldung'
+
 export class KontenVerwaltung {
   private bevorzugt: string | null = null
   private gesperrtBis = new Map<string, number>()
+  private sperrGrund = new Map<string, SperrGrund>()
   /**
    * Letzter bekannter Nutzungsstand je Konto -- aus welcher der beiden
    * Quellen auch immer zuletzt etwas kam (kontenNutzung.ts fuer den
@@ -335,8 +353,12 @@ export class KontenVerwaltung {
   constructor(private readonly persistenz?: KontenPersistenz) {
     if (!persistenz) return
     const jetzt = Date.now()
+    const gruende = persistenz.kontoSperrGruendeLesen?.() ?? {}
     for (const [name, bis] of Object.entries(persistenz.kontoSperrenLesen())) {
-      if (bis > jetzt) this.gesperrtBis.set(name, bis)
+      if (bis > jetzt) {
+        this.gesperrtBis.set(name, bis)
+        this.sperrGrund.set(name, gruende[name] ?? 'limit')
+      }
     }
     this.bevorzugt = persistenz.kontoVorzugLesen()
     for (const [name, { stand, quelle }] of Object.entries(persistenz.kontoNutzungLesen())) {
@@ -355,9 +377,28 @@ export class KontenVerwaltung {
   }
 
   /** Merkt ein Konto als gesperrt bis zum angegebenen Zeitpunkt. */
-  sperren(name: string, bisMs: number): void {
+  sperren(name: string, bisMs: number, grund: SperrGrund = 'limit'): void {
     this.gesperrtBis.set(name, bisMs)
-    this.persistenz?.kontoSperren(name, bisMs)
+    this.sperrGrund.set(name, grund)
+    this.persistenz?.kontoSperren(name, bisMs, grund)
+  }
+
+  /**
+   * Hebt eine laufende Sperre auf, aber NUR, wenn sie wegen eines
+   * Anmeldefehlers gesetzt wurde -- eine Limitsperre bleibt unangetastet.
+   * Aufrufer ist der Nutzungs-Poll nach einer erfolgreichen Antwort (das
+   * Token gilt also nachweislich wieder). true, wenn wirklich etwas
+   * aufgehoben wurde.
+   */
+  anmeldeSperreAufheben(name: string): boolean {
+    const bis = this.gesperrtBis.get(name)
+    if (bis === undefined || bis <= Date.now() || this.sperrGrund.get(name) !== 'anmeldung') return false
+    this.gesperrtBis.delete(name)
+    this.sperrGrund.delete(name)
+    // Zeitpunkt 0 statt DELETE: beim naechsten Start verwirft der
+    // Konstruktor abgelaufene Sperren ohnehin, das Interface bleibt schmal.
+    this.persistenz?.kontoSperren(name, 0, 'anmeldung')
+    return true
   }
 
   private gesperrtBisMap(): Map<string, number | null> {
@@ -424,6 +465,7 @@ export class KontenVerwaltung {
       return {
         ...k,
         gesperrtBis: bis !== null && bis > jetzt ? bis : null,
+        sperrGrund: bis !== null && bis > jetzt ? (this.sperrGrund.get(k.name) ?? 'limit') : null,
         bevorzugt: k.name === this.bevorzugt,
         fuenfStundenAnteil: n?.stand.fuenfStundenAnteil ?? null,
         siebenTageAnteil: n?.stand.siebenTageAnteil ?? null,
