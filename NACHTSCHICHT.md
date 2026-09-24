@@ -12,18 +12,29 @@ fruehere Fassung dieser Datei (bis Durchgang 12, vor dem Kuerzen hier).
   das ist jetzt Prioritaet 1 fuer die naechsten Durchgaenge, siehe unten.
 - **Durchgang 13:** Diese Datei war auf 1127 Zeilen angewachsen (jeder
   Durchgang liest und bezahlt sie komplett) -- auf unter 150 Zeilen gekuerzt.
-  Kein Code geaendert. Alte Inhalte bleiben per `git log -p` erreichbar.
+  Danach den ersten Prioritaet-1-Punkt aus Cans Beobachtung angegangen:
+  `konten_nutzung`-Tabelle ergaenzt, letzter Nutzungsstand je Konto ueberlebt
+  jetzt einen Neustart (Commit `aebf9e8`, Details unten). 429-Backoff,
+  Reset-Zeit aus der CLI-Meldung parsen und die UI-Unterscheidung
+  "keine Messung" vs. "0%" sind davon NICHT abgedeckt, bleiben offen.
 
 ## Offene Punkte (naechste Durchgaenge, Prioritaet 1 zuerst)
 
-1. **Messwert-Luecke nach Daemon-Neustart** (aus Cans Beobachtung): Token
-   des Hauptkontos abgelaufen -> Poll liefert 401, `zweit` liefert 429 vom
-   Nutzungs-Endpunkt -> `/api/konten` empfiehlt trotzdem `haupt`, obwohl es
-   im Wochenlimit steckt. Ideen aus der Aufgabenstellung: Messungen (mit
-   Reset-Zeitpunkt) persistieren solange ihr Fenster laeuft; 429 mit Backoff
-   behandeln; Reset-Zeit aus der CLI-Limit-Meldung parsen, wenn kein
-   `rate_limit_event` sie liefert; Oberflaeche soll "keine Messung (Token
-   abgelaufen)" von "0%" unterscheiden. **Noch nicht begonnen.**
+1. **Messwert-Luecke nach Daemon-Neustart, Rest** (aus Cans Beobachtung):
+   der Kern -- dass ein Konto nach dem Neustart faelschlich als "0% genutzt"
+   durchgeht, obwohl es im Limit war -- ist behoben (`aebf9e8`, siehe unten).
+   Noch offen:
+   - **429 mit Backoff behandeln:** `kontenNutzung.ts` liefert bei jedem
+     `!antwort.ok` (auch 429) einfach `null`, der naechste Poll (10 min
+     spaeter) versucht es stumpf erneut. Kein eigenes Backoff fuer
+     wiederholte 429 vom `/api/oauth/usage`-Endpunkt selbst.
+   - **Reset-Zeit aus der CLI-Limit-Meldung parsen**, wenn kein
+     `rate_limit_event` sie liefert (Beispieltext in der Aufgabenstellung:
+     "You've hit your weekly limit · resets Sep 26, 4am (Europe/Berlin)").
+   - **Oberflaeche:** "keine Messung (Token abgelaufen)" von "0%"
+     unterscheiden -- `gemessenAm === null` ist im Server-Tab bereits im
+     Datenmodell vorhanden (siehe `KontoMitZustand`), aber `web/tabs/
+     server.js` nutzt das Feld fuer die Anzeige noch nicht gezielt dafuer.
 2. **Weitere Multi-Konto-Luecken** selbst suchen (z.B. Konto wird waehrend
    eines langen Laufs abgemeldet). **Noch nicht begonnen.**
 3. **Chat-Sitzungen wachsen minimal im Supervisor-Speicher:** ein Eintrag
@@ -52,6 +63,11 @@ fruehere Fassung dieser Datei (bis Durchgang 12, vor dem Kuerzen hier).
 
 ## Erledigt (chronologisch, mit Commit)
 
+- `aebf9e8` Konten: Nutzungsstand ueberlebt jetzt einen Daemon-Neustart (neue
+  Tabelle `konten_nutzung`, `nutzungBeimLadenFiltern()` verwirft dabei
+  Fenster mit laengst vergangenem Reset-Zeitpunkt). Live gegen die
+  Testinstanz geprueft: nach Neustart mit vorher persistierter 100%-Messung
+  fuer `haupt` empfiehlt `/api/konten` korrekt `dritt`, nicht mehr `haupt`.
 - `e340d9a` Chats: Nutzungslimit-Meldung nicht mehr als falsche Antwort angezeigt
 - `d56b87c` Tabs: inaktive Flaechen verdecken aktiven Tab nicht mehr
 - `98435ae` Konten-Balancing: Nutzung je Konto messen, niedrigstes Wochenkonto zuerst
