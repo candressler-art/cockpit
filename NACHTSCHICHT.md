@@ -9,42 +9,29 @@ fruehere Fassung dieser Datei (bis Durchgang 12, vor dem Kuerzen hier).
 - Nacht 1 (21 Commits bis "Logbuch nach Durchgang 12") ist live ausgerollt.
   Danach hast Du drei konkrete Beobachtungen aus dem echten Betrieb notiert
   (Token-Ablauf, 429 bei `zweit`, falsche Kontoempfehlung nach Neustart) --
-  das ist jetzt Prioritaet 1 fuer die naechsten Durchgaenge, siehe unten.
-- **Durchgang 13:** Diese Datei war auf 1127 Zeilen angewachsen (jeder
-  Durchgang liest und bezahlt sie komplett) -- auf unter 150 Zeilen gekuerzt.
-  Danach den ersten Prioritaet-1-Punkt aus Cans Beobachtung angegangen:
-  `konten_nutzung`-Tabelle ergaenzt, letzter Nutzungsstand je Konto ueberlebt
-  jetzt einen Neustart (Commit `aebf9e8`, Details unten). 429-Backoff,
-  Reset-Zeit aus der CLI-Meldung parsen und die UI-Unterscheidung
-  "keine Messung" vs. "0%" sind davon NICHT abgedeckt, bleiben offen.
+  das war Prioritaet 1 fuer die naechsten Durchgaenge.
+- **Durchgang 13:** Logbuch gekuerzt; Messwert-Persistenz ueber einen
+  Neustart hinweg gebaut (`aebf9e8`).
+- **Durchgang 14:** die drei verbliebenen Punkte aus Cans Beobachtung
+  abgeschlossen -- 429-Backoff beim Nutzungspoll und Reset-Zeit aus dem
+  CLI-Fehlertext lesen (`3cd4a73`), dazu ein Regressionstest fuer die
+  UI-Unterscheidung "keine Messung" vs. "0%" (die war inhaltlich schon seit
+  Durchgang 1 korrekt, `98435ae`, hatte nur keinen Test, jetzt `2685036`).
+  Damit ist Cans Beobachtungsliste abgearbeitet. Naechster Schwerpunkt:
+  Punkt 1 unten (weitere Multi-Konto-Luecken selbst suchen).
 
 ## Offene Punkte (naechste Durchgaenge, Prioritaet 1 zuerst)
 
-1. **Messwert-Luecke nach Daemon-Neustart, Rest** (aus Cans Beobachtung):
-   der Kern -- dass ein Konto nach dem Neustart faelschlich als "0% genutzt"
-   durchgeht, obwohl es im Limit war -- ist behoben (`aebf9e8`, siehe unten).
-   Noch offen:
-   - **429 mit Backoff behandeln:** `kontenNutzung.ts` liefert bei jedem
-     `!antwort.ok` (auch 429) einfach `null`, der naechste Poll (10 min
-     spaeter) versucht es stumpf erneut. Kein eigenes Backoff fuer
-     wiederholte 429 vom `/api/oauth/usage`-Endpunkt selbst.
-   - **Reset-Zeit aus der CLI-Limit-Meldung parsen**, wenn kein
-     `rate_limit_event` sie liefert (Beispieltext in der Aufgabenstellung:
-     "You've hit your weekly limit · resets Sep 26, 4am (Europe/Berlin)").
-   - **Oberflaeche:** "keine Messung (Token abgelaufen)" von "0%"
-     unterscheiden -- `gemessenAm === null` ist im Server-Tab bereits im
-     Datenmodell vorhanden (siehe `KontoMitZustand`), aber `web/tabs/
-     server.js` nutzt das Feld fuer die Anzeige noch nicht gezielt dafuer.
-2. **Weitere Multi-Konto-Luecken** selbst suchen (z.B. Konto wird waehrend
+1. **Weitere Multi-Konto-Luecken** selbst suchen (z.B. Konto wird waehrend
    eines langen Laufs abgemeldet). **Noch nicht begonnen.**
-3. **Chat-Sitzungen wachsen minimal im Supervisor-Speicher:** ein Eintrag
+2. **Chat-Sitzungen wachsen minimal im Supervisor-Speicher:** ein Eintrag
    pro NEU ERSTELLTER Sitzung bleibt fuer immer in `supervisor.agenten`
    (viel kleiner als das in Durchgang 6 behobene Leck, da Fortschreiben nur
    ueberschreibt statt anzuhaeufen). Braucht eine Produktentscheidung, wann
    eine Sitzung als "verworfen" gilt -- nicht angefasst.
-4. **`src-tauri/`** nie angefasst (kein `cargo` in dieser Umgebung) -- auf
+3. **`src-tauri/`** nie angefasst (kein `cargo` in dieser Umgebung) -- auf
    dem PC bauen und pruefen.
-5. Prioritaet 2/3 laut Aufgabenstellung: Oberflaeche weiter feinschleifen
+4. Prioritaet 2/3 laut Aufgabenstellung: Oberflaeche weiter feinschleifen
    (Konsistenz, Handy, Tastatur, Ladezustaende), mehr End-to-End-Szenarien,
    Daemon-Robustheit bei Last/Fehlern -- bisher nur das oben Gelistete tief
    geprueft, nicht erschoepfend.
@@ -63,6 +50,14 @@ fruehere Fassung dieser Datei (bis Durchgang 12, vor dem Kuerzen hier).
 
 ## Erledigt (chronologisch, mit Commit)
 
+- `2685036` Server-Tab: Regressionstest fuer "keine Messung" vs. "0%" (war
+  inhaltlich schon korrekt seit `98435ae`, jetzt mit Test in
+  `tests/server.test.mjs` -- kontoKarte()/nutzungHerkunft()/pz() dafuer aus
+  `web/tabs/server.js` benannt exportiert).
+- `3cd4a73` Konten: 429-Backoff beim Nutzungspoll (naechsteBackoffMs(),
+  verdoppelt sich je Folge-429, gedeckelt bei 2h), Reset-Zeit aus dem
+  CLI-Fehlertext lesen, wenn Wochenlimit-Format mit Datum+Zeitzone vorliegt
+  (resetzeitAusFehlertext(), ueber Intl, kein Zeitzonen-Tabellen-Paket noetig).
 - `aebf9e8` Konten: Nutzungsstand ueberlebt jetzt einen Daemon-Neustart (neue
   Tabelle `konten_nutzung`, `nutzungBeimLadenFiltern()` verwirft dabei
   Fenster mit laengst vergangenem Reset-Zeitpunkt). Live gegen die
