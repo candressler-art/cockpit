@@ -141,7 +141,60 @@ function agentSetzen(a) {
   zeitachse?.setzen([...agenten.values()])
 }
 
+/** Agentenzustaende, nach denen nichts mehr kommt. */
+const ENDE = new Set(['done', 'failed', 'stopped'])
+
+/**
+ * Den Stopp-Knopf nur zeigen, solange in diesem Lauf noch ein Agent arbeitet
+ * oder wartet -- ein Knopf, der nichts tun kann, waere nur Rauschen.
+ */
+function stoppZeichnen() {
+  const knopf = $('#stopp')
+  const laeuft = [...agenten.values()].some((a) => !a.endedAt && !ENDE.has(a.status))
+  knopf.hidden = !runId || !laeuft
+  if (knopf.hidden) stoppZuruecksetzen()
+}
+
+let stoppFrage = null
+function stoppZuruecksetzen() {
+  clearTimeout(stoppFrage)
+  stoppFrage = null
+  $('#stopp').textContent = 'Stoppen'
+}
+
+/**
+ * Zwei Klicks statt confirm(): der erste fragt nach, der zweite binnen drei
+ * Sekunden stoppt. confirm() ist in der Desktop-App (WebKitGTK) nicht
+ * verlaesslich, und ein versehentlicher Tipp am Handy soll keinen Lauf
+ * beenden.
+ */
+async function stoppen() {
+  const knopf = $('#stopp')
+  if (!stoppFrage) {
+    knopf.textContent = 'Wirklich stoppen?'
+    stoppFrage = setTimeout(stoppZuruecksetzen, 3000)
+    return
+  }
+  stoppZuruecksetzen()
+  knopf.disabled = true
+  try {
+    const r = await fetch(api('/api/abbrechen'), {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ runId }),
+    })
+    // 404 heisst: der Daemon kennt keinen laufenden Agenten mehr (schon
+    // fertig, oder der Daemon wurde seither neu gestartet). Dann stimmt die
+    // Anzeige nicht mehr -- neu laden statt still nichts zu tun.
+    if (!r.ok) await logNeuLaden()
+  } catch {
+    // Daemon weg: die Verbindungsanzeige sagt das bereits.
+  } finally {
+    knopf.disabled = false
+  }
+}
+
 function agentenZeichnen() {
+  stoppZeichnen()
   if (agenten.size === 0) { agentenEl.innerHTML = '<div class="leer">noch keine</div>'; return }
   agentenEl.innerHTML = ''
   for (const a of agenten.values()) {
@@ -325,6 +378,7 @@ async function starten() {
 }
 
 $('#senden').onclick = starten
+$('#stopp').onclick = stoppen
 $('#prompt').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); starten() }
 })

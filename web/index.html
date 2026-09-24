@@ -178,6 +178,9 @@
     header #budget{display:none}
     header select{max-width:130px}
     header .spacer{flex:0 0 4px}
+    /* Die Kopfzeile scrollt hier seitlich -- ganz hinten laege "Stoppen"
+       ausserhalb des Bildschirms, genau wenn man es braucht. */
+    header #stopp{order:-1}
     #tableiste{grid-row:3;padding:0;justify-content:space-around;
       border-bottom:0;border-top:1px solid var(--surface0)}
     #tableiste button{flex:1;flex-direction:column;gap:3px;justify-content:center;
@@ -523,6 +526,7 @@
     <button class="still schubladenknopf" id="aufAgenten" title="Agenten">☰</button>
     <select id="laufwahl" title="Lauf"></select>
     <button class="still" id="neu">Neuer Lauf</button>
+    <button class="nein" id="stopp" hidden title="Alle noch laufenden Agenten dieses Laufs abbrechen">Stoppen</button>
     <select id="stimmwahl" title="Sprachausgabe">
       <option value="aus">🔇 stumm</option>
       <option value="wichtig">🔔 Wichtiges</option>

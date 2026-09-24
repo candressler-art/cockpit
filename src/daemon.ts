@@ -548,7 +548,13 @@ const server = createServer(async (req, res) => {
           cwd,
           model,
         })
-        .then((r) => db.runBeenden(runId, r.fehler ? 'failed' : 'done', r.fehler))
+        .then((r) => {
+          // Von Hand gestoppt heisst 'stopped' wie beim Orchestrator-Lauf --
+          // sonst stuende der Abbruch als 'failed' ("Operation aborted") in
+          // der Laufliste und saehe nach einem Absturz aus.
+          const gestoppt = supervisor.agentenListe(runId).some((a) => a.status === 'stopped')
+          db.runBeenden(runId, gestoppt ? 'stopped' : r.fehler ? 'failed' : 'done', gestoppt ? 'von Hand abgebrochen' : r.fehler)
+        })
         .catch((e) => db.runBeenden(runId, 'failed', String(e)))
         // Wie bei orchestratorLaufStarten: eine frische runId je Aufruf, sonst
         // bleibt der Agent dieses Laufs fuer immer in supervisor.agenten.
@@ -605,12 +611,18 @@ const server = createServer(async (req, res) => {
       const agentId = k?.agentId ? String(k.agentId) : null
       if (!agentId) {
         // Ganzen Lauf stoppen: der Orchestrator beendet nach der laufenden Runde.
+        // Ein Einzellauf (/api/lauf) oder ein Chat-Zug hat keinen
+        // Orchestrator -- dort zaehlt, ob wenigstens ein Agent tatsaechlich
+        // gestoppt wurde. Frueher kam hier 404, obwohl der Agent gerade
+        // abgebrochen worden war.
         const orch = orchestratoren.get(runId)
         if (orch) orch.abbrechen()
+        let gestoppt = 0
         for (const a of supervisor.agentenListe(runId)) {
-          supervisor.agentAbbrechen(runId, a.agentId)
+          if (supervisor.agentAbbrechen(runId, a.agentId)) gestoppt++
         }
-        return json(orch ? 200 : 404, { ok: Boolean(orch) })
+        const ok = Boolean(orch) || gestoppt > 0
+        return json(ok ? 200 : 404, { ok, gestoppt })
       }
       const ok = supervisor.agentAbbrechen(runId, agentId)
       return json(ok ? 200 : 404, { ok })
