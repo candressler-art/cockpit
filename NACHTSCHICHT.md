@@ -6,30 +6,13 @@ fruehere Fassung dieser Datei (bis Durchgang 12, vor dem Kuerzen hier).
 
 ## Fuer Can (Kurzfassung)
 
-- Nacht 1 (21 Commits bis "Logbuch nach Durchgang 12") ist live ausgerollt.
-  Danach hast Du drei konkrete Beobachtungen aus dem echten Betrieb notiert
-  (Token-Ablauf, 429 bei `zweit`, falsche Kontoempfehlung nach Neustart) --
-  das war Prioritaet 1 fuer die naechsten Durchgaenge.
-- **Durchgang 13:** Logbuch gekuerzt; Messwert-Persistenz ueber einen
-  Neustart hinweg gebaut (`aebf9e8`).
-- **Durchgang 14:** die drei verbliebenen Punkte aus Cans Beobachtung
-  abgeschlossen -- 429-Backoff beim Nutzungspoll und Reset-Zeit aus dem
-  CLI-Fehlertext lesen (`3cd4a73`), dazu ein Regressionstest fuer die
-  UI-Unterscheidung "keine Messung" vs. "0%" (die war inhaltlich schon seit
-  Durchgang 1 korrekt, `98435ae`, hatte nur keinen Test, jetzt `2685036`).
-  Damit ist Cans Beobachtungsliste abgearbeitet. Naechster Schwerpunkt:
-  Punkt 1 unten (weitere Multi-Konto-Luecken selbst suchen).
-- **Durchgang 15:** Luecke "Konto abgemeldet/Token tot mitten im Lauf"
-  durchgegangen. Der Wechsel selbst klappte schon; aber nach Deinem
-  `/login` blieb das Konto 5h gesperrt. Jetzt hebt der naechste
-  erfolgreiche Nutzungs-Poll (<=10 min) eine reine Anmeldesperre auf,
-  Limitsperren bleiben (`7f5c455`). **Bitte pruefen:** Server-Tab zeigt
-  "Anmeldefehler · gesperrt bis ..."; DB-Schema geht beim ersten Start auf
-  Version 2 (Spalte `konten_sperren.grund`, Bestand = 'limit').
-- **Durchgang 16:** zwei kleine Konto-Randfaelle: Modus zeigt nur noch
-  "manuell", wenn der Vorzug auf ein vorhandenes, angemeldetes Konto zeigt
-  (`7b891d2`); Fortsetzungsprompt sagt "Kontowechsel" statt immer
-  "Nutzungslimit" (`9e4ae1b`).
+- Nacht 1 (bis "Logbuch nach Durchgang 12") ist live. **D13-D16** haben
+  Deine Beobachtungsliste abgearbeitet: Messwerte ueberleben Neustart
+  (`aebf9e8`), 429-Backoff + Reset-Zeit aus CLI-Text (`3cd4a73`), Anmelde-
+  sperre faellt nach `/login` beim naechsten Poll (`7f5c455`, DB-Schema v2),
+  Modus "manuell" nur bei wirksamem Vorzug (`7b891d2`), neutraler
+  Fortsetzungsprompt (`9e4ae1b`). **Bitte pruefen:** Server-Tab zeigt
+  "Anmeldefehler · gesperrt bis ...".
 - **Durchgang 17:** Die Oberflaeche hatte **keinen Abbrechen-Knopf** (nur
   Discord `!stop`). Jetzt "Stoppen" im Lauf-Tab (nur sichtbar, solange ein
   Agent arbeitet; zweiter Klick bestaetigt), `/api/abbrechen` meldet bei
