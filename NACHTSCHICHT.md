@@ -31,6 +31,11 @@ Nacht 1 (bis "Logbuch nach Durchgang 12") ist live. Seitdem, **bitte pruefen**:
   `cockpit.db` (z. B. `sqlite3` in der Shell), **starb der Daemon** beim
   naechsten Agenten-Ereignis ("database is locked"). Jetzt wartet er bis
   5 s (`c537153`). Hinweis: in dieser Zeit steht die Ereignisschleife.
+- **D27:** zwei gleichzeitige Sprachgespraech-Runden (App + Handy, oder
+  Neuladen waehrend einer Runde) liefen unter demselben Agentenschluessel
+  -- erste nicht mehr stoppbar, sessionId evtl. vertauscht. Jetzt 409
+  (`17c97e5`). Pruefen: in der Zentrale erscheint dann "Antwort nicht
+  bekommen: Das Gespräch antwortet gerade noch ...".
 
 ## Offene Punkte (naechste Durchgaenge, Prioritaet 1 zuerst)
 
@@ -57,9 +62,11 @@ Nacht 1 (bis "Logbuch nach Durchgang 12") ist live. Seitdem, **bitte pruefen**:
    (Konsistenz, Handy, Tastatur, Ladezustaende), mehr End-to-End-Szenarien,
    Daemon-Robustheit bei Last/Fehlern -- bisher nur das oben Gelistete tief
    geprueft, nicht erschoepfend. D24 hat Absturzpfade gesucht (WS, Discord,
-   Anfragekoerper), D25 Sprachdienste (Piper/Whisper); ungeprueft: unhandledRejection-Pfade in orchestrator.ts/
-   supervisor.ts (keine globale Absicherung per process.on -- bewusst nicht
-   eingebaut, weil sie echte Fehler verschleiern kann).
+   Anfragekoerper), D25 Sprachdienste (Piper/Whisper). D27: Promise-Ketten
+   in daemon.ts/supervisor.ts/orchestrator.ts/discord.ts/kontenNutzungPuls
+   durchgesehen -- alle haben Faenger, kein weiterer Absturzpfad gefunden.
+   Naechste Idee: gleichzeitige Anfragen auf anderen festen Schluesseln
+   (Konsole nutzt eigene Ids je Befehl -- vermutlich ok, nicht geprueft).
 
 ## Entscheidungen fuer Can (noch offen, keine Selbstentscheidung getroffen)
 
@@ -78,6 +85,8 @@ Nacht 1 (bis "Logbuch nach Durchgang 12") ist live. Seitdem, **bitte pruefen**:
 
 ## Erledigt (neueste zuerst, Details im Commit)
 
+- `17c97e5` /api/gespraech: zweite Runde waehrend der ersten -> 409
+  (`src/gespraech.ts`, `tests/gespraech.test.mjs`).
 - `c537153` DB busy_timeout 5 s (db.ts, chats.ts), laufAbschliessen() in
   daemon.ts; Sperr-Stub `/tmp/nachtschicht/halter.cjs <ms>`.
 - `e85ec1a` WyomingLeser prueft Kopf/Laengen/Datenfeld, stimme.ts nutzt ihn
