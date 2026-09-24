@@ -26,7 +26,7 @@ import { vaultZugriffErlaubt } from './vaultZugriff.js'
 import { konsoleBefehl } from './konsole.js'
 import { cwdPruefen, folgenLesen, zahlLesen } from './eingaben.js'
 import { nutzungAbfragen } from './kontenNutzung.js'
-import { AnfrageFehler, fehlerStatus, koerperAuswerten } from './httpFehler.js'
+import { AnfrageFehler, fehlerStatus, koerperAuswerten, textFeld } from './httpFehler.js'
 import { ChatZuege } from './chatZuege.js'
 import { nachliefern, senden as klientSenden, type Klient } from './nachlieferung.js'
 import { existsSync } from 'node:fs'
@@ -536,10 +536,10 @@ const server = createServer(async (req, res) => {
 
     if (pfad === '/api/lauf' && req.method === 'POST') {
       const k = (await koerperLesen(req)) as Record<string, unknown> | null
-      const prompt = String(k?.prompt ?? '').trim()
-      const cwd = String(k?.cwd ?? process.env.HOME ?? '.')
-      const label = String(k?.label ?? 'Chat')
-      const model = k?.model ? String(k.model) : undefined
+      const prompt = (textFeld(k, 'prompt') ?? '').trim()
+      const cwd = textFeld(k, 'cwd') ?? process.env.HOME ?? '.'
+      const label = textFeld(k, 'label') ?? 'Chat'
+      const model = textFeld(k, 'model') || undefined
       if (!prompt) return json(400, { fehler: 'prompt fehlt' })
       const schlecht = cwdPruefen(cwd)
       if (schlecht) return json(400, { fehler: schlecht })
@@ -590,8 +590,8 @@ const server = createServer(async (req, res) => {
 
     if (pfad === '/api/orchestrator' && req.method === 'POST') {
       const k = (await koerperLesen(req)) as Record<string, unknown> | null
-      const anfangsPrompt = String(k?.anfangsPrompt ?? '').trim()
-      const cwd = String(k?.cwd ?? '')
+      const anfangsPrompt = (textFeld(k, 'anfangsPrompt') ?? '').trim()
+      const cwd = textFeld(k, 'cwd') ?? ''
       if (!anfangsPrompt) return json(400, { fehler: 'anfangsPrompt fehlt' })
       const schlecht = cwdPruefen(cwd)
       if (schlecht) return json(400, { fehler: schlecht })
@@ -604,14 +604,14 @@ const server = createServer(async (req, res) => {
       if (zahlFehler) return json(400, { fehler: zahlFehler })
 
       const runId = orchestratorLaufStarten({
-        label: String(k?.label ?? 'Orchestrator-Lauf'),
+        label: textFeld(k, 'label') ?? 'Orchestrator-Lauf',
         cwd,
         anfangsPrompt,
-        projektBlock: String(k?.projektBlock ?? '(kein Projektblock angegeben)'),
+        projektBlock: textFeld(k, 'projektBlock') ?? '(kein Projektblock angegeben)',
         maxRunden: maxRunden.zahl,
         parallelitaet: parallelitaet.zahl,
-        orchestratorModell: k?.orchestratorModell ? String(k.orchestratorModell) : undefined,
-        workerModell: k?.workerModell ? String(k.workerModell) : undefined,
+        orchestratorModell: textFeld(k, 'orchestratorModell') || undefined,
+        workerModell: textFeld(k, 'workerModell') || undefined,
         // Wie bisher: 0 bedeutet "kein Dollar-Limit", nicht "sofort aufhoeren".
         maxBudgetUsd: maxBudgetUsd.zahl || undefined,
         tokenBudget: tokenBudget.zahl,
@@ -621,17 +621,17 @@ const server = createServer(async (req, res) => {
 
     if (pfad === '/api/freigabe' && req.method === 'POST') {
       const k = (await koerperLesen(req)) as Record<string, unknown> | null
-      const id = String(k?.id ?? '')
+      const id = textFeld(k, 'id') ?? ''
       const erlaubt = k?.erlaubt === true
-      const durch = String(k?.durch ?? 'ui')
+      const durch = textFeld(k, 'durch') ?? 'ui'
       const ok = supervisor.freigabeEntscheiden(id, erlaubt, durch)
       return json(ok ? 200 : 404, { ok })
     }
 
     if (pfad === '/api/abbrechen' && req.method === 'POST') {
       const k = (await koerperLesen(req)) as Record<string, unknown> | null
-      const runId = String(k?.runId ?? '')
-      const agentId = k?.agentId ? String(k.agentId) : null
+      const runId = textFeld(k, 'runId') ?? ''
+      const agentId = textFeld(k, 'agentId') || null
       if (!agentId) {
         // Ganzen Lauf stoppen: der Orchestrator beendet nach der laufenden Runde.
         // Ein Einzellauf (/api/lauf) oder ein Chat-Zug hat keinen
@@ -653,8 +653,8 @@ const server = createServer(async (req, res) => {
 
     if (pfad === '/api/konsole' && req.method === 'POST') {
       const k = (await koerperLesen(req)) as Record<string, unknown> | null
-      const befehl = String(k?.befehl ?? '').trim()
-      const cwd = String(k?.cwd ?? '/opt/cockpit')
+      const befehl = (textFeld(k, 'befehl') ?? '').trim()
+      const cwd = textFeld(k, 'cwd') ?? '/opt/cockpit'
       if (!befehl) return json(400, { fehler: 'befehl fehlt' })
       const schlecht = cwdPruefen(cwd)
       if (schlecht) return json(400, { fehler: schlecht })
@@ -684,7 +684,7 @@ const server = createServer(async (req, res) => {
     if (pfad.startsWith('/api/chats/') && pfad.endsWith('/weiter') && req.method === 'POST') {
       const id = decodeURIComponent(pfad.slice('/api/chats/'.length, -'/weiter'.length))
       const k = (await koerperLesen(req)) as Record<string, unknown> | null
-      const text = String(k?.text ?? '').trim()
+      const text = (textFeld(k, 'text') ?? '').trim()
       if (!text) return json(400, { fehler: 'text fehlt' })
       const besetzt = () => json(409, { fehler: 'Diese Sitzung schreibt gerade schon weiter' })
       // Direkt nach "Stoppen" steht der Agent schon auf 'stopped', laeuft
@@ -779,7 +779,7 @@ const server = createServer(async (req, res) => {
 
     if (pfad === '/api/sprechen' && req.method === 'POST') {
       const k = (await koerperLesen(req)) as Record<string, unknown> | null
-      const text = String(k?.text ?? '').trim()
+      const text = (textFeld(k, 'text') ?? '').trim()
       if (!text) return json(400, { fehler: 'text fehlt' })
       try {
         const wav = await sprechenGecacht(text)
@@ -813,10 +813,10 @@ const server = createServer(async (req, res) => {
 
     if (pfad === '/api/gespraech' && req.method === 'POST') {
       const k = (await koerperLesen(req)) as Record<string, unknown> | null
-      const text = String(k?.text ?? '').trim()
+      const text = (textFeld(k, 'text') ?? '').trim()
       if (!text) return json(400, { fehler: 'text fehlt' })
       const neu = k?.neu === true
-      const resume = !neu && k?.sessionId ? String(k.sessionId) : undefined
+      const resume = neu ? undefined : textFeld(k, 'sessionId') || undefined
       try {
         const antwort = await gespraechAntworten(supervisor, text, resume)
         return json(200, antwort)
@@ -840,7 +840,7 @@ const server = createServer(async (req, res) => {
     if (pfad === '/api/konten' && req.method === 'POST') {
       const k = (await koerperLesen(req)) as Record<string, unknown> | null
       // Leerstring oder fehlendes Feld heben die Bevorzugung auf.
-      const name = k?.name ? String(k.name) : null
+      const name = textFeld(k, 'name') || null
       const ok = supervisor.bevorzugtesKontoSetzen(name)
       return json(ok ? 200 : 404, { ok, ...supervisor.kontenUebersicht() })
     }
