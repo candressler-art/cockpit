@@ -226,3 +226,47 @@ export function einstellungenLaden(gespeichert: unknown, heim: string): Einstell
   if (!gespeichert || typeof gespeichert !== 'object') return basis
   return einstellungenPruefen(gespeichert, basis).werte
 }
+
+/** Was der Speicher von der Datenbank braucht -- als Schnittstelle, damit Tests ohne SQLite auskommen. */
+export interface EinstellungsAblage {
+  einstellungenLesen(): unknown
+  einstellungenSpeichern(werte: unknown): void
+}
+
+/**
+ * Aktueller Stand im Speicher, jede Aenderung sofort in die Ablage.
+ *
+ * Gelesen wird aus dem Speicher, weil jeder Chatstart die Werte braucht und
+ * es keinen zweiten Schreiber gibt (nur dieser Daemon aendert sie).
+ */
+export class EinstellungsSpeicher {
+  private stand: Einstellungen
+
+  constructor(private ablage: EinstellungsAblage, heim: string) {
+    this.stand = einstellungenLaden(ablage.einstellungenLesen(), heim)
+  }
+
+  lesen(): Einstellungen {
+    return structuredClone(this.stand)
+  }
+
+  /**
+   * Teilaenderung anwenden. Gespeichert wird nur, wenn sich wirklich etwas
+   * geaendert hat; `geaendert` sagt der Oberflaeche, ob sie andere Geraete
+   * benachrichtigen muss.
+   */
+  aendern(teil: unknown): { werte: Einstellungen; fehler: string[]; geaendert: boolean } {
+    const { werte, fehler } = einstellungenPruefen(teil, this.stand)
+    const geaendert = JSON.stringify(werte) !== JSON.stringify(this.stand)
+    if (geaendert) {
+      this.ablage.einstellungenSpeichern(werte)
+      this.stand = werte
+    }
+    return { werte: this.lesen(), fehler, geaendert }
+  }
+}
+
+/** Auswahllisten fuer die Oberflaeche -- eine Quelle, damit sie nicht doppelt gepflegt werden. */
+export function auswahlListen(): { modelle: Auswahl<string>[]; aufwaende: Auswahl<Aufwand>[]; berechtigungen: Auswahl<Berechtigung>[] } {
+  return { modelle: MODELLE, aufwaende: AUFWAENDE, berechtigungen: BERECHTIGUNGEN }
+}

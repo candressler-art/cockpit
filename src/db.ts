@@ -110,6 +110,15 @@ CREATE TABLE IF NOT EXISTS konten_nutzung (
   gemessen_am             INTEGER NOT NULL,
   quelle                  TEXT NOT NULL
 );
+
+-- Einstellungen des Cockpits (siehe einstellungen.ts) als ein JSON-Dokument:
+-- die Felder aendern sich mit der Oberflaeche, eine Spalte je Feld haette
+-- fuer jede neue Einstellung eine Migration gebraucht. Geprueft wird beim
+-- Lesen (einstellungenLaden), nicht vom Schema.
+CREATE TABLE IF NOT EXISTS einstellungen (
+  id    INTEGER PRIMARY KEY CHECK (id = 1),
+  werte TEXT NOT NULL
+);
 `
 
 /** Wie lange ein Schreibzugriff auf eine fremde Sperre wartet (ms). */
@@ -388,6 +397,29 @@ export class CockpitDb {
          ON CONFLICT (id) DO UPDATE SET name = excluded.name`,
       )
       .run(name)
+  }
+
+  /** Gespeicherte Einstellungen als rohes Objekt, oder null, wenn nie gespeichert (oder unlesbar). */
+  einstellungenLesen(): unknown {
+    const row = this.db.prepare(`SELECT werte FROM einstellungen WHERE id = 1`).get() as
+      | { werte: string }
+      | undefined
+    if (!row) return null
+    try {
+      return JSON.parse(row.werte)
+    } catch {
+      // Von Hand kaputtgeschrieben: Vorgaben statt eines Daemons, der nicht startet.
+      return null
+    }
+  }
+
+  einstellungenSpeichern(werte: unknown): void {
+    this.db
+      .prepare(
+        `INSERT INTO einstellungen (id, werte) VALUES (1, ?)
+         ON CONFLICT (id) DO UPDATE SET werte = excluded.werte`,
+      )
+      .run(JSON.stringify(werte))
   }
 
   /** Letzter bekannter Nutzungsstand je Konto, Name -> (Stand, Quelle). */

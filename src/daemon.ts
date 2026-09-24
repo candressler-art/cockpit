@@ -30,6 +30,8 @@ import { AnfrageFehler, fehlerStatus, koerperAuswerten } from './httpFehler.js'
 import { ChatZuege } from './chatZuege.js'
 import { nachliefern, senden as klientSenden, type Klient } from './nachlieferung.js'
 import { existsSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { EinstellungsSpeicher, auswahlListen } from './einstellungen.js'
 
 const PORT = Number(process.env.COCKPIT_PORT ?? 8765)
 const HOST = process.env.COCKPIT_HOST ?? '127.0.0.1'
@@ -41,6 +43,7 @@ const verwaist = db.verwaisteLaeufeAufraeumen()
 if (verwaist > 0) console.log(`[cockpit] ${verwaist} verwaiste Lauf/Laeufe als abgebrochen markiert`)
 
 const supervisor = new Supervisor(db)
+const einstellungen = new EinstellungsSpeicher(db, homedir())
 const orchestratoren = new Map<string, Orchestrator>()
 
 /**
@@ -824,6 +827,20 @@ const server = createServer(async (req, res) => {
         if (e instanceof GespraechBelegt) return json(409, { fehler: e.message })
         return json(500, { fehler: String(e) })
       }
+    }
+
+    if (pfad === '/api/einstellungen' && req.method === 'GET') {
+      return json(200, { werte: einstellungen.lesen(), ...auswahlListen() })
+    }
+
+    if (pfad === '/api/einstellungen' && req.method === 'POST') {
+      const teil = await koerperLesen(req)
+      const { werte, fehler, geaendert } = einstellungen.aendern(teil)
+      // Andere offene Oberflaechen (Handy, Desktop-App) gleich nachziehen.
+      if (geaendert) verteilen('einstellungen', werte)
+      // 400 nur, wenn gar nichts uebernommen werden konnte -- ein gueltiges
+      // Feld neben einem ungueltigen ist trotzdem gespeichert.
+      return json(fehler.length > 0 && !geaendert ? 400 : 200, { werte, fehler })
     }
 
     if (pfad === '/api/rollen' && req.method === 'GET') {
