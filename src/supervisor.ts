@@ -317,6 +317,10 @@ export class Supervisor extends EventEmitter {
         fehler = versuch.fehler
 
         if (!versuch.istLimit || !konto) break
+        // Abgebrochen: kein Kontowechsel mehr. Ein Anmeldefehler, der erst
+        // im Abbruch ankommt, wuerde den Agenten sonst mit dem naechsten
+        // Konto wieder anlaufen lassen -- gegen Cans ausdrueckliches Stopp.
+        if (abort.signal.aborted) break
 
         // Sperrzeit aus dem LIMITSTAND DIESES KONTOS, nicht aus dem
         // zuletzt gesehenen ueberhaupt -- der koennte laengst von einem
@@ -588,14 +592,18 @@ export class Supervisor extends EventEmitter {
     const neuerStatus = STATUS_JE_KIND[z.kind]
     if (neuerStatus) {
       const a = this.agenten.get(this.schluessel(runId, agentId))
+      // Abgebrochen ist endgueltig: der abgebrochene Strom liefert oft noch
+      // gepufferte Nachrichten nach, und ein 'writing' darueber haette den
+      // Schutz in endzustandSetzen ausgehebelt -- der gestoppte Agent stand
+      // hinterher als 'failed' ("Operation aborted") in der Datenbank.
       // Wartet der Agent auf eine Freigabe, bleibt das der Zustand, bis
       // entschieden ist. Sonst ueberschreibt die naechste Nachricht -- etwa ein
       // Nutzungsstand -- den einzigen Zustand, der eine Handlung von Can braucht.
-      const haeltFest =
+      const haeltFest = a?.status === 'stopped' || (
         a?.status === 'waiting_permission' &&
         [...this.offeneFreigaben.values()].some(
           (o) => o.anfrage.runId === runId && o.anfrage.agentId === agentId,
-        )
+        ))
       if (!haeltFest) this.agentAendern(runId, agentId, { status: neuerStatus })
     }
 
