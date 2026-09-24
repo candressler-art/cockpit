@@ -15,7 +15,7 @@ import {
   nutzungBeimLadenFiltern,
 } from '../dist/konten.js'
 import { nutzungAusAntwort, nutzungAbfragen, naechsteBackoffMs } from '../dist/kontenNutzung.js'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -774,6 +774,57 @@ const SDK_LIMIT_PRAEFIXE = ["You've hit your", "You've reached your"]
   sperren.zweit = jetzt + 100_000
   const kv3 = new KontenVerwaltung(altePersistenz)
   pruefe('ohne Gruende-Lesen: Sperre gilt vorsichtig als Limit', kv3.anmeldeSperreAufheben('zweit') === false)
+}
+
+// --- 20. Vorzug auf ein geloeschtes oder abgemeldetes Konto ---
+// Fund (D16): ein persistierter Vorzug ueberlebt das Loeschen des
+// Kontoverzeichnisses. /api/konten meldete dann weiter modus 'manuell',
+// obwohl der Vorzug keine Wirkung hat -- und weil keine Kontokarte mehr
+// "bevorzugt" traegt, gab es in der Oberflaeche auch keinen Knopf zum
+// Aufheben. modus soll nur 'manuell' sein, wenn der Vorzug wirken kann.
+{
+  const alteHome = process.env.HOME
+  const alteKontenDir = process.env.COCKPIT_KONTEN_DIR
+  const alteConfigDir = process.env.CLAUDE_CONFIG_DIR
+  const cred = JSON.stringify({ claudeAiOauth: { accessToken: 'attrappe', subscriptionType: 'pro' } })
+  const heim = mkdtempSync(join(tmpdir(), 'nachtschicht-vorzug-home-'))
+  const konfigDir = mkdtempSync(join(tmpdir(), 'nachtschicht-vorzug-konfig-'))
+  const zusatz = mkdtempSync(join(tmpdir(), 'nachtschicht-vorzug-zusatz-'))
+  writeFileSync(join(konfigDir, '.credentials.json'), cred)
+  mkdirSync(join(zusatz, 'zweit'))
+  writeFileSync(join(zusatz, 'zweit', '.credentials.json'), cred)
+  process.env.HOME = heim
+  process.env.CLAUDE_CONFIG_DIR = konfigDir
+  process.env.COCKPIT_KONTEN_DIR = zusatz
+  try {
+    const kv = new KontenVerwaltung()
+    kv.bevorzugtesKontoSetzen('zweit')
+    let u = kv.uebersicht()
+    pruefe('Vorzug auf vorhandenes Konto: modus manuell', u.modus === 'manuell' && u.naechstesKonto === 'zweit')
+
+    // Konto abgemeldet (Verzeichnis da, Anmeldung weg): Vorzug wirkt nicht,
+    // die Karte traegt ihn aber weiter -- dort laesst er sich aufheben.
+    rmSync(join(zusatz, 'zweit', '.credentials.json'))
+    u = kv.uebersicht()
+    pruefe('Vorzug auf abgemeldetes Konto: modus ausgeglichen', u.modus === 'ausgeglichen')
+    pruefe('Vorzug auf abgemeldetes Konto: Karte zeigt ihn weiter',
+      u.konten.find((k) => k.name === 'zweit')?.bevorzugt === true)
+
+    rmSync(join(zusatz, 'zweit'), { recursive: true })
+    u = kv.uebersicht()
+    pruefe('Vorzug auf geloeschtes Konto: modus ausgeglichen', u.modus === 'ausgeglichen')
+    pruefe('Vorzug auf geloeschtes Konto: naechstes Konto ist haupt', u.naechstesKonto === 'haupt')
+    // Der gespeicherte Vorzug bleibt (konservativ): taucht das Verzeichnis
+    // wieder auf, gilt er wieder.
+    pruefe('Vorzug auf geloeschtes Konto: gespeicherter Wert bleibt', kv.bevorzugtesKontoLesen() === 'zweit')
+  } finally {
+    if (alteHome === undefined) delete process.env.HOME
+    else process.env.HOME = alteHome
+    if (alteKontenDir === undefined) delete process.env.COCKPIT_KONTEN_DIR
+    else process.env.COCKPIT_KONTEN_DIR = alteKontenDir
+    if (alteConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR
+    else process.env.CLAUDE_CONFIG_DIR = alteConfigDir
+  }
 }
 
 console.log(`\n${ok}/${gesamt} bestanden`)

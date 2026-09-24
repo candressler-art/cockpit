@@ -53,7 +53,8 @@ export interface KontoMitZustand extends Konto {
  */
 export interface KontenUebersicht {
   konten: KontoMitZustand[]
-  /** 'manuell': ein Vorzug ist gesetzt und schlaegt das Balancing.
+  /** 'manuell': ein Vorzug auf ein vorhandenes, angemeldetes Konto ist
+   *  gesetzt und schlaegt das Balancing (solange das Konto nicht gesperrt ist).
    *  'ausgeglichen': die Vorgabe -- das Balancing waehlt frei. */
   modus: 'manuell' | 'ausgeglichen'
   /** Name des Kontos, das eine Wahl JETZT treffen wuerde -- unter
@@ -504,9 +505,16 @@ export class KontenVerwaltung {
       this.zuletztGenutzt, Date.now(),
     )
 
+    // 'manuell' nur, wenn der Vorzug wirken kann: ein persistierter Vorzug
+    // auf ein inzwischen geloeschtes oder abgemeldetes Konto hat keine
+    // Wirkung -- und beim geloeschten gaebe es nicht einmal eine Karte mit
+    // "Vorzug aufheben". Der gespeicherte Wert selbst bleibt (konservativ):
+    // kommt das Konto zurueck, gilt er wieder.
+    const vorzugWirkt = nutzbar.some((k) => k.name === this.bevorzugt)
+
     return {
       konten,
-      modus: this.bevorzugt ? 'manuell' : 'ausgeglichen',
+      modus: vorzugWirkt ? 'manuell' : 'ausgeglichen',
       naechstesKonto,
       abstandPunkte,
     }
