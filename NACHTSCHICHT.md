@@ -184,11 +184,3 @@ COCKPIT_DISCORD_TOKEN= BESZEL_URL= node dist/daemon.js
 - Fuer synthetische "aktive" Laufdaten ohne echten Agentenprozess:
   `CockpitDb` aus `dist/db.js` direkt importieren (`runAnlegen`/
   `agentSpeichern`/`ereignisSpeichern`/`freigabeAnlegen`).
-
-## Bestandsaufnahme (weiterhin gueltig)
-
-Prioritaet 1 (Konten, `src/konten.ts`/`src/supervisor.ts`) ist sorgfaeltig
-gebaut (Sperre vor Vorzug vor Balancing, Hysterese, eigener Nutzungs-Poll,
-gut dokumentiert und getestet). Gefundene Bugs waren bisher meist Randfaelle
-(fehlende Fehlerklasse, fehlende Erstbefuellung), keine grundlegenden
-Konstruktionsfehler.
