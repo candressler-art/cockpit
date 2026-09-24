@@ -8,7 +8,7 @@
 import { DatabaseSync } from 'node:sqlite'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
-import type { AgentState, CockpitEvent, PermissionRequest } from './typen.js'
+import type { AgentState, CockpitEvent, LimitStand, PermissionRequest } from './typen.js'
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -88,6 +88,26 @@ CREATE TABLE IF NOT EXISTS konten_sperren (
 CREATE TABLE IF NOT EXISTS konten_vorzug (
   id   INTEGER PRIMARY KEY CHECK (id = 1),
   name TEXT
+);
+
+-- Letzter bekannter Nutzungsstand je Konto (siehe kontenNutzung.ts, konten.ts
+-- nutzungMelden). Bisher reiner In-Memory-Zustand: ein Daemon-Neustart liess
+-- jedes Konto ohne jede Messung dastehen -- balanciert wie ein nie genutztes
+-- Konto (0 %, siehe KontoBalancing), selbst wenn es in Wahrheit mitten im
+-- Wochenlimit steckte und der erste Poll nach dem Neustart nur an einem
+-- abgelaufenen Token (401) oder einem HTTP 429 des Nutzungs-Endpunkts
+-- scheiterte. Beobachtet auf servertwo nach dem Rollout der ersten Nacht.
+CREATE TABLE IF NOT EXISTS konten_nutzung (
+  name                    TEXT PRIMARY KEY,
+  status                  TEXT NOT NULL,
+  rate_limit_type         TEXT,
+  resets_at               INTEGER,
+  fuenf_stunden_anteil    REAL,
+  fuenf_stunden_resets_at INTEGER,
+  sieben_tage_anteil      REAL,
+  sieben_tage_resets_at   INTEGER,
+  gemessen_am             INTEGER NOT NULL,
+  quelle                  TEXT NOT NULL
 );
 `
 
@@ -337,6 +357,68 @@ export class CockpitDb {
          ON CONFLICT (id) DO UPDATE SET name = excluded.name`,
       )
       .run(name)
+  }
+
+  /** Letzter bekannter Nutzungsstand je Konto, Name -> (Stand, Quelle). */
+  kontoNutzungLesen(): Record<string, { stand: LimitStand; quelle: 'usage_api' | 'rate_limit_event' }> {
+    const rows = this.db.prepare(`SELECT * FROM konten_nutzung`).all() as {
+      name: string
+      status: string
+      rate_limit_type: string | null
+      resets_at: number | null
+      fuenf_stunden_anteil: number | null
+      fuenf_stunden_resets_at: number | null
+      sieben_tage_anteil: number | null
+      sieben_tage_resets_at: number | null
+      gemessen_am: number
+      quelle: string
+    }[]
+    const out: Record<string, { stand: LimitStand; quelle: 'usage_api' | 'rate_limit_event' }> = {}
+    for (const r of rows) {
+      out[r.name] = {
+        stand: {
+          status: r.status,
+          rateLimitType: r.rate_limit_type,
+          resetsAt: r.resets_at,
+          fuenfStundenAnteil: r.fuenf_stunden_anteil,
+          fuenfStundenResetsAt: r.fuenf_stunden_resets_at,
+          siebenTageAnteil: r.sieben_tage_anteil,
+          siebenTageResetsAt: r.sieben_tage_resets_at,
+          gemessenAm: r.gemessen_am,
+        },
+        quelle: r.quelle === 'rate_limit_event' ? 'rate_limit_event' : 'usage_api',
+      }
+    }
+    return out
+  }
+
+  /** Merkt den Nutzungsstand eines Kontos dauerhaft, ueberlebt einen Daemon-Neustart. */
+  kontoNutzungSpeichern(name: string, stand: LimitStand, quelle: 'usage_api' | 'rate_limit_event'): void {
+    this.db
+      .prepare(
+        `INSERT INTO konten_nutzung (
+           name, status, rate_limit_type, resets_at,
+           fuenf_stunden_anteil, fuenf_stunden_resets_at,
+           sieben_tage_anteil, sieben_tage_resets_at,
+           gemessen_am, quelle
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (name) DO UPDATE SET
+           status = excluded.status,
+           rate_limit_type = excluded.rate_limit_type,
+           resets_at = excluded.resets_at,
+           fuenf_stunden_anteil = excluded.fuenf_stunden_anteil,
+           fuenf_stunden_resets_at = excluded.fuenf_stunden_resets_at,
+           sieben_tage_anteil = excluded.sieben_tage_anteil,
+           sieben_tage_resets_at = excluded.sieben_tage_resets_at,
+           gemessen_am = excluded.gemessen_am,
+           quelle = excluded.quelle`,
+      )
+      .run(
+        name, stand.status, stand.rateLimitType, stand.resetsAt,
+        stand.fuenfStundenAnteil, stand.fuenfStundenResetsAt,
+        stand.siebenTageAnteil, stand.siebenTageResetsAt,
+        stand.gemessenAm, quelle,
+      )
   }
 
   close(): void {

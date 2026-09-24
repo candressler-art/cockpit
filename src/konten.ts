@@ -268,6 +268,36 @@ export interface KontenPersistenz {
   kontoSperren(name: string, bis: number): void
   kontoVorzugLesen(): string | null
   kontoVorzugSetzen(name: string | null): void
+  kontoNutzungLesen(): Record<string, { stand: LimitStand; quelle: 'usage_api' | 'rate_limit_event' }>
+  kontoNutzungSpeichern(name: string, stand: LimitStand, quelle: 'usage_api' | 'rate_limit_event'): void
+}
+
+/**
+ * Beim Laden einer persistierten Messung nach einem Daemon-Neustart: ein
+ * Fenster, dessen Reset-Zeitpunkt schon vergangen ist, sagt nichts mehr ueber
+ * den AKTUELLEN Verbrauch aus -- das Fenster ist laengst neu aufgemacht,
+ * moeglicherweise laengst wieder frei. Genullt statt die ganze Messung zu
+ * verwerfen, damit das jeweils andere (noch gueltige) Fenster erhalten
+ * bleibt -- 5h- und Wochenfenster resetten unabhaengig voneinander. Ist
+ * `resetsAt` unbekannt (null), bleibt das Fenster erhalten: ohne einen
+ * Reset-Zeitpunkt laesst sich Veralten nicht feststellen, und ein unbekannter
+ * Reset ist kein Beleg dafuer, dass er schon vorbei waere.
+ *
+ * Liefert null, wenn BEIDE Fenster abgelaufen sind -- dann ist an der
+ * gesamten Messung nichts mehr brauchbar, sie wird behandelt wie "nie
+ * gemessen" (genau das Verhalten vor dieser Persistenz).
+ */
+export function nutzungBeimLadenFiltern(stand: LimitStand, jetzt: number): LimitStand | null {
+  const f5Aktuell = stand.fuenfStundenResetsAt === null || stand.fuenfStundenResetsAt * 1000 > jetzt
+  const f7Aktuell = stand.siebenTageResetsAt === null || stand.siebenTageResetsAt * 1000 > jetzt
+  if (!f5Aktuell && !f7Aktuell) return null
+  return {
+    ...stand,
+    fuenfStundenAnteil: f5Aktuell ? stand.fuenfStundenAnteil : null,
+    fuenfStundenResetsAt: f5Aktuell ? stand.fuenfStundenResetsAt : null,
+    siebenTageAnteil: f7Aktuell ? stand.siebenTageAnteil : null,
+    siebenTageResetsAt: f7Aktuell ? stand.siebenTageResetsAt : null,
+  }
 }
 
 export class KontenVerwaltung {
@@ -293,10 +323,14 @@ export class KontenVerwaltung {
 
   /**
    * Ohne Persistenz (z.B. in Tests) rein im Speicher, wie bisher. Mit
-   * Persistenz werden Sperren und Vorzug beim Start nachgeladen (abgelaufene
-   * Sperren dabei verworfen) und bei jeder Aenderung sofort weggeschrieben --
-   * ein Neustart mitten in einer 5-Stunden-Sperre probiert das Konto danach
-   * nicht mehr sofort wieder.
+   * Persistenz werden Sperren, Vorzug UND der letzte Nutzungsstand beim Start
+   * nachgeladen (abgelaufene Sperren und veraltete Fenster dabei verworfen,
+   * siehe nutzungBeimLadenFiltern()) und bei jeder Aenderung sofort
+   * weggeschrieben -- ein Neustart mitten in einer 5-Stunden-Sperre probiert
+   * das Konto danach nicht mehr sofort wieder, UND ein Konto, dessen erster
+   * Poll nach dem Neustart an einem abgelaufenen Token (401) oder einem
+   * HTTP 429 scheitert, faellt nicht mehr auf "nie gemessen" (= 0 % im
+   * Balancing) zurueck, obwohl es in Wahrheit noch mitten im Limit steckt.
    */
   constructor(private readonly persistenz?: KontenPersistenz) {
     if (!persistenz) return
@@ -305,6 +339,10 @@ export class KontenVerwaltung {
       if (bis > jetzt) this.gesperrtBis.set(name, bis)
     }
     this.bevorzugt = persistenz.kontoVorzugLesen()
+    for (const [name, { stand, quelle }] of Object.entries(persistenz.kontoNutzungLesen())) {
+      const gefiltert = nutzungBeimLadenFiltern(stand, jetzt)
+      if (gefiltert) this.nutzung.set(name, { stand: gefiltert, quelle })
+    }
   }
 
   bevorzugtesKontoSetzen(name: string | null): void {
@@ -340,6 +378,7 @@ export class KontenVerwaltung {
     const vorhanden = this.nutzung.get(name)
     if (vorhanden && vorhanden.stand.gemessenAm > stand.gemessenAm) return
     this.nutzung.set(name, { stand, quelle })
+    this.persistenz?.kontoNutzungSpeichern(name, stand, quelle)
   }
 
   /** Letzter bekannter Nutzungsstand eines Kontos, oder null ohne Messung. */

@@ -65,6 +65,48 @@ const dbPfad = join(verzeichnis, 'test.db')
   db.close()
 }
 
+// --- Nutzungsstand je Konto: Neustart darf die letzte Messung nicht vergessen ---
+{
+  const db = new CockpitDb(dbPfad)
+  pruefe('frisch: keine Nutzung gespeichert', Object.keys(db.kontoNutzungLesen()).length === 0)
+
+  const stand = {
+    status: 'rejected',
+    rateLimitType: 'seven_day',
+    resetsAt: null,
+    fuenfStundenAnteil: 0.4,
+    fuenfStundenResetsAt: 1_800_000,
+    siebenTageAnteil: 1,
+    siebenTageResetsAt: 9_000_000,
+    gemessenAm: 500_000,
+  }
+  db.kontoNutzungSpeichern('zweit', stand, 'usage_api')
+  let nutzung = db.kontoNutzungLesen()
+  pruefe('Nutzung gespeichert',
+    nutzung.zweit?.quelle === 'usage_api' &&
+    nutzung.zweit?.stand.siebenTageAnteil === 1 &&
+    nutzung.zweit?.stand.siebenTageResetsAt === 9_000_000 &&
+    nutzung.zweit?.stand.fuenfStundenAnteil === 0.4 &&
+    nutzung.zweit?.stand.gemessenAm === 500_000)
+
+  // Erneutes Melden desselben Kontos ueberschreibt, verdoppelt nicht.
+  db.kontoNutzungSpeichern('zweit', { ...stand, siebenTageAnteil: 0.7, gemessenAm: 600_000 }, 'rate_limit_event')
+  nutzung = db.kontoNutzungLesen()
+  pruefe('erneutes Melden ueberschreibt statt zu verdoppeln',
+    nutzung.zweit?.stand.siebenTageAnteil === 0.7 && nutzung.zweit?.quelle === 'rate_limit_event' &&
+    Object.keys(nutzung).length === 1)
+  db.close()
+}
+
+// --- Nutzungsstand ueberlebt einen Neustart (neu geoeffnete DB) ---
+{
+  const db = new CockpitDb(dbPfad)
+  const nutzung = db.kontoNutzungLesen()
+  pruefe('nach Neu-Oeffnen: Nutzung bleibt erhalten',
+    nutzung.zweit?.stand.siebenTageAnteil === 0.7 && nutzung.zweit?.quelle === 'rate_limit_event')
+  db.close()
+}
+
 rmSync(verzeichnis, { recursive: true, force: true })
 
 console.log(`\n${ok}/${gesamt} bestanden`)

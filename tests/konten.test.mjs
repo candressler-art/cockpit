@@ -11,6 +11,7 @@ import {
   KONTO_AUTH_FEHLER_PRAEFIXE,
   emailLesen,
   KontenVerwaltung,
+  nutzungBeimLadenFiltern,
 } from '../dist/konten.js'
 import { nutzungAusAntwort } from '../dist/kontenNutzung.js'
 import { mkdtempSync, writeFileSync } from 'node:fs'
@@ -463,15 +464,23 @@ const SDK_LIMIT_PRAEFIXE = ["You've hit your", "You've reached your"]
     const fakePersistenz = () => {
       const sperren = {}
       let vorzug = null
+      const nutzung = {}
       const sperrenAufrufe = []
       const vorzugAufrufe = []
+      const nutzungAufrufe = []
       return {
         kontoSperrenLesen: () => ({ ...sperren }),
         kontoSperren: (name, bis) => { sperren[name] = bis; sperrenAufrufe.push([name, bis]) },
         kontoVorzugLesen: () => vorzug,
         kontoVorzugSetzen: (name) => { vorzug = name; vorzugAufrufe.push(name) },
+        kontoNutzungLesen: () => ({ ...nutzung }),
+        kontoNutzungSpeichern: (name, stand, quelle) => {
+          nutzung[name] = { stand, quelle }
+          nutzungAufrufe.push([name, stand, quelle])
+        },
         _sperrenAufrufe: sperrenAufrufe,
         _vorzugAufrufe: vorzugAufrufe,
+        _nutzungAufrufe: nutzungAufrufe,
       }
     }
 
@@ -505,6 +514,37 @@ const SDK_LIMIT_PRAEFIXE = ["You've hit your", "You've reached your"]
     pruefe('Konstruktion: gespeicherter Vorzug wird uebernommen',
       kvVorzug.bevorzugtesKontoLesen() === 'haupt')
 
+    // Der eigentliche Fund aus dem Live-Rollout: ein noch gueltiger,
+    // gespeicherter Nutzungsstand MUSS beim Start uebernommen werden --
+    // sonst zaehlt ein Konto nach einem Neustart als "nie gemessen" (= 0 %
+    // im Balancing), obwohl es in Wahrheit mitten im Wochenlimit steckt und
+    // der erste Poll danach nur an einem abgelaufenen Token oder einem
+    // HTTP 429 scheitert.
+    const p5 = fakePersistenz()
+    p5.kontoNutzungSpeichern('haupt', {
+      status: 'rejected', rateLimitType: 'seven_day', resetsAt: null,
+      fuenfStundenAnteil: null, fuenfStundenResetsAt: null,
+      siebenTageAnteil: 1, siebenTageResetsAt: Math.floor((Date.now() + 100_000) / 1000),
+      gemessenAm: Date.now() - 1000,
+    }, 'usage_api')
+    const kvNutzung = new KontenVerwaltung(p5)
+    pruefe('Konstruktion: gespeicherter Nutzungsstand wird uebernommen',
+      kvNutzung.nutzungLesen('haupt')?.stand.siebenTageAnteil === 1)
+
+    // Eine gespeicherte Messung, deren Wochenfenster laengst zurueckgesetzt
+    // wurde, darf beim Start NICHT als aktuell gelten -- siehe
+    // nutzungBeimLadenFiltern().
+    const p6 = fakePersistenz()
+    p6.kontoNutzungSpeichern('haupt', {
+      status: 'rejected', rateLimitType: 'seven_day', resetsAt: null,
+      fuenfStundenAnteil: 0.9, fuenfStundenResetsAt: Math.floor((Date.now() - 50_000) / 1000),
+      siebenTageAnteil: 1, siebenTageResetsAt: Math.floor((Date.now() - 100_000) / 1000),
+      gemessenAm: Date.now() - 200_000,
+    }, 'usage_api')
+    const kvVeraltet = new KontenVerwaltung(p6)
+    pruefe('Konstruktion: Nutzungsstand mit laengst abgelaufenem Fenster wird verworfen',
+      kvVeraltet.nutzungLesen('haupt') === null)
+
     // sperren()/bevorzugtesKontoSetzen() schreiben bei JEDEM Aufruf durch,
     // nicht nur beim ersten -- ein zweiter Anmeldefehler waehrend derselben
     // Sperre muss den neuen Sperrzeitpunkt ebenfalls sofort speichern.
@@ -520,6 +560,15 @@ const SDK_LIMIT_PRAEFIXE = ["You've hit your", "You've reached your"]
     kvSchreiben.bevorzugtesKontoSetzen(null)
     pruefe('bevorzugtesKontoSetzen(): schreibt auch das Aufheben (null) durch',
       p4._vorzugAufrufe.length === 2 && p4._vorzugAufrufe[0] === 'dritt' && p4._vorzugAufrufe[1] === null)
+
+    kvSchreiben.nutzungMelden('dritt', {
+      status: 'allowed', rateLimitType: null, resetsAt: null,
+      fuenfStundenAnteil: 0.2, fuenfStundenResetsAt: null,
+      siebenTageAnteil: 0.3, siebenTageResetsAt: null, gemessenAm: 1000,
+    }, 'usage_api')
+    pruefe('nutzungMelden(): schreibt ebenfalls durch',
+      p4._nutzungAufrufe.length === 1 && p4._nutzungAufrufe[0][0] === 'dritt' &&
+      p4._nutzungAufrufe[0][2] === 'usage_api')
   } finally {
     if (alteHome === undefined) delete process.env.HOME
     else process.env.HOME = alteHome
@@ -528,6 +577,40 @@ const SDK_LIMIT_PRAEFIXE = ["You've hit your", "You've reached your"]
     if (alteConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR
     else process.env.CLAUDE_CONFIG_DIR = alteConfigDir
   }
+}
+
+// --- 18. nutzungBeimLadenFiltern(): veraltete Fenster beim Laden aussortieren ---
+{
+  const jetzt = 10_000_000
+  const basis = {
+    status: 'rejected', rateLimitType: 'seven_day', resetsAt: null,
+    fuenfStundenAnteil: 0.5, fuenfStundenResetsAt: null,
+    siebenTageAnteil: 1, siebenTageResetsAt: null, gemessenAm: jetzt - 1000,
+  }
+
+  // Beide Fenster noch aktiv (Reset in der Zukunft): unveraendert uebernommen.
+  const beideAktiv = nutzungBeimLadenFiltern(
+    { ...basis, fuenfStundenResetsAt: jetzt / 1000 + 100, siebenTageResetsAt: jetzt / 1000 + 100 }, jetzt)
+  pruefe('beide Fenster aktiv: unveraendert', beideAktiv.fuenfStundenAnteil === 0.5 && beideAktiv.siebenTageAnteil === 1)
+
+  // Nur das 5h-Fenster ist abgelaufen: nur das wird genullt, Wochenfenster bleibt.
+  const f5Abgelaufen = nutzungBeimLadenFiltern(
+    { ...basis, fuenfStundenResetsAt: jetzt / 1000 - 100, siebenTageResetsAt: jetzt / 1000 + 100 }, jetzt)
+  pruefe('nur 5h-Fenster abgelaufen: nur dieses genullt',
+    f5Abgelaufen.fuenfStundenAnteil === null && f5Abgelaufen.fuenfStundenResetsAt === null &&
+    f5Abgelaufen.siebenTageAnteil === 1)
+
+  // Beide Fenster abgelaufen: die ganze Messung ist wertlos, null zurueck.
+  const beideAbgelaufen = nutzungBeimLadenFiltern(
+    { ...basis, fuenfStundenResetsAt: jetzt / 1000 - 100, siebenTageResetsAt: jetzt / 1000 - 100 }, jetzt)
+  pruefe('beide Fenster abgelaufen: komplette Messung verworfen', beideAbgelaufen === null)
+
+  // Unbekannter Reset-Zeitpunkt (null): das Fenster gilt als nicht widerlegt
+  // veraltet, bleibt also erhalten.
+  const resetUnbekannt = nutzungBeimLadenFiltern(
+    { ...basis, fuenfStundenResetsAt: null, siebenTageResetsAt: null }, jetzt)
+  pruefe('unbekannter Reset-Zeitpunkt: Fenster bleibt erhalten',
+    resetUnbekannt.fuenfStundenAnteil === 0.5 && resetUnbekannt.siebenTageAnteil === 1)
 }
 
 console.log(`\n${ok}/${gesamt} bestanden`)
