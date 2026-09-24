@@ -50,6 +50,12 @@ Nacht 1 (bis "Logbuch nach Durchgang 12") ist live. Seitdem, **bitte pruefen**:
   auf; ein Objekt als `prompt` startete einen echten Agenten mit dem Prompt
   "[object Object]". Jetzt 400 mit Feldnamen (`a15a1f7`). Zahlen als Text
   bleiben erlaubt (wie bisher).
+- **D31 Orchestrator-Schleife:** leerer `NAECHSTER-PROMPT` startete eine
+  Runde ohne Worker ("Worker lieferte keinen Report"), einer nur aus
+  `---WORKER---` ging als Auftrag an einen Worker -- jetzt Formatfehler mit
+  Klartext, Anfangsauftrag nur aus Trennern -> 400 (`85e8f34`). Nach einer
+  Rueckfrage fielen wartende Auftraege (> Parallelitaet) still weg -- jetzt
+  bleiben sie in der Schlange (`bf1659f`). Rollenlogik unberuehrt.
 
 ## Offene Punkte (naechste Durchgaenge, Prioritaet 1 zuerst)
 
@@ -85,6 +91,10 @@ Nacht 1 (bis "Logbuch nach Durchgang 12") ist live. Seitdem, **bitte pruefen**:
    D30: API-Randfaelle per curl (Koerpertypen, leere Ids, FTS-Sonder-
    zeichen, fremde Methoden) -- nur der Fund oben. Chats-Index/Fortsetzen
    und SIGTERM-Ablauf gelesen, kein Fund.
+   D31: Rundenablauf von Orchestrator.fahren() mit Attrappen-Supervisor
+   (`tests/orchestratorLauf.test.mjs`) -- zwei Funde oben. Nicht geprueft:
+   COCKPIT_DISCORD_MAXRUNDEN/_PARALLEL als Unsinn -> NaN, Lauf endet
+   sofort als "rundenlimit" (nur Konfiguration, nicht angefasst).
    Noch offen: Zentrale holt /api/lauf/<id> nur fuer die Agenten, bekommt
    aber bis zu 5000 Ereignisse mit (nur Verschwendung, kein Fehler).
 
@@ -104,6 +114,9 @@ Nacht 1 (bis "Logbuch nach Durchgang 12") ist live. Seitdem, **bitte pruefen**:
   Ressourcenbindung durch wartende Laeufe, Sichtbarkeit "wartet" vs. "tot").
 
 ## Erledigt (neueste zuerst, Details im Commit)
+
+- `85e8f34` `bf1659f` Orchestrator.fahren: leere Runde, Schlange nach
+  Rueckfrage (`tests/orchestratorLauf.test.mjs`, Attrappen-Supervisor).
 
 - `a15a1f7` koerperAuswerten: nur JSON-Objekt; textFeld() fuer alle
   Textfelder in daemon.ts (`src/httpFehler.ts`, Test dort).
