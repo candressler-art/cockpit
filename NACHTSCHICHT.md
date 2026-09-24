@@ -38,6 +38,10 @@ fruehere Fassung dieser Datei (bis Durchgang 12, vor dem Kuerzen hier).
   `stopped`, und haette nach Kontofehler sogar das naechste Konto probiert
   (`f3b5f04`). **Bitte pruefen:** Knopf in der Desktop-App (Kopfzeile rechts,
   am Handy ganz links).
+- **Durchgang 18:** Chats-Tab hat jetzt ebenfalls "Stoppen" fuer einen
+  laufenden Zug (ersetzt waehrenddessen "Senden", `da2ac07`). Kaputte
+  URL-Kodierung liefert 400, Verzeichnispfade 404 statt 500; API-Fehler
+  kommen als JSON (`f5407cc`). **Bitte pruefen:** Stopp im Chat in der App.
 
 ## Offene Punkte (naechste Durchgaenge, Prioritaet 1 zuerst)
 
@@ -52,11 +56,11 @@ fruehere Fassung dieser Datei (bis Durchgang 12, vor dem Kuerzen hier).
    eine Sitzung als "verworfen" gilt -- nicht angefasst.
 3. **`src-tauri/`** nie angefasst (kein `cargo` in dieser Umgebung) -- auf
    dem PC bauen und pruefen.
-4. Ideen aus D17, noch nicht angefasst: Chats-Tab hat ebenfalls keinen
-   Stopp fuer einen laufenden Chat-Zug (API waere `/api/abbrechen` mit
-   `runId`=laufId); `/api/chats/%E0` liefert 500 (URIError aus
-   decodeURIComponent) statt 400; statischer Pfad auf ein Verzeichnis
-   (`/tabs`) liefert 500 (EISDIR) statt 404.
+4. Kleiner Rest aus D18 (ungetestet, vermutlich harmlos): wer direkt nach
+   "Stoppen" im Chat sofort wieder sendet, koennte 409 "schreibt gerade
+   schon weiter" bekommen, falls `chatLaeuft` erst nach dem Poll-Tick
+   geraeumt wird -- erneut senden hilft. Chat-Stopp nur mit abgefangener
+   API getestet (kein echter Agent in der Testinstanz).
 5. Prioritaet 2/3 laut Aufgabenstellung: Oberflaeche weiter feinschleifen
    (Konsistenz, Handy, Tastatur, Ladezustaende), mehr End-to-End-Szenarien,
    Daemon-Robustheit bei Last/Fehlern -- bisher nur das oben Gelistete tief
@@ -74,6 +78,11 @@ fruehere Fassung dieser Datei (bis Durchgang 12, vor dem Kuerzen hier).
   Ressourcenbindung durch wartende Laeufe, Sichtbarkeit "wartet" vs. "tot").
 
 ## Erledigt (chronologisch, mit Commit)
+
+- `da2ac07` Chats-Tab: Stopp-Knopf fuer laufenden Zug (Skript
+  `nachtschicht-bilder/chatstopp18.mjs`, 1280/375 per Playwright).
+- `f5407cc` Daemon: URIError -> 400, EISDIR/ENOTDIR -> 404, /api-Fehler als
+  JSON (`src/httpFehler.ts`, `tests/httpFehler.test.mjs`).
 
 - `886ad89` Lauf-Tab: Stopp-Knopf (1280/375 per Playwright geprueft,
   Skript `nachtschicht-bilder/stopp_ui.mjs`); /api/abbrechen ok+gestoppt
