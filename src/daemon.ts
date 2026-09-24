@@ -26,7 +26,7 @@ import { vaultZugriffErlaubt } from './vaultZugriff.js'
 import { konsoleBefehl } from './konsole.js'
 import { cwdPruefen, zahlLesen } from './eingaben.js'
 import { nutzungAbfragen } from './kontenNutzung.js'
-import { fehlerStatus } from './httpFehler.js'
+import { AnfrageFehler, fehlerStatus, koerperAuswerten } from './httpFehler.js'
 import { ChatZuege } from './chatZuege.js'
 import { existsSync } from 'node:fs'
 
@@ -447,19 +447,15 @@ async function koerperLesen(req: import('node:http').IncomingMessage): Promise<u
       // Wenn selbst das Wegwerfen kein Ende nimmt, ist es kein Versehen mehr.
       if (groesse > MAX_KOERPER * 8) {
         req.destroy()
-        return null
+        break
       }
       continue
     }
     stuecke.push(b)
   }
-  if (zuGross) return null
-  if (stuecke.length === 0) return null
-  try {
-    return JSON.parse(Buffer.concat(stuecke).toString('utf-8'))
-  } catch {
-    return null
-  }
+  // Wirft AnfrageFehler (413/400) -- der Fanghaken im Handler macht daraus
+  // eine JSON-Antwort mit lesbarer Meldung statt "prompt fehlt".
+  return koerperAuswerten(stuecke.length ? Buffer.concat(stuecke) : null, zuGross, MAX_KOERPER)
 }
 
 /**
@@ -895,7 +891,7 @@ const server = createServer(async (req, res) => {
     // Schon angefangene Antwort nicht ein zweites Mal beginnen -- writeHead
     // wuerde selbst werfen, und das hier ist der letzte Fanghaken.
     if (res.headersSent) return res.end()
-    const text = code === 404 ? 'nicht gefunden' : code === 400 ? 'ungueltige Anfrage' : `Fehler: ${String(e)}`
+    const text = e instanceof AnfrageFehler ? e.message : code === 404 ? 'nicht gefunden' : code === 400 ? 'ungueltige Anfrage' : `Fehler: ${String(e)}`
     // Die Tabs rufen bei /api/ immer .json() auf -- Klartext kaeme dort als
     // Parse-Fehler an statt als lesbare Meldung.
     if (pfad.startsWith('/api/')) return json(code, { fehler: text })
