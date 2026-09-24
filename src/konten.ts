@@ -707,9 +707,11 @@ export function kontoFehlerLabel(text: string, praefixeLimit: readonly string[])
  * `resume` haengt an dieselbe Session an -- schickt man dort den kompletten
  * Originalauftrag noch einmal, steht er zweimal in der Konversation, einmal
  * schon (teilweise) bearbeitet, einmal als vermeintlich neuer Auftrag.
+ * Neutral "Kontowechsel": seit dd0525c wechselt auch ein Anmeldefehler das
+ * Konto, dann waere "Nutzungslimit" schlicht falsch.
  */
 export const KONTOWECHSEL_FORTSETZUNGSPROMPT =
-  'Du wurdest durch ein Nutzungslimit unterbrochen. Mach genau dort weiter, wo du aufgehoert hast.'
+  'Du wurdest durch einen Kontowechsel unterbrochen. Mach genau dort weiter, wo du aufgehoert hast.'
 
 /**
  * Waehlt Prompt fuer einen (Wieder-)Versuch. Reine Funktion, damit sich der
