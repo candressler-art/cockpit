@@ -510,6 +510,7 @@ export function sperrzeitpunktAusLimitstand(
   stand: Pick<LimitStand, 'resetsAt' | 'rateLimitType' | 'fuenfStundenResetsAt' | 'siebenTageResetsAt'> | null,
   jetzt: number,
   vorgabeMs: number,
+  textFallbackMs: number | null = null,
 ): number {
   if (stand) {
     if (typeof stand.resetsAt === 'number') return stand.resetsAt * 1000
@@ -521,7 +522,95 @@ export function sperrzeitpunktAusLimitstand(
       return stand.fuenfStundenResetsAt * 1000
     }
   }
+  // Kein gemessener Stand (oder keiner, der zum ausloesenden Fenster passt) --
+  // steht im Fehlertext selbst eine Reset-Zeit (siehe resetzeitAusFehlertext),
+  // ist die genauer als die pauschale Vorgabe.
+  if (typeof textFallbackMs === 'number') return textFallbackMs
   return jetzt + vorgabeMs
+}
+
+const MONATSNAMEN: Record<string, number> = {
+  jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+  jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
+}
+
+/**
+ * UTC-Versatz (Minuten, Osten positiv) einer IANA-Zeitzone zu einem
+ * gegebenen Zeitpunkt -- Standardtrick ueber Intl: die Wanduhrzeit der Zone
+ * wird noch einmal als UTC interpretiert, die Differenz zum echten UTC-
+ * Zeitpunkt ist der gesuchte Versatz. null bei unbekannter Zone.
+ */
+function tzVersatzMinuten(zone: string, zeitpunktMs: number): number | null {
+  try {
+    const teile = new Intl.DateTimeFormat('en-US', {
+      timeZone: zone, hour12: false,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+    }).formatToParts(new Date(zeitpunktMs))
+    const w = Object.fromEntries(teile.map((t) => [t.type, t.value]))
+    const alsUtc = Date.UTC(
+      Number(w.year), Number(w.month) - 1, Number(w.day),
+      Number(w.hour) % 24, Number(w.minute), Number(w.second),
+    )
+    return Math.round((alsUtc - zeitpunktMs) / 60_000)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Liest eine Reset-Zeit direkt aus dem Fehlertext der CLI, wenn kein
+ * rate_limit_event und keine Poll-Messung sie liefert -- Beispiel (Wochen-
+ * limit): "You've hit your weekly limit · resets Sep 26, 4am (Europe/Berlin)".
+ * Nur dieses Format mit EXPLIZITER IANA-Zeitzone wird geparst: die kuerzere
+ * Session-Limit-Meldung ("resets 8:10pm", ohne Datum und ohne Zeitzone,
+ * siehe tests/chats.test.mjs) bliebe reine Raterei -- welcher Tag, welche
+ * Zeitzone --, deshalb bewusst NICHT geparst; dafuer bleibt die pauschale
+ * Vorgabe (vorgabeMs) die einzige Quelle.
+ *
+ * Das Jahr fehlt im Text; da ein Wochenlimit immer in der Zukunft liegt,
+ * wird das laufende Jahr angenommen und nur dann um eins erhoeht, wenn das
+ * Ergebnis sonst mehr als einen Tag in der Vergangenheit laege (Jahreswechsel).
+ */
+export function resetzeitAusFehlertext(text: string, jetzt: number): number | null {
+  const treffer = text.match(
+    /resets\s+([A-Za-z]{3,9})\s+(\d{1,2}),?\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)\s*\(([\w/+-]+)\)/i,
+  )
+  if (!treffer) return null
+  const [, monatText, tagText, stundeText, minuteText, meridian, zone] = treffer
+  if (!monatText || !tagText || !stundeText || !meridian || !zone) return null
+  const monat = MONATSNAMEN[monatText.slice(0, 3).toLowerCase()]
+  if (monat === undefined) return null
+  const tag = Number(tagText)
+  let stunde = Number(stundeText) % 12
+  if (meridian.toLowerCase() === 'pm') stunde += 12
+  const minute = minuteText ? Number(minuteText) : 0
+
+  let jahrJetztRoh: string
+  try {
+    jahrJetztRoh = new Intl.DateTimeFormat('en-US', { timeZone: zone, year: 'numeric' }).format(
+      new Date(jetzt),
+    )
+  } catch {
+    return null // unbekannte Zeitzone -- lieber gar keine Zeit als eine falsche
+  }
+  const jahrJetzt = Number(jahrJetztRoh)
+  if (!Number.isFinite(jahrJetzt)) return null
+
+  const zeitpunktFuer = (jahr: number): number | null => {
+    const grobUtc = Date.UTC(jahr, monat, tag, stunde, minute, 0)
+    const versatz = tzVersatzMinuten(zone, grobUtc)
+    if (versatz === null) return null
+    return grobUtc - versatz * 60_000
+  }
+
+  let ergebnis = zeitpunktFuer(jahrJetzt)
+  if (ergebnis === null) return null
+  if (ergebnis < jetzt - 24 * 60 * 60 * 1000) {
+    const naechstesJahr = zeitpunktFuer(jahrJetzt + 1)
+    if (naechstesJahr !== null) ergebnis = naechstesJahr
+  }
+  return ergebnis
 }
 
 /**

@@ -3,6 +3,7 @@
 import {
   kontoWaehlen,
   sperrzeitpunktAusLimitstand,
+  resetzeitAusFehlertext,
   versuchPrompt,
   KONTOWECHSEL_FORTSETZUNGSPROMPT,
   BALANCING_HYSTERESE,
@@ -13,7 +14,7 @@ import {
   KontenVerwaltung,
   nutzungBeimLadenFiltern,
 } from '../dist/konten.js'
-import { nutzungAusAntwort } from '../dist/kontenNutzung.js'
+import { nutzungAusAntwort, nutzungAbfragen, naechsteBackoffMs } from '../dist/kontenNutzung.js'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -267,6 +268,70 @@ const JETZT_MS = JETZT_S * 1000
   pruefe('passender Typ, aber Feld fehlt: Vorgabe', r === JETZT_MS + VORGABE_MS)
 }
 
+{
+  // Vierter Parameter: textFallbackMs greift NUR, wenn weder resetsAt noch
+  // das passende Fensterfeld etwas liefern -- also genau der Fall, den
+  // Test 6 oben (unpassender rateLimitType) schon als "Vorgabe" pruefte.
+  const stand = { resetsAt: undefined, rateLimitType: 'overage' }
+  const textFallbackMs = JETZT_MS + 3 * 60 * 60 * 1000
+  const r = sperrzeitpunktAusLimitstand(stand, JETZT_MS, VORGABE_MS, textFallbackMs)
+  pruefe('textFallbackMs greift, wenn Stand nichts liefert', r === textFallbackMs)
+}
+{
+  // Ein echter Messwert geht auch vor textFallbackMs -- der Messwert bleibt
+  // die verlaesslichere Quelle.
+  const stand = { resetsAt: JETZT_S + 999, rateLimitType: 'five_hour' }
+  const r = sperrzeitpunktAusLimitstand(stand, JETZT_MS, VORGABE_MS, JETZT_MS + 1)
+  pruefe('gemessenes resetsAt geht vor textFallbackMs', r === (JETZT_S + 999) * 1000)
+}
+
+// --- 13b. resetzeitAusFehlertext: Reset-Zeit aus der CLI-Meldung parsen ----
+//
+// Format aus der Aufgabenstellung: "You've hit your weekly limit · resets
+// Sep 26, 4am (Europe/Berlin)". Nur DIESES Format (Datum + Zeitzone in
+// Klammern) wird geparst -- die kuerzere Session-Limit-Meldung ("resets
+// 8:10pm", siehe tests/chats.test.mjs) bewusst nicht, siehe Kommentar an der
+// Funktion selbst.
+{
+  // 2026-09-24 12:00 UTC "heute" -- Berlin ist im September in CEST (UTC+2),
+  // 4 Uhr Berlin = 2 Uhr UTC.
+  const jetzt = Date.UTC(2026, 8, 24, 12, 0, 0)
+  const r = resetzeitAusFehlertext("You've hit your weekly limit · resets Sep 26, 4am (Europe/Berlin)", jetzt)
+  pruefe('Wochenlimit-Text: Datum+Zeitzone korrekt nach UTC umgerechnet', r === Date.UTC(2026, 8, 26, 2, 0, 0))
+}
+{
+  // Minuten im Text vorhanden.
+  const jetzt = Date.UTC(2026, 8, 24, 12, 0, 0)
+  const r = resetzeitAusFehlertext('resets Sep 26, 4:30pm (Europe/Berlin)', jetzt)
+  pruefe('Wochenlimit-Text mit Minuten: 16:30 Berlin = 14:30 UTC', r === Date.UTC(2026, 8, 26, 14, 30, 0))
+}
+{
+  // Jahreswechsel: Text nennt kein Jahr, "Jan 2" liegt vor "heute" (30. Dez)
+  // im laufenden Jahr -- also naechstes Jahr. Berlin im Januar ist CET
+  // (UTC+1), 3 Uhr Berlin = 2 Uhr UTC.
+  const jetzt = Date.UTC(2026, 11, 30, 12, 0, 0)
+  const r = resetzeitAusFehlertext('resets Jan 2, 3am (Europe/Berlin)', jetzt)
+  pruefe('Jahreswechsel im Text erkannt (naechstes Jahr)', r === Date.UTC(2027, 0, 2, 2, 0, 0))
+}
+{
+  // Kein Match: Session-Limit-Meldung ohne Datum/Zeitzone -- bewusst nicht
+  // geparst (siehe Funktionskommentar), lieber die pauschale Vorgabe als
+  // eine geratene Zeitzone.
+  const r = resetzeitAusFehlertext("You've hit your session limit · resets 8:10pm", Date.now())
+  pruefe('Session-Limit-Text ohne Zeitzone: kein Treffer', r === null)
+}
+{
+  // Text ohne jede Reset-Angabe.
+  const r = resetzeitAusFehlertext('Not logged in', Date.now())
+  pruefe('Text ohne Reset-Angabe: kein Treffer', r === null)
+}
+{
+  // Unbekannte Zeitzone -- Intl wirft, die Funktion faengt das ab statt zu
+  // crashen, und liefert null statt einer falschen Zeit.
+  const r = resetzeitAusFehlertext('resets Sep 26, 4am (Nirgendwo/Erfunden)', Date.now())
+  pruefe('unbekannte Zeitzone: kein Absturz, null statt falscher Zeit', r === null)
+}
+
 // --- 14. versuchPrompt: Originalauftrag vs. Fortsetzungsprompt -------------
 //
 // Dritte Bedingung `schonGeantwortet` kam nach einem Fund auf servertwo dazu:
@@ -392,6 +457,57 @@ const SDK_LIMIT_PRAEFIXE = ["You've hit your", "You've reached your"]
   pruefe('usage: kein Objekt ergibt null', nutzungAusAntwort(null, JETZT) === null)
   pruefe('usage: utilization null ergibt null',
     nutzungAusAntwort({ five_hour: { utilization: null, resets_at: null } }, JETZT) === null)
+}
+
+// --- 15b. naechsteBackoffMs: reine Verdopplung mit Deckel -------------------
+{
+  pruefe('erster 429: 10 Minuten', naechsteBackoffMs(0) === 10 * 60_000)
+  pruefe('zweiter 429 in Folge: 20 Minuten', naechsteBackoffMs(1) === 20 * 60_000)
+  pruefe('dritter 429 in Folge: 40 Minuten', naechsteBackoffMs(2) === 40 * 60_000)
+  pruefe('vierter 429 in Folge: 80 Minuten', naechsteBackoffMs(3) === 80 * 60_000)
+  pruefe('waechst nicht unbegrenzt: bei 2h gedeckelt', naechsteBackoffMs(10) === 2 * 60 * 60_000)
+}
+
+// --- 15c. nutzungAbfragen: 429-Backoff live gegen einen fetch-Mock ---------
+//
+// nutzungAbfragen() haelt seinen Backoff-Zustand in modulweiten Maps (siehe
+// kontenNutzung.ts) -- jeder Testfall bekommt deshalb einen eigenen
+// Kontonamen, damit sich die Faelle nicht gegenseitig beeinflussen.
+{
+  const konfigDir = mkdtempSync(join(tmpdir(), 'nachtschicht-nutzung-429-'))
+  writeFileSync(
+    join(konfigDir, '.credentials.json'),
+    JSON.stringify({ claudeAiOauth: { accessToken: 'attrappe' } }),
+  )
+  const konto = { name: 'test-429', configDir: konfigDir, angemeldet: true, email: null, abo: null }
+
+  const alterFetch = global.fetch
+  let aufrufe = 0
+  global.fetch = async () => {
+    aufrufe++
+    return new Response('', { status: 429 })
+  }
+  const erste = await nutzungAbfragen(konto)
+  pruefe('erster 429-Aufruf liefert null', erste === null)
+  pruefe('erster Aufruf hat wirklich gefetcht', aufrufe === 1)
+
+  const zweite = await nutzungAbfragen(konto)
+  pruefe('zweiter Aufruf INNERHALB des Backoffs liefert null', zweite === null)
+  pruefe('zweiter Aufruf hat NICHT erneut gefetcht (Backoff greift)', aufrufe === 1)
+
+  global.fetch = alterFetch
+}
+{
+  // Ein Konto ohne .credentials.json (keine Anmeldung) fragt den Endpunkt
+  // erst gar nicht an -- kein Backoff-Zustand noetig.
+  const konfigDir = mkdtempSync(join(tmpdir(), 'nachtschicht-nutzung-keine-anmeldung-'))
+  const konto = { name: 'test-ohne-login', configDir: konfigDir, angemeldet: false, email: null, abo: null }
+  const alterFetch = global.fetch
+  let aufrufe = 0
+  global.fetch = async () => { aufrufe++; return new Response('', { status: 200 }) }
+  const r = await nutzungAbfragen(konto)
+  pruefe('ohne .credentials.json: null, kein Netzwerkaufruf', r === null && aufrufe === 0)
+  global.fetch = alterFetch
 }
 
 // --- 16. emailLesen: Home-Fallback nur ohne gesetztes CLAUDE_CONFIG_DIR ---

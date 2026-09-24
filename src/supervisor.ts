@@ -15,6 +15,7 @@ import {
   HAUPT_KONTO,
   kontenLesen,
   sperrzeitpunktAusLimitstand,
+  resetzeitAusFehlertext,
   versuchPrompt,
   istKontoFehlertext,
   kontoFehlerLabel,
@@ -315,9 +316,14 @@ export class Supervisor extends EventEmitter {
         // Sperrzeit aus dem LIMITSTAND DIESES KONTOS, nicht aus dem
         // zuletzt gesehenen ueberhaupt -- der koennte laengst von einem
         // anderen Konto ueberschrieben sein. Und passend zum Fenster, das
-        // wirklich griff (5h/7d), nicht immer 5h.
+        // wirklich griff (5h/7d), nicht immer 5h. Fehlt ein passender
+        // Messwert (z.B. noch kein Poll seit dem letzten Reset gelaufen),
+        // steht die Reset-Zeit oft im Fehlertext der CLI selbst (Wochenlimit
+        // mit Datum+Zeitzone, siehe resetzeitAusFehlertext) -- genauer als
+        // die pauschale Vorgabe.
         const standDesKontos = this.konten.nutzungLesen(konto.name)?.stand ?? null
-        const reset = sperrzeitpunktAusLimitstand(standDesKontos, Date.now(), KONTO_SPERRE_VORGABE_MS)
+        const textFallback = resetzeitAusFehlertext(fehler ?? '', Date.now())
+        const reset = sperrzeitpunktAusLimitstand(standDesKontos, Date.now(), KONTO_SPERRE_VORGABE_MS, textFallback)
         this.konten.sperren(konto.name, reset)
         const naechstes = this.konten.waehlen(versuchteKonten)
         if (!naechstes) break // alle Konten gesperrt -- altes Wartevehalten bleibt
