@@ -11,6 +11,7 @@
 
 import { connect } from 'node:net'
 import { wavBauen } from './wav.js'
+import { WyomingLeser } from './wyoming.js'
 
 const HOST = process.env.PIPER_HOST ?? '127.0.0.1'
 const PORT = Number(process.env.PIPER_PORT ?? 10200)
@@ -20,13 +21,6 @@ const TIMEOUT_MS = Number(process.env.PIPER_TIMEOUT_MS ?? 20_000)
 const MAX_ZEICHEN = 1200
 
 export class StimmeFehler extends Error {}
-
-interface WyomingKopf {
-  type: string
-  data?: Record<string, unknown>
-  data_length?: number | null
-  payload_length?: number | null
-}
 
 /**
  * Einen Satz sprechen lassen. Gibt fertiges WAV zurueck.
@@ -41,7 +35,7 @@ export function sprechen(text: string): Promise<Buffer> {
 
   return new Promise<Buffer>((loesen, ablehnen) => {
     const sock = connect({ host: HOST, port: PORT })
-    let puffer = Buffer.alloc(0)
+    const leser = new WyomingLeser()
     const stuecke: Buffer[] = []
     let rate = 22050
     let breite = 2
@@ -74,47 +68,25 @@ export function sprechen(text: string): Promise<Buffer> {
     })
 
     sock.on('data', (teil: Buffer) => {
-      puffer = Buffer.concat([puffer, teil])
-
-      // Solange ein vollstaendiges Ereignis im Puffer liegt, eines abarbeiten.
-      // Ein Ereignis ist erst vollstaendig, wenn auch seine angekuendigten
-      // Rohdaten da sind -- sonst wartet die Schleife auf mehr Bytes.
-      for (;;) {
-        const nl = puffer.indexOf(0x0a)
-        if (nl < 0) return
-
-        let kopf: WyomingKopf
-        try {
-          kopf = JSON.parse(puffer.subarray(0, nl).toString('utf-8')) as WyomingKopf
-        } catch {
-          return abschliessen(new StimmeFehler('Piper schickte kein gueltiges JSON'))
-        }
-
-        const dLen = kopf.data_length ?? 0
-        const pLen = kopf.payload_length ?? 0
-        const gesamt = nl + 1 + dLen + pLen
-        if (puffer.length < gesamt) return // noch nicht alles da
-
-        let daten = kopf.data ?? {}
-        if (dLen > 0) {
-          try {
-            daten = JSON.parse(puffer.subarray(nl + 1, nl + 1 + dLen).toString('utf-8'))
-          } catch {
-            return abschliessen(new StimmeFehler('Piper schickte kein gueltiges Datenfeld'))
-          }
-        }
-        const nutzlast = pLen > 0 ? puffer.subarray(nl + 1 + dLen, gesamt) : null
-        puffer = puffer.subarray(gesamt)
-
-        if (kopf.type === 'audio-start') {
+      // Gemeinsamer Leser aus wyoming.ts statt eigenem Zerlegen: der alte
+      // private Parser warf bei einer Kopfzeile `null` ungefangen im
+      // Socket-Handler (ganzer Daemon weg) und hing bei unsinnigen Laengen.
+      let ereignisse
+      try {
+        ereignisse = leser.schieben(teil)
+      } catch (e) {
+        return abschliessen(new StimmeFehler(`Piper schickte kein gueltiges Ereignis: ${String(e)}`))
+      }
+      for (const { type, data: daten, payload: nutzlast } of ereignisse) {
+        if (type === 'audio-start') {
           rate = Number(daten.rate ?? rate)
           breite = Number(daten.width ?? breite)
           kanaele = Number(daten.channels ?? kanaele)
-        } else if (kopf.type === 'audio-chunk') {
-          if (nutzlast) stuecke.push(Buffer.from(nutzlast))
-        } else if (kopf.type === 'audio-stop') {
+        } else if (type === 'audio-chunk') {
+          if (nutzlast) stuecke.push(nutzlast)
+        } else if (type === 'audio-stop') {
           return abschliessen(null)
-        } else if (kopf.type === 'error') {
+        } else if (type === 'error') {
           return abschliessen(new StimmeFehler(String(daten.text ?? 'Piper meldete einen Fehler')))
         }
       }
