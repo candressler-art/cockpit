@@ -42,6 +42,11 @@ fruehere Fassung dieser Datei (bis Durchgang 12, vor dem Kuerzen hier).
   laufenden Zug (ersetzt waehrenddessen "Senden", `da2ac07`). Kaputte
   URL-Kodierung liefert 400, Verzeichnispfade 404 statt 500; API-Fehler
   kommen als JSON (`f5407cc`). **Bitte pruefen:** Stopp im Chat in der App.
+- **Durchgang 19:** Restpunkt aus D18 bestaetigt und behoben: nach
+  "Stoppen" sofort wieder senden gab 409, solange der alte Zug auslief.
+  Jetzt wartet der Server kurz (max. 10 s) darauf; zwei gleichzeitige
+  Sendungen kommen nicht mehr beide durch (`59a3eca`). **Bitte pruefen:**
+  Chat stoppen und direkt neu senden (mit echtem Agent nicht testbar hier).
 
 ## Offene Punkte (naechste Durchgaenge, Prioritaet 1 zuerst)
 
@@ -56,11 +61,9 @@ fruehere Fassung dieser Datei (bis Durchgang 12, vor dem Kuerzen hier).
    eine Sitzung als "verworfen" gilt -- nicht angefasst.
 3. **`src-tauri/`** nie angefasst (kein `cargo` in dieser Umgebung) -- auf
    dem PC bauen und pruefen.
-4. Kleiner Rest aus D18 (ungetestet, vermutlich harmlos): wer direkt nach
-   "Stoppen" im Chat sofort wieder sendet, koennte 409 "schreibt gerade
-   schon weiter" bekommen, falls `chatLaeuft` erst nach dem Poll-Tick
-   geraeumt wird -- erneut senden hilft. Chat-Stopp nur mit abgefangener
-   API getestet (kein echter Agent in der Testinstanz).
+4. Chat-Stopp/Neu-Senden (D18/D19) nur mit Unit-Test und Attrappen-Konten
+   geprueft (Attrappe endet sofort mit "Not logged in", kein echter
+   laufender Agent zum Stoppen) -- in der App gegenpruefen.
 5. Prioritaet 2/3 laut Aufgabenstellung: Oberflaeche weiter feinschleifen
    (Konsistenz, Handy, Tastatur, Ladezustaende), mehr End-to-End-Szenarien,
    Daemon-Robustheit bei Last/Fehlern -- bisher nur das oben Gelistete tief
@@ -79,6 +82,8 @@ fruehere Fassung dieser Datei (bis Durchgang 12, vor dem Kuerzen hier).
 
 ## Erledigt (chronologisch, mit Commit)
 
+- `59a3eca` Chats: nach Stopp sofort senden ohne 409 (`src/chatZuege.ts`,
+  `tests/chatZuege.test.mjs`; Testinstanz: 3 parallele POSTs -> 202/409/409).
 - `da2ac07` Chats-Tab: Stopp-Knopf fuer laufenden Zug (Skript
   `nachtschicht-bilder/chatstopp18.mjs`, 1280/375 per Playwright).
 - `f5407cc` Daemon: URIError -> 400, EISDIR/ENOTDIR -> 404, /api-Fehler als
