@@ -46,6 +46,10 @@ Nacht 1 (bis "Logbuch nach Durchgang 12") ist live. Seitdem, **bitte pruefen**:
   mitten im Nachtrag -- ganze Oberflaeche "getrennt". Jetzt seitenweise mit
   Warten auf den Puffer (`9aa5caf`). Pruefen: grossen alten Lauf im
   Lauf-Tab am Handy oeffnen -> vollstaendig, keine "getrennt"-Pille.
+- **D30:** `POST /api/konten` mit `[1,2]` o. ae. hob still den Kontovorzug
+  auf; ein Objekt als `prompt` startete einen echten Agenten mit dem Prompt
+  "[object Object]". Jetzt 400 mit Feldnamen (`a15a1f7`). Zahlen als Text
+  bleiben erlaubt (wie bisher).
 
 ## Offene Punkte (naechste Durchgaenge, Prioritaet 1 zuerst)
 
@@ -78,6 +82,9 @@ Nacht 1 (bis "Logbuch nach Durchgang 12") ist live. Seitdem, **bitte pruefen**:
    D28: feste Schluessel geprueft -- /api/lauf, Konsole, Discord-!lauf
    nutzen je Aufruf frische Ids, kein weiterer Fall. D29: Live-Strom-
    Nachlieferung (Last) behoben; /api/lauf ?seit=abc -> 400 (`995a94c`).
+   D30: API-Randfaelle per curl (Koerpertypen, leere Ids, FTS-Sonder-
+   zeichen, fremde Methoden) -- nur der Fund oben. Chats-Index/Fortsetzen
+   und SIGTERM-Ablauf gelesen, kein Fund.
    Noch offen: Zentrale holt /api/lauf/<id> nur fuer die Agenten, bekommt
    aber bis zu 5000 Ereignisse mit (nur Verschwendung, kein Fehler).
 
@@ -97,6 +104,9 @@ Nacht 1 (bis "Logbuch nach Durchgang 12") ist live. Seitdem, **bitte pruefen**:
   Ressourcenbindung durch wartende Laeufe, Sichtbarkeit "wartet" vs. "tot").
 
 ## Erledigt (neueste zuerst, Details im Commit)
+
+- `a15a1f7` koerperAuswerten: nur JSON-Objekt; textFeld() fuer alle
+  Textfelder in daemon.ts (`src/httpFehler.ts`, Test dort).
 
 - `9aa5caf` `src/nachlieferung.ts` (Senden + Nachlieferung aus daemon.ts),
   `tests/nachlieferung.test.mjs`; Repro-Skripte `/tmp/nachtschicht/d29/`
