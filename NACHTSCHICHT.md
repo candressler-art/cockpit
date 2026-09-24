@@ -30,6 +30,11 @@ fruehere Fassung dieser Datei (bis Durchgang 12, vor dem Kuerzen hier).
   Jetzt wartet der Server kurz (max. 10 s) darauf; zwei gleichzeitige
   Sendungen kommen nicht mehr beide durch (`59a3eca`). **Bitte pruefen:**
   Chat stoppen und direkt neu senden (mit echtem Agent nicht testbar hier).
+- **Durchgang 20:** Vertipptes Arbeitsverzeichnis in der Zentrale ergab
+  einen Lauf, der mit "native binary ... failed to launch" (libc!)
+  scheiterte. Jetzt sofort "Start abgelehnt: /x gibt es auf diesem Host
+  nicht"; unsinnige Zahlen (Runden "abc" -> Lauf endete sofort ohne Arbeit)
+  ebenfalls 400 (`c0d49e3`).
 
 ## Offene Punkte (naechste Durchgaenge, Prioritaet 1 zuerst)
 
@@ -54,6 +59,10 @@ fruehere Fassung dieser Datei (bis Durchgang 12, vor dem Kuerzen hier).
 
 ## Entscheidungen fuer Can (noch offen, keine Selbstentscheidung getroffen)
 
+- **Obergrenzen fuer Runden/Parallelitaet:** die Zentrale-Felder sagen
+  max 40/4, der Server prueft seit D20 nur Untergrenze und Zahlformat
+  (kein Deckel, damit API-Aufrufe mit mehr nicht brechen). Deckeln?
+
 - **Anmeldefehler-Sperre:** seit D15 faellt sie nach erneutem `/login`
   automatisch (naechster erfolgreicher Poll, konservativ: nur Anmelde-,
   nie Limitsperren). Einen manuellen "Sperre aufheben"-Knopf gibt es
@@ -65,6 +74,9 @@ fruehere Fassung dieser Datei (bis Durchgang 12, vor dem Kuerzen hier).
 
 ## Erledigt (chronologisch, mit Commit)
 
+- `c0d49e3` Daemon: cwd/Zahlen bei /api/lauf, /api/orchestrator vorab
+  pruefen (`src/eingaben.ts`, `tests/eingaben.test.mjs`; Testinstanz: 400er
+  fuer fehlendes/Datei-cwd und NaN, gueltiger Lauf wie gehabt 202).
 - `59a3eca` Chats: nach Stopp sofort senden ohne 409 (`src/chatZuege.ts`,
   `tests/chatZuege.test.mjs`; Testinstanz: 3 parallele POSTs -> 202/409/409).
 - `da2ac07` Chats-Tab: Stopp-Knopf fuer laufenden Zug (Skript
