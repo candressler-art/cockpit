@@ -3,8 +3,8 @@
 ## Zusammenfassung fuer Can
 
 - **Stand:** Schritte 1 und 2 erledigt. Schritt 3 (Oberflaeche) laeuft:
-  Geruest und **Chat fertig**; Aufgaben, Nutzung, Server, Notizen, Terminal,
-  Einstellungen sind noch Platzhalter.
+  Geruest, **Chat, Einstellungen, Nutzung fertig**; Aufgaben, Server,
+  Notizen, Terminal sind noch Platzhalter.
 - **Fertig (Backend):** Einstellungen in der DB + API; Nutzungsindex +
   `/api/nutzung`; Rollen (`inherit`, Planer-Regel); `/api/verzeichnisse`;
   **Chat-API** (neuer Chat, Weiterschreiben mit Modell/Aufwand/Modus,
@@ -27,6 +27,16 @@
     aendert (die auch deine CLI am PC betreffen wuerde).
   - *Plan annehmen* erlaubt nur "Aenderungen automatisch" oder "nachfragen",
     nie "Alles erlauben".
+  - *Konten-Vorzug steht in der Nutzung*, nicht in den Einstellungen: dort
+    sieht man die Limits, nach denen man waehlt (Einstellungen verlinken
+    nur dorthin -- keine Doppelung).
+  - *Stimme bleibt je Geraet* (localStorage), alles andere liegt im Daemon.
+  - *Wochenprognose linear* (Anteil / vergangene Zeit im Fenster), erst ab
+    6 h nach Fensterbeginn -- vorher ist das Tempo Zufall.
+  - *Guthaben: noch kein Cockpit-Schalter* "Guthaben nutzen, wenn im Limit"
+    (Plan) -- das griffe ins Balancing ein, und die echte Form der Antwort
+    ist ungeprueft. Erst nach dem Ende-zu-Ende-Test entscheiden. Ebenso
+    offen: Prognose "Guthaben reicht noch X Tage" (braucht Verlauf).
   - *Haiku bekommt keinen Denkaufwand* (effort) -- kennt keine Stufen.
   - *Guthaben*: eigene stuendliche Abfrage ohne `skip_spend`, der erprobte
     10-Minuten-Nutzungspuls bleibt, wie er ist. Mit echten Konten noch
@@ -48,7 +58,11 @@
 - `GET /api/aufgaben` -> `{laeufe:[{runId, chatId, titel, laeuft,
   agenten:[{..., todos, letzteTaetigkeit, spezialisten:[...]}]}]}`; WS
   `aufgaben {runId}` bei Aenderung.
-- `GET /api/konten` hat jetzt `guthaben: {konto: {aktiv, stand, ...}}`.
+- `GET /api/konten` hat jetzt `guthaben: {konto: {aktiv, stand, ...}}`,
+  je Konto `fuenfStundenResetAm`, `siebenTageResetAm` (ms) und
+  `wochePrognose {reicht, leerAm}`.
+- `GET /api/nutzung/tag?tag=JJJJ-MM-TT` -> Sitzungen des Tages mit `chat
+  {id, titel}` (auch ueber Fortsetzungen).
 - Gebaut in `src/chatOptionen.ts`, `src/freigaben.ts`, `src/aufgaben.ts`.
 
 ## Neue Oberflaeche (Aufbau)
@@ -58,7 +72,8 @@
 - `web/ui/`: `dom.js` (h(), Symbole, api(), Formate), `markdown.js`,
   `chat.js`, `eingabe.js` (Ordner/Modell/Denken/Modus, Diktieren),
   `werkzeuge.js` (Werkzeug-Zeilen, Diff, To-do, Spezialisten-Karte),
-  `diff.js`, `chatliste.js`. Bereiche: in `app.js` `BEREICHE` eintragen,
+  `diff.js`, `chatliste.js`, `einstellungen.js`, `nutzung.js`;
+  Stil der Bereiche in `web/bereiche.css`. Bereiche: in `app.js` `BEREICHE` eintragen,
   `bauen()` -> `{el, zeigen(param), verbergen()}`.
 - Vendor-Dateien: `node scripts/vendor.mjs` (kein Build-Schritt).
 - Browserpruefung: `node scripts/oberflaeche-pruefen.mjs [url] [ansichten]`
@@ -69,9 +84,9 @@
 
 ## Naechste Schritte
 
-1. Bereiche bauen: Einstellungen (inkl. Stimme, Spezialisten, Konten-Vorzug),
-   Nutzung (Heatmap, Kennzahlen, Konten, Guthaben), Aufgaben (+ Team-Auftrag-
-   Formular), Server, Notizen (Suche/Lesen statt 3D), Terminal (Konsole).
+1. Bereiche bauen: Aufgaben (+ Team-Auftrag-Formular), Server, Notizen
+   (Suche/Lesen statt 3D), Terminal (Konsole). Vorlage: `nutzung.js`
+   (laden/zeichnen, Fehlerbox, Pollen nur sichtbar).
 2. Chat-Karten fuer Freigabe/Rueckfrage/Plan/Spezialist sind nur ohne echte
    Daten geprueft -> in Schritt 5 mit Haiku echt ansehen.
 3. Schritt 4 Aufraeumen, README; Schritt 5 Ende-zu-Ende mit Haiku.
@@ -99,3 +114,12 @@
   Attrappen-Konten geprueft (Anmeldefehler, Kontowechsel) -> Kontowechsel-
   Fehler gefunden und behoben. Testkonten heissen jetzt `zweit`/`dritt`
   (`haupt` ist CLAUDE_CONFIG_DIR, Namensgleichheit verwirrte die Liste).
+- **D6** (25.9. 02:56): nacht-optimierung ohne neue Commits. Backend:
+  Reset-Zeiten + Wochenprognose in /api/konten, /api/nutzung/tag (Tests).
+  Bereiche **Einstellungen** und **Nutzung** gebaut, Playwright 1280/375
+  ohne Befund (auch Fehler-/Leerzustand, Bedienung der Schalter). Stimmstufe
+  wurde in der neuen Oberflaeche nie geladen -> behoben. Rollen- und
+  Auswahltexte mit echten Umlauten; Symbol des Fehlersuchers (⌖ fehlte in
+  Schriften) -> ✱. Hilfsskript fuer hohe Bilder: `scripts/.lang-tmp.mjs`
+  (nicht im Repo). Testkonten tragen kuenstliche Messwerte in
+  /tmp/umbau/cockpit.db.
