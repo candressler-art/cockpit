@@ -164,6 +164,30 @@ const dbPfad = join(verzeichnis, 'test.db')
   db.close()
 }
 
+// --- Aufgaben-Bereich: Agenten und Ereignisse der letzten 24 h ---
+{
+  const db = new CockpitDb(dbPfad)
+  const agent = (runId, agentId, startedAt, endedAt) => db.agentSpeichern({
+    agentId, runId, role: 'chat', fachrolle: null, status: endedAt ? 'done' : 'running', sessionId: null,
+    label: 'L', parentAgentId: null, model: null, cwd: '/tmp', startedAt, endedAt,
+    weightedTokens: 0, rawTokens: 0, costUsd: 0, turns: 0, lastError: null,
+  })
+  agent('alt', 'a', 100, 200)
+  agent('neu', 'a', 5000, 6000)
+  agent('lang', 'a', 100, 5500)
+  agent('offen', 'a', 100, null)
+  const ids = db.agentenSeit(5000).map((r) => r.run_id).sort().join()
+  pruefe('agentenSeit: neu begonnen, spaet geendet, noch offen -- nicht alt', ids === 'lang,neu,offen')
+  const ev = (seq, ts, kind) => db.ereignisSpeichern({
+    seq, ts, runId: 'neu', agentId: 'a', sessionId: null, kind, parentToolUseId: null, summary: kind, payload: { n: seq },
+  })
+  ev(1, 100, 'tool_use'); ev(2, 5001, 'usage'); ev(3, 5002, 'tool_use'); ev(4, 5003, 'tool_result')
+  const e = db.ereignisseArtSeit(5000, ['tool_use', 'tool_result'])
+  pruefe('ereignisseArtSeit: nur Arten und Zeitraum, Payload gelesen',
+    e.length === 2 && e[0].seq === 3 && e[1].kind === 'tool_result' && e[0].payload.n === 3)
+  db.close()
+}
+
 rmSync(verzeichnis, { recursive: true, force: true })
 
 console.log(`\n${ok}/${gesamt} bestanden`)

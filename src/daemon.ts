@@ -24,6 +24,7 @@ import {
 } from './chats.js'
 import { chatOptionenBauen, type ChatOptionen } from './chatOptionen.js'
 import { entscheidungLesen } from './freigaben.js'
+import { AufgabenSammler, AUFGABEN_FENSTER_MS, agentAusZeile } from './aufgaben.js'
 import { vaultIndizieren, vaultGraphLesen, vaultBeobachten, vaultDa, VAULT } from './vault.js'
 import { vaultZugriffErlaubt } from './vaultZugriff.js'
 import { konsoleBefehl } from './konsole.js'
@@ -273,6 +274,22 @@ function verteilen(typ: string, daten: unknown): void {
 }
 
 supervisor.on('ereignis', (e: CockpitEvent) => verteilen('ereignis', e))
+
+// Aufgaben-Bereich (aufgaben.ts): To-do-Listen und Spezialisten aus den
+// Ereignissen. Beim Start einmal aus der DB nachladen, damit Listen einen
+// Neustart des Daemons ueberleben; danach live. Der Weckruf 'aufgaben' traegt
+// nur die runId -- die Oberflaeche holt sich die Liste selbst.
+const aufgaben = new AufgabenSammler()
+try {
+  for (const e of db.ereignisseArtSeit(Date.now() - AUFGABEN_FENSTER_MS, ['tool_use', 'tool_result', 'text', 'thinking'])) {
+    aufgaben.ereignis(e)
+  }
+} catch (e) {
+  console.warn('[aufgaben] Nachladen fehlgeschlagen:', String(e))
+}
+supervisor.on('ereignis', (e: CockpitEvent) => {
+  if (aufgaben.ereignis(e)) verteilen('aufgaben', { runId: e.runId })
+})
 supervisor.on('agent', (a: { runId: string }) => verteilen('agent', a))
 // Live-Text eines Chat-Zugs (nur mit liveText). Wird nicht nachgeliefert:
 // wer spaeter kommt, bekommt die fertige Nachricht ueber die Ereignisse.
@@ -953,6 +970,11 @@ const server = createServer(async (req, res) => {
         if (e instanceof OrdnerFehler) return json(e.status, { fehler: e.message })
         throw e
       }
+    }
+
+    if (pfad === '/api/aufgaben' && req.method === 'GET') {
+      const agenten = db.agentenSeit(Date.now() - AUFGABEN_FENSTER_MS).map(agentAusZeile)
+      return json(200, { laeufe: aufgaben.liste(agenten) })
     }
 
     if (pfad === '/api/nutzung' && req.method === 'GET') {

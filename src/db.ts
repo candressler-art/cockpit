@@ -275,6 +275,41 @@ export class CockpitDb {
       .all(runId) as Record<string, unknown>[]
   }
 
+  /** Agenten, die seit `ts` begonnen oder geendet haben -- oder noch laufen. Fuer den Aufgaben-Bereich. */
+  agentenSeit(ts: number, limit = 300): Record<string, unknown>[] {
+    return this.db
+      .prepare(
+        `SELECT * FROM agents WHERE started_at >= ? OR ended_at >= ? OR ended_at IS NULL
+          ORDER BY started_at DESC LIMIT ?`,
+      )
+      .all(ts, ts, limit) as Record<string, unknown>[]
+  }
+
+  /**
+   * Ereignisse bestimmter Arten seit `ts`, ueber alle Laeufe, aelteste zuerst.
+   * Nur fuer den einmaligen Wiederaufbau des Aufgaben-Bereichs beim Start.
+   */
+  ereignisseArtSeit(ts: number, arten: string[], limit = 20_000): CockpitEvent[] {
+    const rows = this.db
+      .prepare(
+        `SELECT seq, run_id, ts, agent_id, session_id, kind, parent_tool_use_id, summary, payload
+           FROM events WHERE ts >= ? AND kind IN (${arten.map(() => '?').join(',')})
+          ORDER BY ts, seq LIMIT ?`,
+      )
+      .all(ts, ...arten, limit) as Record<string, unknown>[]
+    return rows.map((r) => ({
+      seq: r.seq as number,
+      runId: r.run_id as string,
+      ts: r.ts as number,
+      agentId: r.agent_id as string,
+      sessionId: (r.session_id as string | null) ?? null,
+      kind: r.kind as CockpitEvent['kind'],
+      parentToolUseId: (r.parent_tool_use_id as string | null) ?? null,
+      summary: r.summary as string,
+      payload: JSON.parse((r.payload as string) || 'null'),
+    }))
+  }
+
   laeufeLesen(limit = 50): Record<string, unknown>[] {
     return this.db
       .prepare(`SELECT * FROM runs ORDER BY started_at DESC LIMIT ?`)
