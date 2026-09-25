@@ -2,9 +2,9 @@
 
 ## Zusammenfassung fuer Can
 
-- **Stand:** Schritte 1-3 erledigt: alle Bereiche gebaut (Chat,
-  Aufgaben, Nutzung, Server, Notizen, Terminal, Einstellungen). Offen:
-  Schritt 4 (Aufraeumen, README) und 5 (Ende-zu-Ende mit Haiku).
+- **Stand:** Schritte 1-4 erledigt: alle Bereiche gebaut (Chat,
+  Aufgaben, Nutzung, Server, Notizen, Terminal, Einstellungen), alte
+  Oberflaeche entfernt, README neu. Offen: Schritt 5 (Ende-zu-Ende mit Haiku).
 - **Fertig (Backend):** Einstellungen in der DB + API; Nutzungsindex +
   `/api/nutzung`; Rollen (`inherit`, Planer-Regel); `/api/verzeichnisse`;
   **Chat-API** (neuer Chat, Weiterschreiben mit Modell/Aufwand/Modus,
@@ -53,6 +53,11 @@
   - *Terminal bleibt ohne "immer erlauben"* und ohne interaktive Shell
     (wie bisher, Begruendung in konsole.ts); neu ist nur ein Verlauf der
     letzten 30 Befehle im Daemon.
+  - *Sprachgespraech der Zentrale entfernt* (`/api/gespraech`, werkzeugloser
+    Antwort-Agent mit Vorlesen): laut Plan geht es im Chat auf; dort gibt es
+    Diktieren ins Eingabefeld. Vorgelesen werden nur noch Freigaben/Fragen.
+    Faellt dir das Vorlesen von Antworten ab, waere "Antwort vorlesen" im
+    Chat der Weg (Piper ist ja da).
   - *Haiku bekommt keinen Denkaufwand* (effort) -- kennt keine Stufen.
   - *Guthaben*: eigene stuendliche Abfrage ohne `skip_spend`, der erprobte
     10-Minuten-Nutzungspuls bleibt, wie er ist. Mit echten Konten noch
@@ -108,20 +113,14 @@
   Ansichten `aufgaben-voll/-team/-fehler` mit `scripts/aufgaben-attrappe.mjs`.
   Eigene Playwright-Skripte muessen in `scripts/` liegen (sonst findet node
   playwright nicht) -- danach loeschen.
-- Alte Oberflaeche (`web/tabs/*`, `kern.js`, `graph.js`, `zeitachse.js`,
-  `hud.css`, `tabs.js`, `sprachpegel.js`?) ist nicht mehr eingebunden ->
-  Schritt 4 loeschen. `chatLesen` in chats.ts ist tot (nur noch Tests).
 
 ## Naechste Schritte
 
-1. Schritt 4 Aufraeumen: `web/tabs/*`, `kern.js`, `graph.js`,
-   `zeitachse.js`, `hud.css`, `tabs.js` usw. (erst per grep pruefen, dass
-   nichts sie einbindet), verwaiste Endpunkte (`/api/vault/graph`?
-   -- vault.ts-Index nutzt sonst niemand? pruefen), `chatLesen`; README.
-2. Chat-Karten fuer Freigabe/Rueckfrage/Plan/Spezialist sind nur ohne echte
-   Daten geprueft -> in Schritt 5 mit Haiku echt ansehen; ebenso Aufgaben
-   mit echtem Chat (To-do, Spezialist) und einem kleinen Team-Auftrag.
-3. Schritt 5 Ende-zu-Ende mit Haiku (hoechstens 15 Zuege!).
+1. Schritt 5 Ende-zu-Ende mit Haiku (hoechstens 15 Zuege!): neuer Chat,
+   Fortsetzen, Freigabe, Plan-Modus, Spezialist, Abbrechen,
+   Kontowechsel-Anzeige; dabei Chat-Karten und Aufgaben (To-do, Spezialist)
+   echt ansehen, Guthaben-Form pruefen.
+2. Danach Ausrollen anfordern (`.umbau-ausrollen`).
 
 ## Durchgaenge
 
@@ -142,3 +141,7 @@
   fertig (Kurve erst ab 3 Min. Verlauf, Ausrichtung), **Notizen** und
   **Terminal** gebaut, jeweils mit Tests; Playwright alle 52 Ansichten
   1280/375 ohne Befund (inkl. echtem Terminal-Ablauf mit Neuladen).
+- **D10** (25.9. 07:35): Schritt 4: alte Oberflaeche, three.js,
+  `/api/gespraech`, `/api/vault/graph` (+Index), `POST /api/lauf`,
+  `chatLesen` entfernt (`/api/laeufe` bleibt: ausrollen.sh nutzt es); README
+  neu. Playwright 52 Ansichten ohne Befund.
