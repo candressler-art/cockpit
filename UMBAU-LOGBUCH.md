@@ -116,11 +116,28 @@
 
 ## Naechste Schritte
 
-1. Schritt 5 Ende-zu-Ende mit Haiku (hoechstens 15 Zuege!): neuer Chat,
-   Fortsetzen, Freigabe, Plan-Modus, Spezialist, Abbrechen,
-   Kontowechsel-Anzeige; dabei Chat-Karten und Aufgaben (To-do, Spezialist)
-   echt ansehen, Guthaben-Form pruefen.
+1. Schritt 5 Rest: Rueckfrage-Karte (AskUserQuestion) und ein kleiner
+   Team-Auftrag mit Haiku (Einstellungen der E2E-Instanz stehen schon auf
+   Haiku, 2 Runden, 1 parallel). Bisher 9 von 15 Zuegen verbraucht.
 2. Danach Ausrollen anfordern (`.umbau-ausrollen`).
+
+## Ende-zu-Ende (D10, echte Konten, Haiku)
+
+- Instanz: `/tmp/umbau/e2e/start.sh` (ohne CLAUDE_*-Variablen der Shell,
+  eigene DB/Spiegel unter /tmp/umbau/e2e, Port 8796); Ablauf per
+  `scripts/e2e.mjs <schritt> <chatId>` (nicht committet, danach loeschen).
+- Geprueft und gut: neuer Chat, Fortsetzen, Freigabe (Bash, Erlauben),
+  Plan-Modus (Karte, Umsetzen), Spezialist (pruefer, Karte), Abbrechen,
+  **echter Kontowechsel** (haupt im Wochenlimit -> zweit, Hinweis im Chat),
+  To-do-Liste live, Aufgaben-Bereich mit Liste und Spezialist.
+- Guthaben echt: `{aktiv:false, umschaltbar:false, vomNutzerAus:false,
+  jemalsAktiv:false, stand:null, verbraucht:0, waehrung:'USD'}` -> Anzeige
+  "Guthaben aus" stimmt. Schalter bleibt weggelassen (siehe oben).
+- Gefunden und behoben: Frage nach Kontowechsel doppelt; Modus blieb nach
+  "Plan umsetzen" auf "Nur planen"; **TodoWrite gibt es in der CLI nicht
+  mehr** (TaskCreate/TaskUpdate) -> Chat und Aufgaben zeigten keine Liste;
+  Anhalten blieb auf "arbeitet" haengen und hiess "Fehler"; angehaltene
+  Fragen ohne Kennzeichen; Handy-Eingabeleiste brach bei langem Pfad um.
 
 ## Durchgaenge
 
