@@ -443,3 +443,36 @@ select.chip option { background: var(--mantle); color: var(--text); }
   .chat-eintrag { padding: 8px 10px; }
   .bereich-link { padding: 8px 10px; }
 }
+
+/* Chatliste: "…" je Eintrag (anheften, umbenennen, aus der Liste nehmen).
+   Mit Maus erst bei Hover/Fokus sichtbar, am Touchgeraet immer (leise). */
+.chat-zeile { position: relative; }
+.chat-zeile .chat-eintrag { padding-right: 30px; }
+.eintrag-mehr {
+  position: absolute; top: 50%; right: 4px; transform: translateY(-50%);
+  width: 26px; height: 26px; display: grid; place-items: center; padding: 0;
+  border: 0; border-radius: 6px; background: none; color: var(--overlay); cursor: pointer; opacity: 0;
+}
+.chat-zeile:hover .eintrag-mehr, .chat-zeile.an .eintrag-mehr, .eintrag-mehr:focus-visible, .eintrag-mehr[aria-expanded="true"] { opacity: 1; }
+.eintrag-mehr:hover, .eintrag-mehr[aria-expanded="true"] { background: var(--surface1); color: var(--text); }
+@media (hover: none) { .eintrag-mehr { opacity: .7; } }
+.eintrag-menue {
+  position: fixed; z-index: 60; min-width: 190px; padding: 4px; display: flex; flex-direction: column;
+  background: var(--mantle); border: 1px solid var(--surface1); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.35);
+}
+.menue-punkt {
+  display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 0; border-radius: 6px;
+  background: none; text-align: left; cursor: pointer; font-size: 13.5px;
+}
+.menue-punkt:hover, .menue-punkt:focus-visible { background: var(--surface0); outline: none; }
+.menue-punkt.gefahr { color: var(--rot); }
+.chat-zeile.bearbeiten { padding: 3px 4px; }
+.titel-feld {
+  width: 100%; padding: 6px 8px; font-size: 13.5px; border-radius: 8px;
+  border: 1px solid var(--akzent); background: var(--base); outline: none;
+}
+.entfernt-hinweis {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin: 6px 4px 2px; padding: 8px 10px;
+  font-size: 12.5px; border-radius: 8px; background: var(--surface0); color: var(--subtext);
+}
+.entfernt-hinweis > span { min-width: 0; overflow-wrap: anywhere; }

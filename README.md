@@ -311,6 +311,7 @@ kein Profil.
 | `/api/chats?q=` | GET | Chats suchen |
 | `/api/chats` | POST | neuer Chat `{text, cwd?, modell?, aufwand?, berechtigung?}` -> `202 {id, laufId, cwd, startSeq}` |
 | `/api/chats/<id>` | GET | ein Chat als Nachrichten |
+| `/api/chats/<id>` | PATCH | nur Cockpit-Eintrag: `{titel?, angeheftet?, ausgeblendet?}` (Titel leer = Original; ausgeblendet bis zur naechsten Aktivitaet) |
 | `/api/chats/<id>/weiter` | POST | weiterschreiben `{text, modell?, aufwand?, berechtigung?}` |
 | `/api/freigabe` | POST | Freigabe entscheiden `{id, erlaubt, immer?, antworten?, modus?, nachricht?}` |
 | `/api/abbrechen` | POST | Agent (`runId`, `agentId`) oder ganzen Lauf (`runId`) abbrechen |

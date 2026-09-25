@@ -62,6 +62,17 @@ CREATE TABLE IF NOT EXISTS chat_fortsetzung (
   cwd              TEXT NOT NULL,
   geaendert        INTEGER NOT NULL
 );
+-- Was man im Cockpit an einem Chat einstellt: eigener Titel, angeheftet,
+-- aus der Liste genommen. Kein abgeleiteter Zustand (ueberlebt den Neubau
+-- des Index), und nie eine Aenderung an der Sitzungsdatei -- die gehoert
+-- dem Desktop bzw. der CLI. ausgeblendet ist ein Zeitpunkt: neuere
+-- Aktivitaet im Chat holt ihn wieder in die Liste.
+CREATE TABLE IF NOT EXISTS chat_markierung (
+  session_id   TEXT PRIMARY KEY,
+  titel        TEXT,
+  angeheftet   INTEGER NOT NULL DEFAULT 0,
+  ausgeblendet INTEGER
+);
 `
 
 /**
@@ -94,6 +105,8 @@ export interface ChatKopf {
   quelle: 'desktop' | 'server'
   /** claude-desktop / cli / sdk-ts / sdk-cli, oder null bei alten Dateien. */
   entrypoint: string | null
+  /** Im Cockpit angeheftet: steht oben in der Liste. */
+  angeheftet?: boolean
   /** Ob das Arbeitsverzeichnis auf DIESEM Host existiert -- nur dann ist
    *  ein echtes Fortsetzen moeglich. */
   fortsetzbar?: boolean
@@ -364,7 +377,7 @@ export async function chatsIndizieren(dbPfad: string): Promise<{ gesamt: number;
 function zeileZuKopf(r: Record<string, unknown>): ChatKopf {
   return {
     sessionId: String(r.session_id),
-    titel: String(r.titel),
+    titel: String(r.eigener_titel ?? r.titel),
     cwd: r.cwd ? String(r.cwd) : null,
     projekt: r.projekt ? String(r.projekt) : null,
     startedAt: r.started_at ? Number(r.started_at) : null,
@@ -374,8 +387,15 @@ function zeileZuKopf(r: Record<string, unknown>): ChatKopf {
     groesse: Number(r.groesse ?? 0),
     quelle: r.quelle === 'server' ? 'server' : 'desktop',
     entrypoint: r.entrypoint ? String(r.entrypoint) : null,
+    angeheftet: Boolean(r.angeheftet),
   }
 }
+
+/** Spalten und Join fuer die Markierung; zeileZuKopf liest eigener_titel. */
+const MIT_MARKIERUNG = `c.*, m.titel AS eigener_titel, COALESCE(m.angeheftet, 0) AS angeheftet
+  FROM chats c LEFT JOIN chat_markierung m ON m.session_id = c.session_id`
+/** Aus der Liste genommen, solange danach nichts mehr im Chat geschah. */
+const NICHT_AUSGEBLENDET = `(m.ausgeblendet IS NULL OR COALESCE(c.ended_at, c.started_at, 0) > m.ausgeblendet)`
 
 /**
  * Welche Sitzungen in die Chatliste gehoeren: was ein Mensch angefangen hat
@@ -390,14 +410,14 @@ const SICHTBAR_SQL = `(c.entrypoint IS NULL OR c.entrypoint IN ('claude-desktop'
 
 export function chatsSuchen(dbPfad: string, q: string, limit = 60, alle = false): ChatKopf[] {
   const h = handle(dbPfad)
-  const filter = alle ? '1' : SICHTBAR_SQL
+  const filter = `${alle ? '1' : SICHTBAR_SQL} AND ${NICHT_AUSGEBLENDET}`
   if (!q.trim()) {
     // Sortiert nach letzter Aktivitaet, nicht nach Beginn: ein alter Chat, in
     // dem gestern weitergeschrieben wurde, gehoert nach oben -- so wie in der
     // Claude-App.
     return (h.prepare(
-      `SELECT c.* FROM chats c WHERE ${filter}
-       ORDER BY COALESCE(c.ended_at, c.started_at) DESC LIMIT ?`,
+      `SELECT ${MIT_MARKIERUNG} WHERE ${filter}
+       ORDER BY angeheftet DESC, COALESCE(c.ended_at, c.started_at) DESC LIMIT ?`,
     ).all(limit) as Record<string, unknown>[]).map(zeileZuKopf)
   }
   // Praefixsuche je Wort: wer "cockp" tippt, will "Cockpit" finden.
@@ -405,11 +425,16 @@ export function chatsSuchen(dbPfad: string, q: string, limit = 60, alle = false)
   // liest und bei einem Apostroph mit einem Fehler aussteigt.
   const muster = q.trim().split(/\s+/)
     .map((w) => `"${w.replace(/"/g, '""')}"*`).join(' AND ')
+  // Den eigenen Titel kennt der FTS-Index nicht (der wird aus den Dateien
+  // gebaut) -- er wird per LIKE mitgesucht und steht dann vorn.
+  const wie = `%${q.trim().replace(/[\\%_]/g, (z) => `\\${z}`)}%`
   try {
     return (h.prepare(
-      `SELECT c.* FROM chats_fts f JOIN chats c ON c.session_id = f.session_id
-       WHERE chats_fts MATCH ? AND ${filter} ORDER BY rank LIMIT ?`,
-    ).all(muster, limit) as Record<string, unknown>[]).map(zeileZuKopf)
+      `SELECT ${MIT_MARKIERUNG}
+       LEFT JOIN (SELECT session_id, rank FROM chats_fts WHERE chats_fts MATCH ?) f ON f.session_id = c.session_id
+       WHERE (f.session_id IS NOT NULL OR m.titel LIKE ? ESCAPE '\\') AND ${filter}
+       ORDER BY (m.titel LIKE ? ESCAPE '\\') DESC, f.rank LIMIT ?`,
+    ).all(muster, wie, wie, limit) as Record<string, unknown>[]).map(zeileZuKopf)
   } catch (e) {
     console.warn('[chats] Suche fehlgeschlagen:', String(e))
     return []
@@ -432,7 +457,7 @@ export function zuletztBenutzteOrdner(dbPfad: string, limit = 8): string[] {
 
 export function chatKopfLesen(dbPfad: string, sessionId: string): (ChatKopf & { pfad: string }) | null {
   const h = handle(dbPfad)
-  const r = h.prepare('SELECT * FROM chats WHERE session_id = ?').get(sessionId) as
+  const r = h.prepare(`SELECT ${MIT_MARKIERUNG} WHERE c.session_id = ?`).get(sessionId) as
     Record<string, unknown> | undefined
   if (!r) return null
   return { ...zeileZuKopf(r), pfad: String(r.pfad) }
@@ -445,12 +470,57 @@ export function chatKopfLesen(dbPfad: string, sessionId: string): (ChatKopf & { 
  */
 export function chatFuerSitzung(dbPfad: string, sitzung: string): { id: string; titel: string } | null {
   const h = handle(dbPfad)
-  const r = (h.prepare('SELECT session_id, titel FROM chats WHERE session_id = ?').get(sitzung)
+  const r = (h.prepare(
+    `SELECT c.session_id, COALESCE(m.titel, c.titel) AS titel FROM chats c
+     LEFT JOIN chat_markierung m ON m.session_id = c.session_id WHERE c.session_id = ?`,
+  ).get(sitzung)
     ?? h.prepare(
-      `SELECT c.session_id, c.titel FROM chat_fortsetzung f JOIN chats c ON c.session_id = f.session_id
+      `SELECT c.session_id, COALESCE(m.titel, c.titel) AS titel FROM chat_fortsetzung f
+       JOIN chats c ON c.session_id = f.session_id
+       LEFT JOIN chat_markierung m ON m.session_id = c.session_id
        WHERE f.aktuelle_session = ?`,
     ).get(sitzung)) as { session_id: string; titel: string } | undefined
   return r ? { id: String(r.session_id), titel: String(r.titel) } : null
+}
+
+export interface Markierung {
+  /** Eigener Titel; leer oder null stellt den Titel aus der Sitzung wieder her. */
+  titel?: string | null
+  angeheftet?: boolean
+  /** true nimmt den Chat aus Liste und Suche (und heftet ihn ab), false holt ihn zurueck. */
+  ausgeblendet?: boolean
+}
+
+export const TITEL_HOECHSTENS = 120
+
+/**
+ * Markierung eines Chats aendern (nur die angegebenen Felder). false, wenn
+ * das Cockpit den Chat nicht kennt -- weder im Index noch als eben
+ * begonnener Chat ohne Sitzungsdatei.
+ */
+export function chatMarkieren(dbPfad: string, sessionId: string, m: Markierung): boolean {
+  const h = handle(dbPfad)
+  const bekannt = h.prepare(
+    `SELECT 1 FROM chats WHERE session_id = ? UNION SELECT 1 FROM chat_fortsetzung WHERE session_id = ?`,
+  ).get(sessionId, sessionId)
+  if (!bekannt) return false
+  h.prepare('INSERT OR IGNORE INTO chat_markierung (session_id) VALUES (?)').run(sessionId)
+  if (m.titel !== undefined) {
+    const t = (m.titel ?? '').replace(/\s+/g, ' ').trim().slice(0, TITEL_HOECHSTENS)
+    h.prepare('UPDATE chat_markierung SET titel = ? WHERE session_id = ?').run(t || null, sessionId)
+  }
+  if (m.angeheftet !== undefined) {
+    h.prepare('UPDATE chat_markierung SET angeheftet = ? WHERE session_id = ?').run(m.angeheftet ? 1 : 0, sessionId)
+  }
+  if (m.ausgeblendet !== undefined) {
+    // Ausblenden heftet ab: sonst kaeme er beim Zurueckholen (neue
+    // Aktivitaet) unerwartet ganz oben wieder.
+    h.prepare(
+      `UPDATE chat_markierung SET ausgeblendet = ?, angeheftet = CASE WHEN ? THEN 0 ELSE angeheftet END
+       WHERE session_id = ?`,
+    ).run(m.ausgeblendet ? Date.now() : null, m.ausgeblendet ? 1 : 0, sessionId)
+  }
+  return true
 }
 
 export interface Fortsetzung {

@@ -165,6 +165,12 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
     live[d.art === 'denken' ? 'denken' : 'text'] += d.text
     liveZeichnen()
   })
+  // Umbenannt (in der Liste, evtl. auf einem anderen Geraet).
+  bus.abonnieren('chats', (d) => {
+    if (!d?.titel || d.id !== id || !kopf || kopf.titel === d.titel) return
+    kopf = { ...kopf, titel: d.titel }
+    kopfZeichnen()
+  })
   bus.abonnieren('agent', (a) => {
     if (!laufId || a?.runId !== laufId || a.agentId !== 'chat') return
     status = a.status

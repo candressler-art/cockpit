@@ -18,7 +18,7 @@ import { sprechenGecacht } from './stimme.js'
 import { erkennen } from './hoeren.js'
 import {
   chatsIndizieren, chatsSuchen, verlaufLesen, chatKopfLesen, zuletztBenutzteOrdner,
-  fortsetzungLesen, fortsetzungVorbereiten, fortsetzungAktualisieren, chatRegistrieren, sitzungVorhanden, chatFuerSitzung,
+  fortsetzungLesen, fortsetzungVorbereiten, fortsetzungAktualisieren, chatRegistrieren, sitzungVorhanden, chatFuerSitzung, chatMarkieren, type Markierung,
   type Fortsetzung,
 } from './chats.js'
 import { chatOptionenBauen, type ChatOptionen } from './chatOptionen.js'
@@ -619,7 +619,7 @@ const server = createServer(async (req, res) => {
   const corsKopf: Record<string, string> = erlaubt && origin
     ? {
         'access-control-allow-origin': origin,
-        'access-control-allow-methods': 'GET, POST, OPTIONS',
+        'access-control-allow-methods': 'GET, POST, PATCH, OPTIONS',
         'access-control-allow-headers': 'content-type',
         'access-control-max-age': '600',
         vary: 'Origin',
@@ -826,6 +826,30 @@ const server = createServer(async (req, res) => {
       const neu = !kopf && !sitzungVorhanden(DB_PFAD, id)
       const startSeq = chatZugStarten(id, f, text, kopf?.titel ?? text.slice(0, 50), opt.optionen, neu)
       return json(202, { laufId: f.laufId, cwd: f.cwd, startSeq })
+    }
+
+    // Umbenennen, anheften, aus der Liste nehmen -- nur der Cockpit-Eintrag,
+    // die Sitzungsdatei bleibt unberuehrt.
+    if (pfad.startsWith('/api/chats/') && req.method === 'PATCH') {
+      const id = decodeURIComponent(pfad.slice('/api/chats/'.length))
+      const k = (await koerperLesen(req)) as Record<string, unknown> | null
+      const m: Markierung = {}
+      if (k && 'titel' in k) {
+        if (k.titel !== null && typeof k.titel !== 'string') return json(400, { fehler: 'titel muss Text sein' })
+        m.titel = k.titel as string | null
+      }
+      for (const feld of ['angeheftet', 'ausgeblendet'] as const) {
+        if (k && feld in k) {
+          if (typeof k[feld] !== 'boolean') return json(400, { fehler: `${feld} muss true oder false sein` })
+          m[feld] = k[feld] as boolean
+        }
+      }
+      if (!Object.keys(m).length) return json(400, { fehler: 'nichts zu aendern' })
+      if (!chatMarkieren(DB_PFAD, id, m)) return json(404, { fehler: 'Sitzung unbekannt' })
+      const kopf = chatKopfLesen(DB_PFAD, id)
+      // titel: der offene Chat zeigt ihn im Kopf, auch auf anderen Geraeten.
+      verteilen('chats', { id, titel: kopf?.titel ?? null })
+      return json(200, { ok: true, kopf })
     }
 
     // Neuer Chat: Session-Id vergibt das Cockpit selbst (SDK sessionId), die
