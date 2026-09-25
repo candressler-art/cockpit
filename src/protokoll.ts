@@ -55,14 +55,17 @@ export function rolleAusAuftrag(auftrag: string): { rolle: string | null; text: 
   }
 }
 
-/** Zerlegt einen NAECHSTER-PROMPT in einen oder mehrere Auftraege. */
+/**
+ * Zerlegt einen NAECHSTER-PROMPT in einen oder mehrere Auftraege. Besteht er
+ * nur aus Trennern und Leerraum, ist das Ergebnis leer -- frueher kam dann der
+ * Trenner selbst als "Auftrag" zurueck und ging so an einen Worker.
+ */
 export function auftraegeTrennen(prompt: string): string[] {
   AUFTRAG_TRENNER.lastIndex = 0
-  const teile = (prompt ?? '')
+  return (prompt ?? '')
     .split(AUFTRAG_TRENNER)
     .map((t) => t.trim())
     .filter(Boolean)
-  return teile.length > 0 ? teile : [(prompt ?? '').trim()].filter(Boolean)
 }
 
 const FELD_MARKER =

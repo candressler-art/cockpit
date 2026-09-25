@@ -38,6 +38,12 @@ export class AnfrageFehler extends Error {
  *
  * Leer (auch nur Leerraum) bleibt `null` wie bisher -- einige Routen kommen
  * ohne Koerper aus. Zu gross -> 413, kein gueltiges JSON -> 400.
+ *
+ * Gueltiges JSON, das kein Objekt ist (`[1,2]`, `"text"`, `5`), ebenfalls
+ * 400: alle Routen lesen Felder daraus, und `k?.name` auf einem Array ist
+ * schlicht undefined. POST /api/konten hob so still den Kontovorzug auf
+ * (fehlender Name heisst dort "Vorzug aufheben") und antwortete ok.
+ * Ein JSON-`null` zaehlt wie ein leerer Koerper.
  */
 export function koerperAuswerten(roh: Buffer | null, zuGross: boolean, maxBytes: number): unknown {
   if (zuGross) {
@@ -45,9 +51,29 @@ export function koerperAuswerten(roh: Buffer | null, zuGross: boolean, maxBytes:
   }
   const text = roh ? roh.toString('utf-8') : ''
   if (!text.trim()) return null
+  let wert: unknown
   try {
-    return JSON.parse(text)
+    wert = JSON.parse(text)
   } catch {
     throw new AnfrageFehler(400, 'Anfragekoerper ist kein gueltiges JSON')
   }
+  if (wert !== null && (typeof wert !== 'object' || Array.isArray(wert))) {
+    throw new AnfrageFehler(400, 'Anfragekoerper muss ein JSON-Objekt sein')
+  }
+  return wert
+}
+
+/**
+ * Ein Textfeld aus dem Anfragekoerper. Fehlt es (undefined/null), kommt
+ * undefined zurueck -- den Standard setzt der Aufrufer. Zahlen und
+ * Wahrheitswerte werden wie bisher zu Text; ein Objekt oder Array dagegen
+ * wirft AnfrageFehler 400. Frueher wurde daraus per String() still
+ * "[object Object]" -- /api/lauf startete damit einen echten Agenten auf
+ * Kosten des Kontingents, mit genau diesem Prompt.
+ */
+export function textFeld(k: Record<string, unknown> | null, name: string): string | undefined {
+  const w = k?.[name]
+  if (w === undefined || w === null) return undefined
+  if (typeof w === 'object') throw new AnfrageFehler(400, `${name} muss Text sein`)
+  return String(w)
 }
