@@ -401,6 +401,20 @@ export function chatsSuchen(dbPfad: string, q: string, limit = 60, alle = false)
   }
 }
 
+/**
+ * Arbeitsordner der zuletzt aktiven Chats, neueste zuerst, ohne Doppelte --
+ * fuer die Ordnerwahl beim neuen Chat. Nur sichtbare Chats: die Ordner der
+ * Team-Worker sind dieselben, aber in Massen.
+ */
+export function zuletztBenutzteOrdner(dbPfad: string, limit = 8): string[] {
+  const h = handle(dbPfad)
+  return (h.prepare(
+    `SELECT c.cwd AS cwd, MAX(COALESCE(c.ended_at, c.started_at, 0)) AS t FROM chats c
+     WHERE c.cwd IS NOT NULL AND c.cwd != '' AND ${SICHTBAR_SQL}
+     GROUP BY c.cwd ORDER BY t DESC LIMIT ?`,
+  ).all(limit) as { cwd: string }[]).map((r) => String(r.cwd))
+}
+
 export function chatKopfLesen(dbPfad: string, sessionId: string): (ChatKopf & { pfad: string }) | null {
   const h = handle(dbPfad)
   const r = h.prepare('SELECT * FROM chats WHERE session_id = ?').get(sessionId) as

@@ -18,7 +18,7 @@ import { sprechenGecacht } from './stimme.js'
 import { erkennen } from './hoeren.js'
 import { GespraechBelegt, gespraechAntworten } from './gespraech.js'
 import {
-  chatsIndizieren, chatsSuchen, chatLesen, chatKopfLesen,
+  chatsIndizieren, chatsSuchen, chatLesen, chatKopfLesen, zuletztBenutzteOrdner,
   fortsetzungLesen, fortsetzungVorbereiten, fortsetzungAktualisieren,
 } from './chats.js'
 import { vaultIndizieren, vaultGraphLesen, vaultBeobachten, vaultDa, VAULT } from './vault.js'
@@ -33,6 +33,7 @@ import { auftraegeTrennen } from './protokoll.js'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { EinstellungsSpeicher, auswahlListen } from './einstellungen.js'
+import { ordnerAuflisten, OrdnerFehler } from './verzeichnisse.js'
 import { nutzungIndizieren, nutzungLesen, kennzahlenBerechnen, tagVerschieben, tagVon } from './nutzung.js'
 import { kontenLesen } from './konten.js'
 
@@ -866,6 +867,27 @@ const server = createServer(async (req, res) => {
       // 400 nur, wenn gar nichts uebernommen werden konnte -- ein gueltiges
       // Feld neben einem ungueltigen ist trotzdem gespeichert.
       return json(fehler.length > 0 && !geaendert ? 400 : 200, { werte, fehler })
+    }
+
+    if (pfad === '/api/verzeichnisse' && req.method === 'GET') {
+      // Ohne pfad: der Vorgabe-Arbeitsordner. Favoriten und zuletzt benutzte
+      // kommen immer mit -- die Ordnerwahl braucht alle drei auf einmal, und
+      // verschwundene Ordner sollen dort gar nicht erst auftauchen.
+      const w = einstellungen.lesen()
+      try {
+        const liste = await ordnerAuflisten(
+          url.searchParams.get('pfad') || w.arbeitsordner,
+          url.searchParams.get('versteckte') === '1',
+        )
+        return json(200, {
+          ...liste,
+          favoriten: w.favoriten.filter((f) => existsSync(f)),
+          zuletzt: zuletztBenutzteOrdner(DB_PFAD, 12).filter((f) => existsSync(f)).slice(0, 8),
+        })
+      } catch (e) {
+        if (e instanceof OrdnerFehler) return json(e.status, { fehler: e.message })
+        throw e
+      }
     }
 
     if (pfad === '/api/nutzung' && req.method === 'GET') {
