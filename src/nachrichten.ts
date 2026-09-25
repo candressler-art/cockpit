@@ -198,6 +198,31 @@ function zeitLesen(ts: unknown): number | null {
 /** Synthetische Antwort der CLI nach einem Abbruch -- kein echter Beitrag. */
 const CLI_SYNTHETISCH = 'No response requested.'
 
+/** Reiner Text einer Nachricht, oder null, wenn sie mehr als Text enthaelt. */
+function nurTextVon(n: Nachricht): string | null {
+  if (!n.bloecke.length || !n.bloecke.every((b) => b.typ === 'text')) return null
+  return n.bloecke.map((b) => (b.typ === 'text' ? b.text : '')).join('\n')
+}
+
+/**
+ * Derselbe Prompt noch einmal, und dazwischen stehen nur Limitmeldungen: das
+ * ist der Kontowechsel des Supervisors (erstes Konto scheitert mit einer
+ * Limitmeldung, das naechste bekommt denselben Prompt in dieselbe Sitzung),
+ * keine neue Frage. Ohne Hinweis dazwischen bleibt eine Wiederholung stehen --
+ * dann hat jemand wirklich zweimal gefragt.
+ */
+function istWiederholungNachLimit(bisher: Nachricht[], n: Nachricht): boolean {
+  const text = nurTextVon(n)
+  if (text === null) return false
+  let hinweise = 0
+  for (let i = bisher.length - 1; i >= 0; i--) {
+    const m = bisher[i]!
+    if (m.rolle === 'assistant' && m.bloecke.every((b) => b.typ === 'hinweis')) { hinweise++; continue }
+    return m.rolle === 'user' && hinweise > 0 && nurTextVon(m) === text
+  }
+  return false
+}
+
 /**
  * Normalisiert einen ganzen Dateiinhalt. Die letzten `max` Nachrichten; ob
  * gekuerzt wurde, steht im Ergebnis.
@@ -230,6 +255,8 @@ export function verlaufNormalisieren(
       if (nurText && istLimitText(text)) {
         n.bloecke = [{ typ: 'hinweis', text }]
       }
+    } else if (istWiederholungNachLimit(alle, n)) {
+      continue
     }
     alle.push(n)
   }

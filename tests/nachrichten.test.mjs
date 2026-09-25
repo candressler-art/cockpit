@@ -108,6 +108,38 @@ pruefe('Ergebnis als Zeichenkette', normalisieren({ type: 'user', message: { con
   pruefe('Verlauf: die letzten max behalten', r.gekuerzt && r.nachrichten.length === 4 && r.nachrichten[0].id === '6')
 }
 
+// --- Kontowechsel: derselbe Prompt nach einer Limitmeldung nur einmal -------
+// Gefunden im Ende-zu-Ende-Test: scheitert das erste Konto mit einer
+// Limitmeldung, schickt der Supervisor denselben Prompt mit dem naechsten
+// Konto in dieselbe Sitzung -- die Frage stand dann doppelt im Chat.
+{
+  const z = (o) => JSON.stringify(o)
+  const limit = (t) => t.startsWith("You've hit")
+  const zeilen = [
+    z({ type: 'user', uuid: 'u1', message: { content: 'Sag Hallo' } }),
+    z({ type: 'assistant', uuid: 'a1', message: { content: [{ type: 'text', text: "You've hit your weekly limit" }] } }),
+    z({ type: 'user', uuid: 'u2', message: { content: 'Sag Hallo' } }),
+    z({ type: 'assistant', uuid: 'a2', message: { content: [{ type: 'text', text: 'Hallo' }] } }),
+  ].join('\n')
+  const { nachrichten } = verlaufNormalisieren(zeilen, limit)
+  pruefe('Kontowechsel: Frage nur einmal', nachrichten.filter((n) => n.rolle === 'user').length === 1)
+  pruefe('Kontowechsel: Limithinweis und Antwort bleiben', nachrichten.length === 3 && nachrichten[1].bloecke[0].typ === 'hinweis' && nachrichten[2].bloecke[0].text === 'Hallo')
+
+  // Dieselbe Frage nach einer ECHTEN Antwort ist eine neue Frage und bleibt.
+  const zweimal = [
+    z({ type: 'user', uuid: 'u1', message: { content: 'weiter' } }),
+    z({ type: 'assistant', uuid: 'a1', message: { content: [{ type: 'text', text: 'Teil 1' }] } }),
+    z({ type: 'user', uuid: 'u2', message: { content: 'weiter' } }),
+  ].join('\n')
+  pruefe('gleiche Frage nach echter Antwort bleibt', verlaufNormalisieren(zweimal, limit).nachrichten.filter((n) => n.rolle === 'user').length === 2)
+  // Ohne Limitmeldung dazwischen (z.B. zweimal abgeschickt) bleibt es auch.
+  const direkt = [
+    z({ type: 'user', uuid: 'u1', message: { content: 'x' } }),
+    z({ type: 'user', uuid: 'u2', message: { content: 'x' } }),
+  ].join('\n')
+  pruefe('gleiche Frage ohne Limit dazwischen bleibt', verlaufNormalisieren(direkt, limit).nachrichten.length === 2)
+}
+
 // --- Live-Ereignisse ----------------------------------------------------------
 {
   const e = { seq: 3, runId: 'chat-x', agentId: 'chat', kind: 'tool_use', parentToolUseId: 'toolu_p',
