@@ -80,3 +80,109 @@ a.knopf { text-decoration: none; color: var(--text); }
   .auswahl, .zahl-feld { height: 40px; font-size: 16px; }
   .rolle { padding: 10px 14px; }
 }
+
+/* --- Nutzung -------------------------------------------------------------------- */
+.kacheln { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin: 12px 0 16px; }
+.kachel { border: 1px solid var(--surface0); border-radius: var(--radius); background: var(--mantle); padding: 12px 14px; min-width: 0; }
+.kachel-titel { font-size: 12.5px; color: var(--overlay); }
+.kachel-wert { font-size: 22px; font-weight: 600; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kachel-unter { font-size: 12px; color: var(--overlay); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.n-karte { border: 1px solid var(--surface0); border-radius: var(--radius); background: var(--mantle); padding: 14px 16px; margin-bottom: 16px; min-width: 0; }
+.n-karte-kopf { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.n-karte-kopf h2 { font-size: 15px; font-weight: 600; margin: 0; }
+.n-karte-kopf .leise { font-size: 12.5px; }
+.zwei-spalten { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.zwei-spalten > .n-karte { margin-bottom: 16px; }
+
+/* Raster: 53 Wochen x 7 Tage. Stufen als Mischung der Akzentfarbe; die
+   oberste leuchtet -- die Tage, an denen richtig was los war, sollen ins Auge fallen. */
+.raster-scroll { overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin; }
+.raster-rahmen { display: grid; grid-template-columns: 22px auto; grid-template-rows: 16px auto; gap: 4px 6px; width: max-content; padding: 4px; }
+.raster-monate { grid-column: 2; display: grid; grid-template-columns: repeat(53, 12px); column-gap: 3px; font-size: 11px; color: var(--overlay); }
+.raster-monate .monat { white-space: nowrap; }
+.raster-tage { grid-row: 2; display: grid; grid-template-rows: repeat(7, 12px); row-gap: 3px; font-size: 10px; color: var(--overlay); line-height: 12px; }
+.raster { grid-column: 2; grid-row: 2; display: grid; grid-template-columns: repeat(53, 12px); grid-template-rows: repeat(7, 12px); gap: 3px; }
+.zelle { width: 12px; height: 12px; border-radius: 3px; background: var(--surface0); display: inline-block; }
+.raster .zelle:not(.zukunft) { cursor: pointer; }
+.zelle.zukunft { background: transparent; }
+.zelle.s1 { background: color-mix(in srgb, var(--akzent) 28%, var(--surface0)); }
+.zelle.s2 { background: color-mix(in srgb, var(--akzent) 52%, var(--surface0)); }
+.zelle.s3 { background: color-mix(in srgb, var(--akzent) 78%, var(--surface0)); }
+.zelle.s4 { background: var(--lavendel); box-shadow: 0 0 6px 1px color-mix(in srgb, var(--lavendel) 70%, transparent); }
+.zelle.heute { outline: 1px solid var(--subtext); outline-offset: 1px; }
+.zelle.gewaehlt { outline: 2px solid var(--text); outline-offset: 1px; }
+.legende { display: flex; align-items: center; gap: 4px; justify-content: flex-end; font-size: 11.5px; color: var(--overlay); margin-top: 6px; }
+.legende span:first-child { margin-right: 4px; }
+.legende span:last-child { margin-left: 4px; }
+
+.tag-detail { margin-top: 12px; border-top: 1px solid var(--surface0); padding-top: 12px; }
+.tag-kopf { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; font-size: 14px; }
+.tag-kopf .leise { font-size: 13px; }
+.tag-liste { margin-top: 8px; display: flex; flex-direction: column; gap: 2px; }
+.tag-eintrag { display: grid; grid-template-columns: 16px 1fr; column-gap: 8px; align-items: center; padding: 6px 8px; border-radius: 8px; color: var(--text); text-decoration: none; }
+.tag-eintrag .sym { color: var(--overlay); grid-row: span 2; }
+a.tag-eintrag:hover { background: var(--surface0); }
+.tag-titel { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tag-meta { font-size: 12px; color: var(--overlay); }
+
+.konten-modus { display: flex; align-items: flex-start; gap: 8px; font-size: 13.5px; color: var(--subtext); margin-bottom: 10px; flex-wrap: wrap; }
+.konten-modus .sym { margin-top: 3px; flex: 0 0 auto; }
+.konten-modus span { flex: 1; min-width: 200px; }
+.konten { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.konto { border: 1px solid var(--surface0); border-radius: 10px; padding: 12px; background: var(--base); display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.konto.gesperrt { border-color: color-mix(in srgb, var(--orange) 45%, var(--surface0)); }
+.konto-kopf { display: flex; align-items: flex-start; gap: 8px; }
+.konto-name { flex: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.konto-mail { font-size: 12px; color: var(--overlay); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: -4px; }
+.abo { font: 10.5px var(--mono); color: var(--overlay); border: 1px solid var(--surface1); border-radius: 4px; padding: 0 4px; }
+.marke-klein { font-size: 11.5px; padding: 1px 7px; border-radius: 999px; background: var(--surface0); color: var(--subtext); white-space: nowrap; }
+.marke-klein.an { color: var(--gruen); background: color-mix(in srgb, var(--gruen) 12%, transparent); }
+.marke-klein.warn { color: var(--orange); background: color-mix(in srgb, var(--orange) 12%, transparent); }
+.marke-klein.stern { color: var(--gelb); background: color-mix(in srgb, var(--gelb) 12%, transparent); }
+.marke-klein.aus { color: var(--overlay); }
+.knopf-schmal { padding: 4px 10px; font-size: 12.5px; flex: 0 0 auto; }
+.fenster { display: grid; grid-template-columns: 70px 1fr 42px; grid-template-rows: auto auto; column-gap: 8px; align-items: center; font-size: 13px; }
+.fenster-name { color: var(--subtext); }
+.fenster-balken { height: 7px; border-radius: 4px; background: var(--surface0); overflow: hidden; }
+.fenster-balken > span { display: block; height: 100%; background: var(--gruen); border-radius: 4px; }
+.fenster-balken.mittel > span { background: var(--gelb); }
+.fenster-balken.hoch > span { background: var(--rot); }
+.fenster-zahl { text-align: right; font: 12px var(--mono); }
+.fenster-reset { grid-column: 2 / 4; font-size: 11.5px; color: var(--overlay); }
+.fenster-reset:empty { display: none; }
+.prognose { font-size: 12.5px; color: var(--subtext); }
+.prognose.knapp { color: var(--orange); }
+.gemessen { font-size: 11.5px; color: var(--overlay); }
+.guthaben { display: flex; align-items: flex-start; gap: 6px; font-size: 12.5px; color: var(--subtext); border-top: 1px solid var(--surface0); padding-top: 6px; margin-top: 2px; }
+.guthaben .sym { margin-top: 3px; flex: 0 0 auto; }
+.guthaben.an { color: var(--gruen); }
+.klein { font-size: 12.5px; }
+.klein code { font: 11.5px var(--mono); word-break: break-all; }
+
+.stunden { position: relative; padding-bottom: 18px; }
+.stunden-balken { display: flex; align-items: flex-end; gap: 3px; height: 110px; }
+.stunden-balken span { flex: 1; background: color-mix(in srgb, var(--akzent) 70%, var(--surface0)); border-radius: 3px 3px 0 0; min-height: 1px; }
+.stunden-achse { position: absolute; left: 0; right: 0; bottom: 0; height: 16px; font-size: 11px; color: var(--overlay); }
+.stunden-achse span { position: absolute; transform: translateX(-50%); }
+
+.balken-liste { display: flex; flex-direction: column; gap: 6px; }
+.balken-zeile { display: grid; grid-template-columns: minmax(80px, 38%) 1fr 64px; gap: 10px; align-items: center; font-size: 13px; }
+.balken-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.balken-spur { height: 8px; background: var(--surface0); border-radius: 4px; overflow: hidden; }
+.balken-spur > span { display: block; height: 100%; background: var(--akzent); border-radius: 4px; }
+.balken-wert { text-align: right; font: 12px var(--mono); color: var(--subtext); }
+
+@media (max-width: 1000px) {
+  .kacheln { grid-template-columns: repeat(3, 1fr); }
+  .zwei-spalten { grid-template-columns: 1fr; gap: 0; }
+}
+@media (max-width: 760px) {
+  .kacheln { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .kachel:last-child { grid-column: span 2; }
+  .kachel-wert { font-size: 19px; }
+  .n-karte { padding: 12px; }
+  .konten { grid-template-columns: 1fr; }
+  /* Am Handy laedt der Bereich beim Oeffnen neu -- der Knopf schwebte nur ueber den Kacheln. */
+  .nur-desktop { display: none !important; }
+}

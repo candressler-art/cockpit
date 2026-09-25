@@ -19,6 +19,7 @@ import { h, symbol, api, leeren } from './ui/dom.js'
 import { chatBereich } from './ui/chat.js'
 import { chatListeBauen } from './ui/chatliste.js'
 import { einstellungenBauen } from './ui/einstellungen.js'
+import { nutzungBauen } from './ui/nutzung.js'
 
 await bus.basisErmitteln()
 // Die Stimmstufe ist je Geraet (localStorage) -- vor der ersten Meldung lesen.
@@ -36,7 +37,7 @@ const platzhalter = (titel, text) => () => {
 
 const BEREICHE = [
   { id: 'aufgaben', titel: 'Aufgaben', symbol: 'aufgaben', bauen: platzhalter('Aufgaben', 'Hier siehst du bald, welcher Agent gerade was tut und was er noch vorhat.') },
-  { id: 'nutzung', titel: 'Nutzung', symbol: 'nutzung', bauen: platzhalter('Nutzung', 'Heatmap, Statistik, Limits und Guthaben kommen hierher.') },
+  { id: 'nutzung', titel: 'Nutzung', symbol: 'nutzung', bauen: nutzungBauen },
   { id: 'server', titel: 'Server', symbol: 'server', bauen: platzhalter('Server', 'Auslastung beider Server.') },
   { id: 'notizen', titel: 'Notizen', symbol: 'notizen', bauen: platzhalter('Notizen', 'Den Obsidian-Vault durchsuchen und lesen.') },
   { id: 'terminal', titel: 'Terminal', symbol: 'terminal', bauen: platzhalter('Terminal', 'Befehle mit Freigabe.') },
@@ -169,12 +170,14 @@ async function limitLaden() {
     const k = d.konten.find((x) => x.name === d.naechstesKonto && x.angemeldet) ?? d.konten.find((x) => x.angemeldet)
     if (!k) { leeren(limitEl); return }
     const teile = [h('span', {}, k.name)]
-    if (typeof k.fuenfStundenAnteil === 'number') {
+    const gesperrt = k.gesperrtBis && k.gesperrtBis > Date.now()
+    // Gesperrt ist wichtiger als der Balken -- beides passt nicht in die Leiste.
+    if (gesperrt) teile.push(h('span.warnung', {}, k.sperrGrund === 'anmeldung' ? 'Anmeldung prüfen' : 'im Limit'))
+    else if (typeof k.fuenfStundenAnteil === 'number') {
       const p = Math.round(k.fuenfStundenAnteil * 100) // Anteil 0..1 (konten.ts)
       teile.push(h(`span.limit-balken${p >= 90 ? '.hoch' : p >= 70 ? '.mittel' : ''}`, { title: `5-Stunden-Fenster: ${p} %` },
         h('span', { style: { width: `${Math.min(100, p)}%` } })), h('span.leise', {}, `${p} %`))
     }
-    if (k.gesperrtBis && k.gesperrtBis > Date.now()) teile.push(h('span.warnung', {}, 'im Limit'))
     leeren(limitEl, teile)
   } catch {
     leeren(limitEl)
@@ -182,6 +185,7 @@ async function limitLaden() {
 }
 setInterval(() => { if (document.visibilityState === 'visible') limitLaden() }, 60_000)
 bus.abonnieren('limit', () => limitLaden())
+addEventListener('konten-geaendert', () => limitLaden())
 
 // --- Stimme ------------------------------------------------------------------------
 // Gesprochen wird nur, was eine Entscheidung verlangt -- eine Stimme, die

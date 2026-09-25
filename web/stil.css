@@ -95,7 +95,7 @@ a { color: var(--akzent); }
 .verbindung { display: flex; align-items: center; gap: 6px; }
 .verbindung .punkt { width: 7px; height: 7px; border-radius: 50%; background: var(--rot); }
 .verbindung.an .punkt { background: var(--gruen); }
-.limit-hinweis { margin-left: auto; display: flex; align-items: center; gap: 6px; color: var(--overlay); text-decoration: none; }
+.limit-hinweis { margin-left: auto; display: flex; align-items: center; gap: 6px; color: var(--overlay); text-decoration: none; white-space: nowrap; }
 .limit-hinweis:hover { color: var(--text); }
 .limit-balken { width: 44px; height: 5px; border-radius: 3px; background: var(--surface0); overflow: hidden; }
 .limit-balken > span { display: block; height: 100%; background: var(--gruen); }
