@@ -26,7 +26,7 @@ function zielpfadFeld(toolName: string, input: Record<string, unknown>): string 
  * durchgeht. Existiert der Pfad (noch) nicht, bleibt es bei der reinen
  * Aufloesung (resolve faengt `..` dabei schon ab).
  */
-function aufgeloest(pfad: string): string {
+export function aufgeloest(pfad: string): string {
   const absolut = resolve(pfad)
   try {
     return realpathSync(absolut)
@@ -36,7 +36,7 @@ function aufgeloest(pfad: string): string {
 }
 
 /** Liegt `pfad` innerhalb von (oder ist gleich) `wurzel`? Praefixvergleich MIT Trenner, damit z.B. `/vault-x` nicht als Teil von `/vault` durchgeht. */
-function innerhalbVon(pfad: string, wurzel: string): boolean {
+export function innerhalbVon(pfad: string, wurzel: string): boolean {
   if (pfad === wurzel) return true
   const wurzelMitTrenner = wurzel.endsWith(sep) ? wurzel : wurzel + sep
   return pfad.startsWith(wurzelMitTrenner)

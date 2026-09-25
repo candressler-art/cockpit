@@ -70,6 +70,13 @@ const ANSICHTEN = [
   ['server-voll', '#/server', null, (s) => s.route('**/api/system', (r) => r.fulfill({ json: systemVoll() }))],
   ['server-fehler', '#/server', null, (s) => s.route('**/api/system', (r) => r.fulfill({ status: 502, json: { fehler: 'Beszel antwortet nicht' } }))],
   ['notizen', '#/notizen'],
+  ['notizen-lesen', '#/notizen/Index'],
+  ['notizen-suche', '#/notizen', async (s) => { await s.fill('.notizen .suche', 'backup'); await s.waitForTimeout(700); await s.click('.nz-eintrag >> nth=1'); await s.waitForTimeout(500) }],
+  ['notizen-verweis', '#/notizen/Index', async (s) => { await s.click('.nz-lesen a.nz-verweis >> nth=0'); await s.waitForTimeout(500); if (!/#\/notizen\/./.test(s.url()) || await s.locator('.nz-lesen .fehlerbox').count()) throw new Error('Verweis fuehrt nicht zur Notiz') }],
+  ['notizen-leer', '#/notizen', null, (s) => s.route('**/api/notizen', (r) => r.fulfill({ json: { da: false, anzahl: 0, notizen: [] } }))],
+  ['notizen-keine', '#/notizen', async (s) => { await s.fill('.notizen .suche', 'qqqxxyz'); await s.waitForTimeout(700) }],
+  ['notizen-fehler', '#/notizen/Index', null, (s) => Promise.all([s.route('**/api/notizen', (r) => r.fulfill({ status: 500, json: { fehler: 'Vault nicht lesbar' } })), s.route('**/api/notizen/lesen*', (r) => r.fulfill({ status: 500, json: { fehler: 'Vault nicht lesbar' } }))])],
+  ['notizen-weg', '#/notizen/Gibt/es/nicht'],
   ['terminal', '#/terminal'],
   ['einstellungen', '#/einstellungen'],
 ]
@@ -98,7 +105,7 @@ for (const [breite, hoehe] of [[1280, 800], [375, 740]]) {
     if (ueber > 0) meldungen.push(`Seite ${ueber}px breiter als der Bildschirm`)
     await s.screenshot({ path: join(ordner, `${name}-${breite}.png`), fullPage: process.env.GANZ === '1' })
     // In den *-fehler-Ansichten ist die 500-Antwort gewollt -- der Browser meldet sie trotzdem.
-    const echteFehler = meldungen.filter((m) => !m.startsWith('warning') && !(name.endsWith('-fehler') && /status of 50[02]/.test(m)))
+    const echteFehler = meldungen.filter((m) => !m.startsWith('warning') && !(name.endsWith('-fehler') && /status of 50[02]/.test(m)) && !(name.endsWith('-weg') && /status of 404/.test(m)))
     fehler += echteFehler.length
     console.log(`${echteFehler.length ? 'FEHLER' : 'ok    '} ${name} @${breite}${meldungen.length ? `\n        ${meldungen.join('\n        ')}` : ''}`)
     await s.close()

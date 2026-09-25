@@ -37,9 +37,9 @@ let baut = false
 let uhr: NodeJS.Timeout | null = null
 
 /** [[Ziel]], [[Ziel|Anzeigetext]] und [[Ziel#Abschnitt]]. */
-const WIKILINK = /\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]/g
+export const WIKILINK = /\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]/g
 /** #tag, aber nicht die Raute einer Ueberschrift und keine Raute in Wortmitte. */
-const TAG = /(?:^|\s)#([A-Za-z0-9ÄÖÜäöüß][A-Za-z0-9ÄÖÜäöüß/_-]*)/g
+export const TAG = /(?:^|\s)#([A-Za-z0-9ÄÖÜäöüß][A-Za-z0-9ÄÖÜäöüß/_-]*)/g
 
 async function dateienSammeln(wurzel: string, unter = ''): Promise<string[]> {
   const treffer: string[] = []
@@ -60,7 +60,7 @@ async function dateienSammeln(wurzel: string, unter = ''): Promise<string[]> {
 }
 
 /** Titel: erste Ueberschrift, sonst Dateiname. Obsidian macht es genauso. */
-function titelAus(pfad: string, roh: string): string {
+export function titelAus(pfad: string, roh: string): string {
   const m = /^#\s+(.+)$/m.exec(roh)
   if (m?.[1]) return m[1].trim().slice(0, 120)
   const name = pfad.split(sep).pop() ?? pfad

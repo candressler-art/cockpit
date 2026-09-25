@@ -285,3 +285,29 @@ details[open] > summary .a-pfeil { transform: rotate(90deg); }
 @media (max-width: 760px) {
   .host-werte { grid-template-columns: 1fr; gap: 8px; }
 }
+
+/* --- Notizen -------------------------------------------------------------------- */
+.notizen { display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); gap: 28px; align-items: start; }
+.nz-spalte { position: sticky; top: 8px; max-height: calc(100dvh - 24px); overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+.nz-zaehler { margin: 4px 2px 2px; min-height: 1em; }
+.nz-liste { display: flex; flex-direction: column; gap: 1px; }
+.nz-liste .fehlerbox, .nz-lesen .fehlerbox { margin: 8px 0; max-width: none; }
+.nz-eintrag { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 8px; color: var(--text); text-decoration: none; }
+.nz-eintrag:hover { background: var(--surface0); }
+.nz-eintrag.an { background: var(--surface0); box-shadow: inset 2px 0 0 var(--akzent); }
+.nz-titel { font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nz-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nz-stelle { color: var(--subtext); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.nz-lesen { min-width: 0; max-width: 760px; }
+.nz-kopf { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 14px; }
+.nz-titel-gross { font-size: 1.35em; margin: 0 0 .6em; }
+.nz-verweis { color: var(--akzent); text-decoration: none; border-bottom: 1px dotted color-mix(in srgb, var(--akzent) 50%, transparent); }
+.nz-verweis:hover { border-bottom-style: solid; }
+.nz-rueck { margin-top: 28px; padding-top: 12px; border-top: 1px solid var(--surface0); display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.nz-rueck h2 { flex-basis: 100%; margin: 0 0 2px; font-size: 12px; font-weight: 600; color: var(--overlay); text-transform: uppercase; letter-spacing: .04em; }
+.nz-zurueck { align-items: center; gap: 4px; color: var(--subtext); text-decoration: none; margin-bottom: 10px; font-size: 13px; }
+@media (max-width: 760px) {
+  .notizen { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .nz-spalte { position: static; max-height: none; overflow: visible; }
+  .notizen.offen .nz-spalte, .notizen:not(.offen) .nz-lesen { display: none; }
+}

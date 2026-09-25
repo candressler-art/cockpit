@@ -22,6 +22,7 @@ import { einstellungenBauen } from './ui/einstellungen.js'
 import { nutzungBauen } from './ui/nutzung.js'
 import { aufgabenBauen } from './ui/aufgaben.js'
 import { serverBauen } from './ui/server.js'
+import { notizenBauen } from './ui/notizen.js'
 
 await bus.basisErmitteln()
 // Die Stimmstufe ist je Geraet (localStorage) -- vor der ersten Meldung lesen.
@@ -41,7 +42,7 @@ const BEREICHE = [
   { id: 'aufgaben', titel: 'Aufgaben', symbol: 'aufgaben', bauen: aufgabenBauen },
   { id: 'nutzung', titel: 'Nutzung', symbol: 'nutzung', bauen: nutzungBauen },
   { id: 'server', titel: 'Server', symbol: 'server', bauen: serverBauen },
-  { id: 'notizen', titel: 'Notizen', symbol: 'notizen', bauen: platzhalter('Notizen', 'Den Obsidian-Vault durchsuchen und lesen.') },
+  { id: 'notizen', titel: 'Notizen', symbol: 'notizen', bauen: notizenBauen },
   { id: 'terminal', titel: 'Terminal', symbol: 'terminal', bauen: platzhalter('Terminal', 'Befehle mit Freigabe.') },
   { id: 'einstellungen', titel: 'Einstellungen', symbol: 'einstellungen', bauen: einstellungenBauen },
 ]

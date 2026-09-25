@@ -26,6 +26,7 @@ import { chatOptionenBauen, type ChatOptionen } from './chatOptionen.js'
 import { entscheidungLesen } from './freigaben.js'
 import { AufgabenSammler, AUFGABEN_FENSTER_MS, agentAusZeile } from './aufgaben.js'
 import { vaultIndizieren, vaultGraphLesen, vaultBeobachten, vaultDa, VAULT } from './vault.js'
+import { notizenLaden, notizenSuchen, notizLesen } from './notizen.js'
 import { vaultZugriffErlaubt } from './vaultZugriff.js'
 import { konsoleBefehl } from './konsole.js'
 import { cwdPruefen, folgenLesen, zahlLesen } from './eingaben.js'
@@ -818,6 +819,18 @@ const server = createServer(async (req, res) => {
       const { id } = konsoleBefehl(supervisor, befehl, cwd, (e) => verteilen('konsole', e))
       verteilen('konsole', { id, phase: 'freigabe', befehl, cwd })
       return json(202, { id })
+    }
+
+    if (pfad === '/api/notizen' && req.method === 'GET') {
+      // Ohne Suchwort die neuesten -- das ist die Startansicht des Bereichs.
+      const notizen = await notizenLaden(VAULT)
+      const q = url.searchParams.get('q') ?? ''
+      return json(200, { da: await vaultDa(), anzahl: notizen.length, notizen: notizenSuchen(notizen, q.slice(0, 200)) })
+    }
+
+    if (pfad === '/api/notizen/lesen' && req.method === 'GET') {
+      const n = await notizLesen(VAULT, url.searchParams.get('id') ?? '')
+      return n ? json(200, n) : json(404, { fehler: 'Notiz nicht gefunden' })
     }
 
     if (pfad === '/api/vault/graph' && req.method === 'GET') {
