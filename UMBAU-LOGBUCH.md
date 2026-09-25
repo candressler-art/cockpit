@@ -25,6 +25,11 @@
   Chat fertig/Fehler, Freigabe, Rueckfrage, Plan, Team-Auftrag -- nur wenn
   du nicht ins Cockpit schaust; Klick oeffnet den Chat. Dazu "(1) Cockpit"
   im Tab-Titel. Chat-Titel ohne "# " am Anfang.
+  **Chats umbenennen, anheften, aus der Liste nehmen** (D12): "…" am
+  Eintrag (Maus: bei Hover; Handy: immer sichtbar). Nur der
+  Cockpit-Eintrag, die Sitzungsdatei bleibt; "Rueckgaengig" direkt in der
+  Liste; ein ausgeblendeter Chat kommt zurueck, sobald darin
+  weitergeschrieben wird (z.B. am PC). Umbenannte Titel findet die Suche.
 - **Du musst pruefen** (nach dem Ausrollen): Benachrichtigung am Handy
   (PWA, https -- hier nur ueber http/localhost testbar); ein echter Chat am Handy und
   am PC; Diktieren ueber ein echtes Mikrofon (nur mit WAV-Datei getestet);
@@ -108,10 +113,13 @@ Alle Endpunkte und WebSocket-Nachrichten stehen jetzt in README.md
 ## Naechste Schritte
 
 1. (erledigt D11) Ausrollen geprueft und live angesehen.
-2. "Weitere sinnvolle Dinge": Benachrichtigung erledigt (D11). Offen:
-   Chat umbenennen/anheften/aus Liste entfernen (nur Cockpit-Eintrag, nie
-   die Datei), Tastenkuerzel (Strg+K gibt es schon; Esc stoppt fehlt).
-3. Danach erneut ausrollen (2. von 3), wenn sich genug gesammelt hat.
+2. "Weitere sinnvolle Dinge": 1-3 erledigt (Benachrichtigung D11,
+   umbenennen/anheften D12; Tastenkuerzel gab es schon: Strg+K Suche,
+   Strg+Shift+O neuer Chat, Esc haelt an). Offen: 4. Dateien/Bilder in den
+   Chat ziehen -- erst pruefen, ob chatZugStarten Bild-Bloecke an die SDK
+   geben kann; sonst weglassen.
+3. Danach erneut ausrollen (2. von 3): Benachrichtigungen + Markierung
+   sind genug dafuer, spaetestens im uebernaechsten Durchgang anfordern.
 
 ## Ende-zu-Ende (D10, echte Konten, Haiku)
 
@@ -157,3 +165,8 @@ Alle Endpunkte und WebSocket-Nachrichten stehen jetzt in README.md
   Chat-Titel ohne Markdown-Zeichen (Index-Version 3 baut einmal neu),
   Benachrichtigungen (`web/benachrichtigen.js`, Logik `web/ui/meldungen.js`
   mit Test, Klick im `sw.js`). Playwright 52 Ansichten ok.
+- **D12** (25.9. 08:17): nacht-optimierung ohne neue Commits. Chats
+  umbenennen/anheften/ausblenden (`chat_markierung`, `PATCH
+  /api/chats/<id>`, Test `chatMarkierung.test.mjs` 22/22), Playwright-
+  Ablauf 1280/375 (Menue, Esc, Anheften, Umbenennen Enter/Esc, Kopf,
+  Ausblenden + Rueckgaengig) ohne Konsolenfehler; 52 Ansichten ok.
