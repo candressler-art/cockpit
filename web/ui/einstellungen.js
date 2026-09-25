@@ -122,13 +122,30 @@ export function einstellungenBauen() {
   function meldenZeile() {
     const z = benachrichtigen.zustand()
     const hinweis = {
-      an: 'Wenn Claude fertig ist oder eine Freigabe oder Frage wartet – nur, solange du nicht ins Cockpit schaust.',
+      an: 'Wenn Claude fertig ist oder eine Freigabe oder Frage wartet – auch bei geschlossenem Cockpit oder gesperrtem Handy (iPhone/iPad: nur als App auf dem Home-Bildschirm).',
       aus: 'Wenn Claude fertig ist oder eine Freigabe oder Frage wartet.',
       blockiert: 'Im Browser blockiert. Erlauben lässt es sich nur in den Seiteneinstellungen des Browsers.',
       unmoeglich: 'Dieser Browser kann keine Benachrichtigungen zeigen.',
     }[z]
+    const test = h('button.knopf', {
+      type: 'button',
+      disabled: z !== 'an',
+      onclick: async (ev) => {
+        const knopf = ev.currentTarget
+        knopf.disabled = true
+        try {
+          await benachrichtigen.pushAbgleichen()
+          const n = await benachrichtigen.pushTesten()
+          melden(n ? `Testmeldung an ${n} ${n === 1 ? 'Gerät' : 'Geräte'} geschickt.` : 'Kein Gerät mit Push angemeldet -- Schalter aus und wieder an.', n ? 'info' : 'fehler')
+        } catch (e) {
+          melden(`Test fehlgeschlagen: ${fehlerText(e)}`, 'fehler')
+        } finally { knopf.disabled = false }
+      },
+    }, 'Test')
     return zeile('Benachrichtigungen', hinweis,
-      schalter(z === 'an', async (v) => { await benachrichtigen.setzen(v); zeichnen() }, 'Benachrichtigungen', z === 'blockiert' || z === 'unmoeglich'))
+      h('div.zeile-knoepfe', {},
+        schalter(z === 'an', async (v) => { await benachrichtigen.setzen(v); zeichnen() }, 'Benachrichtigungen', z === 'blockiert' || z === 'unmoeglich'),
+        test))
   }
 
   function favoritenZeile(w) {

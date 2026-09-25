@@ -17,6 +17,21 @@ self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()))
 // Klick auf eine Benachrichtigung (benachrichtigen.js): ein offenes Cockpit nach vorn
 // holen und dorthin schicken, sonst eines oeffnen. Das ist keine Caching-
 // Logik -- der Worker bleibt dabei so duenn wie oben beschrieben.
+// Push vom Daemon (src/push.ts): kommt auch, wenn das Cockpit geschlossen
+// oder das Handy gesperrt ist. Gleicher `tag` wie die Meldung der offenen
+// Seite -- die zweite ersetzt die erste, statt doppelt zu erscheinen.
+self.addEventListener('push', (e) => {
+  let m = {}
+  try { m = e.data ? e.data.json() : {} } catch { m = { text: e.data ? e.data.text() : '' } }
+  e.waitUntil(self.registration.showNotification(m.titel || 'Cockpit', {
+    body: m.text || '',
+    tag: m.tag || undefined,
+    renotify: Boolean(m.tag),
+    icon: './symbol.svg',
+    data: { ziel: typeof m.ziel === 'string' && m.ziel.startsWith('#/') ? m.ziel : '#/' },
+  }))
+})
+
 self.addEventListener('notificationclick', (e) => {
   e.notification.close()
   const ziel = String(e.notification.data?.ziel ?? '')

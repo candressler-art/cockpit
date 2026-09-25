@@ -14,6 +14,7 @@
  * Deshalb zuerst der Worker, sonst der Konstruktor.
  */
 import { meldungFuer } from './ui/meldungen.js'
+import { api } from './bus.js'
 
 const SCHLUESSEL = 'cockpit.melden'
 const TITEL = document.title
@@ -37,6 +38,7 @@ export async function setzen(neu) {
   }
   an = neu && moeglich() && Notification.permission === 'granted'
   try { localStorage.setItem(SCHLUESSEL, an ? 'an' : 'aus') } catch { /* privater Modus */ }
+  await pushAbgleichen()
   return zustand()
 }
 
@@ -80,3 +82,54 @@ addEventListener('focus', gesehen)
 navigator.serviceWorker?.addEventListener('message', (e) => {
   if (e.data?.typ === 'gehe' && typeof e.data.ziel === 'string' && e.data.ziel.startsWith('#/')) location.hash = e.data.ziel
 })
+
+// --- Push (Meldungen auch bei geschlossener Seite) --------------------------
+//
+// Nur mit Service Worker (https, siehe app.js). Am iPhone/iPad geht Push nur,
+// wenn das Cockpit als App auf dem Home-Bildschirm liegt (iOS 16.4+).
+
+/** 'an' | 'aus' | 'unmoeglich' -- fuer die Anzeige in den Einstellungen. */
+export async function pushZustand() {
+  const reg = await navigator.serviceWorker?.getRegistration()
+  if (!reg?.pushManager) return 'unmoeglich'
+  return (await reg.pushManager.getSubscription()) ? 'an' : 'aus'
+}
+
+function schluesselBytes(b64) {
+  const roh = atob((b64 + '='.repeat((4 - (b64.length % 4)) % 4)).replace(/-/g, '+').replace(/_/g, '/'))
+  return Uint8Array.from(roh, (c) => c.charCodeAt(0))
+}
+
+/**
+ * Abo an den Schalter angleichen: an -> abonnieren und dem Daemon melden
+ * (bei jedem Laden erneut, falls der Daemon es verloren hat), aus -> kuendigen.
+ */
+export async function pushAbgleichen() {
+  try {
+    const reg = await navigator.serviceWorker?.getRegistration()
+    if (!reg?.pushManager) return
+    let abo = await reg.pushManager.getSubscription()
+    if (zustand() !== 'an') {
+      if (abo) {
+        await fetch(api('/api/push/ab'), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ endpoint: abo.endpoint }) })
+        await abo.unsubscribe()
+      }
+      return
+    }
+    const { schluessel } = await (await fetch(api('/api/push'))).json()
+    if (!schluessel) return
+    abo ??= await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: schluesselBytes(schluessel) })
+    await fetch(api('/api/push'), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ abo: abo.toJSON() }) })
+  } catch (e) {
+    console.warn('Push nicht eingerichtet:', e)
+  }
+}
+
+/** Testmeldung an alle Geraete mit Abo. */
+export async function pushTesten() {
+  const r = await fetch(api('/api/push/test'), { method: 'POST' })
+  return (await r.json()).abos ?? 0
+}
+
+// Beim Laden abgleichen -- der Worker ist evtl. erst kurz nach dem Start registriert.
+setTimeout(() => void pushAbgleichen(), 3000)

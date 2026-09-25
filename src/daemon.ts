@@ -18,7 +18,7 @@ import { sprechenGecacht } from './stimme.js'
 import { erkennen } from './hoeren.js'
 import {
   chatsIndizieren, chatsSuchen, verlaufLesen, chatKopfLesen, zuletztBenutzteOrdner,
-  fortsetzungLesen, fortsetzungVorbereiten, fortsetzungAktualisieren, chatRegistrieren, sitzungVorhanden, chatMarkieren, sitzungBeschreiben, type Markierung,
+  fortsetzungLesen, fortsetzungVorbereiten, fortsetzungAktualisieren, chatRegistrieren, sitzungVorhanden, chatMarkieren, sitzungBeschreiben, chatFuerSitzung, type Markierung,
   type Fortsetzung,
 } from './chats.js'
 import { chatOptionenBauen, type ChatOptionen } from './chatOptionen.js'
@@ -37,6 +37,8 @@ import { nachliefern, senden as klientSenden, type Klient } from './nachlieferun
 import { ereignisAufbereiten } from './nachrichten.js'
 import { auftraegeTrennen } from './protokoll.js'
 import { existsSync } from 'node:fs'
+import { pathToFileURL } from 'node:url'
+import { pushStarten, pushSenden, pushSchluessel, aboGueltig, aboSpeichern, aboLoeschen, aboAnzahl, type Meldung } from './push.js'
 import { homedir } from 'node:os'
 import { EinstellungsSpeicher, auswahlListen, teamAuftragWerte, auftragTitel } from './einstellungen.js'
 import { ordnerAuflisten, OrdnerFehler } from './verzeichnisse.js'
@@ -52,6 +54,19 @@ const DB_PFAD = process.env.COCKPIT_DB ?? join(process.env.HOME ?? '.', '.cockpi
 /** In den Chat gezogene Dateien (anhaenge.ts), neben der DB. */
 const ANHAENGE = process.env.COCKPIT_ANHAENGE ?? join(dirname(DB_PFAD), 'anhaenge')
 const WEB_DIR = pfadAuflösen(import.meta.dirname, '..', 'web')
+
+// --- Push ans Handy ------------------------------------------------------------
+// Dieselbe Regel wie im Browser (web/ui/meldungen.js ist DOM-frei), damit Push
+// und Seiten-Meldung denselben Text und `tag` tragen und sich ersetzen statt
+// doppeln. Siehe src/push.ts.
+pushStarten(DB_PFAD)
+const { meldungFuer } = (await import(pathToFileURL(join(WEB_DIR, 'ui', 'meldungen.js')).href)) as {
+  meldungFuer: (typ: string, d: unknown, hilfe: { titelVon: (id: string) => string | null }) => Meldung | null
+}
+function melden(typ: string, d: unknown): void {
+  const m = meldungFuer(typ, d, { titelVon: (id) => chatFuerSitzung(DB_PFAD, id)?.titel ?? null })
+  if (m) void pushSenden(m).catch((e) => console.warn('[push]', String(e)))
+}
 
 const db = new CockpitDb(DB_PFAD)
 const verwaist = db.verwaisteLaeufeAufraeumen()
@@ -124,6 +139,7 @@ function orchestratorLaufStarten(o: {
         ende.grund === 'fertig' ? 'done' : ende.grund === 'abgebrochen' ? 'stopped' : 'failed'
       laufAbschliessen(runId, status, JSON.stringify(ende))
       verteilen('lauf_ende', { runId, ende })
+      melden('lauf_ende', { runId, ende })
       const gew = supervisor.agentenListe(runId).reduce((x, a) => x + a.weightedTokens, 0)
       const text = 'text' in ende ? ende.text : 'frage' in ende ? ende.frage : ''
       void discord?.laufBeendet(runId, ende.grund, String(text ?? ''), gew)
@@ -298,7 +314,10 @@ try {
 supervisor.on('ereignis', (e: CockpitEvent) => {
   if (aufgaben.ereignis(e)) verteilen('aufgaben', { runId: e.runId })
 })
-supervisor.on('agent', (a: { runId: string }) => verteilen('agent', a))
+supervisor.on('agent', (a: { runId: string }) => {
+  verteilen('agent', a)
+  melden('agent', a)
+})
 // Live-Text eines Chat-Zugs (nur mit liveText). Wird nicht nachgeliefert:
 // wer spaeter kommt, bekommt die fertige Nachricht ueber die Ereignisse.
 supervisor.on('delta', (d: unknown) => verteilen('delta', d))
@@ -377,7 +396,10 @@ function laufAbschliessen(runId: string, status: string, grund: string | null): 
   }
 }
 
-supervisor.on('freigabe', (f: { runId: string }) => verteilen('freigabe', f))
+supervisor.on('freigabe', (f: { runId: string }) => {
+  verteilen('freigabe', f)
+  melden('freigabe', f)
+})
 // Der Limitstand gilt kontoweit, nicht je Lauf -- also an alle Klienten.
 supervisor.on('limit', (l: unknown) => verteilen('limit', l))
 
@@ -1117,6 +1139,27 @@ const server = createServer(async (req, res) => {
         return { art: 'sonst', projekt }
       })
       return json(200, { tag, eintraege })
+    }
+
+    // Push-Abos: das Handy meldet sein Abo, sobald man in den Einstellungen
+    // Benachrichtigungen einschaltet (web/benachrichtigen.js).
+    if (pfad === '/api/push' && req.method === 'GET') {
+      return json(200, { schluessel: pushSchluessel(), abos: aboAnzahl() })
+    }
+    if (pfad === '/api/push' && req.method === 'POST') {
+      const k = (await koerperLesen(req)) as Record<string, unknown> | null
+      if (!aboGueltig(k?.abo)) return json(400, { fehler: 'abo: PushSubscription.toJSON() erwartet' })
+      aboSpeichern(k.abo)
+      return json(200, { ok: true, abos: aboAnzahl() })
+    }
+    if (pfad === '/api/push/ab' && req.method === 'POST') {
+      const k = (await koerperLesen(req)) as Record<string, unknown> | null
+      if (typeof k?.endpoint === 'string') aboLoeschen(k.endpoint)
+      return json(200, { ok: true, abos: aboAnzahl() })
+    }
+    if (pfad === '/api/push/test' && req.method === 'POST') {
+      await pushSenden({ titel: 'Cockpit', text: 'Benachrichtigungen kommen an.', ziel: '#/einstellungen', tag: 'test' })
+      return json(200, { ok: true, abos: aboAnzahl() })
     }
 
     if (pfad === '/api/rollen' && req.method === 'GET') {

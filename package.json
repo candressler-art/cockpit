@@ -16,11 +16,13 @@
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.281",
     "discord.js": "^14.27.0",
+    "web-push": "^3.6.7",
     "ws": "^8.18.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.4",
     "@types/node": "^22.10.0",
+    "@types/web-push": "^3.6.4",
     "@types/ws": "^8.5.13",
     "dompurify": "^3.4.16",
     "highlight.js": "^11.12.0",
