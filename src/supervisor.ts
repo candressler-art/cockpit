@@ -7,7 +7,11 @@
 
 import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
-import { query, USAGE_LIMIT_ERROR_PREFIXES, type McpServerConfig } from '@anthropic-ai/claude-agent-sdk'
+import {
+  query, USAGE_LIMIT_ERROR_PREFIXES,
+  type AgentDefinition, type McpServerConfig, type PermissionMode, type PermissionUpdate, type SettingSource,
+} from '@anthropic-ai/claude-agent-sdk'
+import { type Entscheidung, freigabeErgebnis } from './freigaben.js'
 import type { CockpitDb } from './db.js'
 import { einordnen } from './normalisieren.js'
 import {
@@ -96,6 +100,24 @@ export interface AgentStartOptionen {
    * weiter ueber freigabeEinholen.
    */
   autoErlauben?: (toolName: string, input: Record<string, unknown>) => boolean
+  /** Denkaufwand (SDK effort). Fehlt: Vorgabe der CLI. */
+  effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+  /** Berechtigungsmodus der Sitzung. 'bypassPermissions' schaltet die SDK-Sicherung mit frei. */
+  permissionMode?: PermissionMode
+  /** Welche Einstellungsquellen (CLAUDE.md, Skills, settings.json) die CLI laedt. */
+  settingSources?: SettingSource[]
+  /** Subagenten (Spezialisten), an die Claude selbst delegieren darf. */
+  agents?: Record<string, AgentDefinition>
+  /**
+   * Feste Session-Id fuer eine NEUE Sitzung -- so kennt der Chat seine Id,
+   * bevor die erste Nachricht zurueckkommt. Nicht zusammen mit resume.
+   */
+  sessionId?: string
+  /**
+   * Antworttext Wort fuer Wort als 'delta'-Ereignis melden (nur Event, nicht
+   * in die DB: ein Zug haette sonst tausende Zeilen fuer denselben Text).
+   */
+  liveText?: boolean
 }
 
 /** Pseudo-Lauf fuer alles, was zu keinem Agentenlauf gehoert. */
@@ -114,7 +136,10 @@ export class Supervisor extends EventEmitter {
   private limitStand: LimitStand | null = null
   private offeneFreigaben = new Map<
     string,
-    { aufloesen: (erlaubt: boolean, grund: string | null) => void; anfrage: PermissionRequest }
+    {
+      aufloesen: (erlaubt: boolean, grund: string | null, entscheidung?: Entscheidung) => void
+      anfrage: PermissionRequest
+    }
   >()
   private konten: KontenVerwaltung
 
@@ -398,7 +423,16 @@ export class Supervisor extends EventEmitter {
           maxTurns: o.maxTurns,
           maxBudgetUsd: o.maxBudgetUsd,
           resume: resumeSessionId,
+          // Eine feste Id nur fuer eine wirklich neue Sitzung: nach einem
+          // Kontowechsel mitten im ersten Zug steht resumeSessionId schon,
+          // und beides zusammen lehnt die SDK ab.
+          ...(o.sessionId && !resumeSessionId ? { sessionId: o.sessionId } : {}),
           allowedTools: o.allowedTools,
+          ...(o.effort ? { effort: o.effort } : {}),
+          ...(o.permissionMode ? { permissionMode: o.permissionMode } : {}),
+          ...(o.permissionMode === 'bypassPermissions' ? { allowDangerouslySkipPermissions: true } : {}),
+          ...(o.settingSources ? { settingSources: o.settingSources } : {}),
+          ...(o.agents && Object.keys(o.agents).length ? { agents: o.agents } : {}),
           ...(o.tools !== undefined ? { tools: o.tools } : {}),
           ...(o.zusatzVerzeichnisse && o.zusatzVerzeichnisse.length
             ? { additionalDirectories: o.zusatzVerzeichnisse }
@@ -419,9 +453,9 @@ export class Supervisor extends EventEmitter {
           // sonst bleibt im Graphen ein stummer Knoten stehen.
           forwardSubagentText: true,
           includeHookEvents: true,
-          // Token-Deltas brauchen wir nicht: parent_tool_use_id ist dort immer
-          // null, sie sind keinem Subagenten zuordenbar.
-          includePartialMessages: false,
+          // Token-Deltas nur fuer Chats mit Live-Text: sie gehen als
+          // 'delta'-Ereignis raus (siehe unten), nie in die DB.
+          includePartialMessages: o.liveText === true,
           // CLAUDE_CONFIG_DIR nur fuer ein ZUSATZkonto explizit setzen. Fuer
           // 'haupt' bleibt env absichtlich weg: der Subprozess erbt
           // process.env unveraendert, genau wie vor den Konten -- das ist
@@ -443,7 +477,7 @@ export class Supervisor extends EventEmitter {
                 },
               }
             : {}),
-          canUseTool: (toolName: string, input: Record<string, unknown>) => {
+          canUseTool: (toolName: string, input: Record<string, unknown>, optionen?: { suggestions?: PermissionUpdate[] }) => {
             // Vor dem Broker: eng umrissene Faelle (z.B. Lesezugriff im
             // Vault), die keine Rueckfrage brauchen. Trotzdem protokolliert,
             // damit im Nachweis steht, WAS automatisch durchlief.
@@ -453,12 +487,16 @@ export class Supervisor extends EventEmitter {
               })
               return Promise.resolve({ behavior: 'allow' as const, updatedInput: input })
             }
-            return this.freigabeEinholen(o.runId, o.agentId, toolName, input)
+            return this.freigabeEinholen(o.runId, o.agentId, toolName, input, optionen?.suggestions)
           },
         },
       })
 
       for await (const nachricht of lauf) {
+        if ((nachricht as { type?: string }).type === 'stream_event') {
+          this.deltaMelden(o.runId, o.agentId, nachricht as unknown as Record<string, unknown>)
+          continue
+        }
         this.nachrichtVerarbeiten(o.runId, o.agentId, nachricht as Record<string, unknown>, konto?.name ?? null)
         const m = nachricht as Record<string, unknown>
         if (m.type === 'assistant') {
@@ -611,6 +649,32 @@ export class Supervisor extends EventEmitter {
   }
 
   /**
+   * Ein Stueck Live-Text weitergeben. Nur Text- und Denk-Deltas; der Rest des
+   * Stroms (message_start, content_block_stop, ...) bringt der Oberflaeche
+   * nichts, die fertige Nachricht kommt ohnehin als 'assistant'. `neu` sagt,
+   * dass ein neuer Block beginnt -- dann faengt die Anzeige frisch an.
+   */
+  private deltaMelden(runId: string, agentId: string, m: Record<string, unknown>): void {
+    const ev = m.event as Record<string, unknown> | undefined
+    if (!ev) return
+    const eltern = typeof m.parent_tool_use_id === 'string' ? m.parent_tool_use_id : null
+    if (ev.type === 'content_block_start') {
+      const b = ev.content_block as Record<string, unknown> | undefined
+      if (b?.type === 'text' || b?.type === 'thinking') {
+        this.emit('delta', { runId, agentId, eltern, art: b.type === 'text' ? 'text' : 'denken', text: '', neu: true })
+      }
+      return
+    }
+    if (ev.type !== 'content_block_delta') return
+    const d = ev.delta as Record<string, unknown> | undefined
+    if (d?.type === 'text_delta' && typeof d.text === 'string') {
+      this.emit('delta', { runId, agentId, eltern, art: 'text', text: d.text, neu: false })
+    } else if (d?.type === 'thinking_delta' && typeof d.thinking === 'string') {
+      this.emit('delta', { runId, agentId, eltern, art: 'denken', text: d.thinking, neu: false })
+    }
+  }
+
+  /**
    * Freigabe-Broker: haelt den Tool-Aufruf an, meldet die Anfrage an alle
    * Kanaele und wartet auf eine Entscheidung aus UI oder Discord.
    */
@@ -619,10 +683,8 @@ export class Supervisor extends EventEmitter {
     agentId: string,
     toolName: string,
     input: Record<string, unknown>,
-  ): Promise<
-    | { behavior: 'allow'; updatedInput: Record<string, unknown> }
-    | { behavior: 'deny'; message: string }
-  > {
+    vorschlaege?: PermissionUpdate[],
+  ): Promise<ReturnType<typeof freigabeErgebnis>> {
     const anfrage: PermissionRequest = {
       id: randomUUID(),
       runId,
@@ -634,6 +696,9 @@ export class Supervisor extends EventEmitter {
       decision: null,
       decidedBy: null,
       reason: null,
+      // Die Oberflaeche zeigt "Immer erlauben" nur, wenn die SDK dafuer
+      // eine Regel vorschlaegt -- sonst waere der Knopf ein stilles "Ja".
+      immerMoeglich: Boolean(vorschlaege && vorschlaege.length),
     }
     this.db.freigabeAnlegen(anfrage)
     this.melden(runId, agentId, 'permission_request', `Freigabe noetig: ${toolName}`, anfrage)
@@ -643,19 +708,16 @@ export class Supervisor extends EventEmitter {
     return new Promise((resolve) => {
       this.offeneFreigaben.set(anfrage.id, {
         anfrage,
-        aufloesen: (erlaubt, grund) => {
+        aufloesen: (erlaubt, grund, entscheidung) => {
           this.offeneFreigaben.delete(anfrage.id)
-          this.db.freigabeEntscheiden(anfrage.id, erlaubt ? 'allow' : 'deny', grund ?? 'ui', null)
+          const e: Entscheidung = { ...entscheidung, erlaubt }
+          this.db.freigabeEntscheiden(anfrage.id, erlaubt ? 'allow' : 'deny', grund ?? 'ui', e.nachricht ?? null)
           this.melden(
             runId, agentId, 'permission_decision',
-            `${toolName}: ${erlaubt ? 'erlaubt' : 'abgelehnt'}`,
-            { id: anfrage.id, erlaubt, grund },
+            `${toolName}: ${erlaubt ? (e.immer ? 'immer erlaubt' : 'erlaubt') : 'abgelehnt'}`,
+            { id: anfrage.id, erlaubt, grund, immer: e.immer ?? false, modus: e.modus ?? null },
           )
-          resolve(
-            erlaubt
-              ? { behavior: 'allow', updatedInput: input }
-              : { behavior: 'deny', message: grund ?? 'Im Cockpit abgelehnt' },
-          )
+          resolve(freigabeErgebnis(toolName, input, vorschlaege, e, grund))
         },
       })
     })
@@ -704,10 +766,10 @@ export class Supervisor extends EventEmitter {
   }
 
   /** Entscheidet eine offene Freigabe. Gibt false zurueck, wenn sie unbekannt ist. */
-  freigabeEntscheiden(id: string, erlaubt: boolean, durch: string): boolean {
+  freigabeEntscheiden(id: string, erlaubt: boolean, durch: string, entscheidung?: Entscheidung): boolean {
     const offen = this.offeneFreigaben.get(id)
     if (!offen) return false
-    offen.aufloesen(erlaubt, durch)
+    offen.aufloesen(erlaubt, durch, entscheidung)
     return true
   }
 

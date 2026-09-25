@@ -101,6 +101,8 @@ export interface PermissionRequest {
   decision: 'allow' | 'deny' | null
   decidedBy: string | null
   reason: string | null
+  /** Die SDK schlaegt eine Regel fuer "immer erlauben" vor (nur im Speicher, nicht in der DB). */
+  immerMoeglich?: boolean
 }
 
 /**

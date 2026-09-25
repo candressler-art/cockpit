@@ -13,14 +13,17 @@ import { Orchestrator, type OrchestratorKonfig } from './orchestrator.js'
 import { DiscordAdapter, stopZielAufloesen } from './discord.js'
 import type { CockpitEvent } from './typen.js'
 import { standLesen, type SystemStand } from './system.js'
-import { rollenLaden, rollenListe } from './rollen.js'
+import { rollenLaden, rollenListe, agentDefinitionen } from './rollen.js'
 import { sprechenGecacht } from './stimme.js'
 import { erkennen } from './hoeren.js'
 import { GespraechBelegt, gespraechAntworten } from './gespraech.js'
 import {
   chatsIndizieren, chatsSuchen, chatLesen, chatKopfLesen, zuletztBenutzteOrdner,
-  fortsetzungLesen, fortsetzungVorbereiten, fortsetzungAktualisieren,
+  fortsetzungLesen, fortsetzungVorbereiten, fortsetzungAktualisieren, chatRegistrieren, sitzungVorhanden,
+  type Fortsetzung,
 } from './chats.js'
+import { chatOptionenBauen, type ChatOptionen } from './chatOptionen.js'
+import { entscheidungLesen } from './freigaben.js'
 import { vaultIndizieren, vaultGraphLesen, vaultBeobachten, vaultDa, VAULT } from './vault.js'
 import { vaultZugriffErlaubt } from './vaultZugriff.js'
 import { konsoleBefehl } from './konsole.js'
@@ -271,6 +274,65 @@ function verteilen(typ: string, daten: unknown): void {
 
 supervisor.on('ereignis', (e: CockpitEvent) => verteilen('ereignis', e))
 supervisor.on('agent', (a: { runId: string }) => verteilen('agent', a))
+// Live-Text eines Chat-Zugs (nur mit liveText). Wird nicht nachgeliefert:
+// wer spaeter kommt, bekommt die fertige Nachricht ueber die Ereignisse.
+supervisor.on('delta', (d: unknown) => verteilen('delta', d))
+/**
+ * Einen Chat-Zug starten -- fuer neue Chats und fuers Weiterschreiben
+ * derselbe Weg, damit beide dieselben Optionen (Modell, Aufwand, Modus,
+ * Spezialisten, Live-Text) bekommen. Laeuft im Hintergrund; der Aufrufer
+ * antwortet sofort.
+ */
+function chatZugStarten(
+  id: string, f: Fortsetzung, text: string, titel: string, opt: ChatOptionen, neu: boolean,
+): number {
+  const startSeq = db.letzteSeq(f.laufId)
+  chatZuege.starten(id, startSeq, async () => {
+    try {
+      const r = await supervisor.agentStarten({
+        runId: f.laufId,
+        agentId: 'chat',
+        role: 'chat',
+        label: `Chat: ${titel}`.slice(0, 60),
+        prompt: text,
+        cwd: f.cwd,
+        // Neuer Chat: feste Session-Id statt resume, damit die Oberflaeche
+        // ihn sofort unter seiner endgueltigen Id fuehren kann.
+        ...(neu ? { sessionId: id } : { resume: f.aktuelleSession }),
+        model: opt.model,
+        effort: opt.effort,
+        permissionMode: opt.permissionMode,
+        settingSources: opt.settingSources,
+        agents: opt.agents,
+        liveText: opt.liveText,
+        ...(existsSync(VAULT) ? { zusatzVerzeichnisse: [VAULT] } : {}),
+        systemPromptZusatz: opt.systemPromptZusatz,
+        autoErlauben: (toolName, input) => vaultZugriffErlaubt(toolName, input, VAULT),
+      })
+      const neueSession = supervisor.agentenListe(f.laufId).find((a) => a.agentId === 'chat')?.sessionId
+      if (neueSession) fortsetzungAktualisieren(DB_PFAD, id, neueSession)
+      if (r.fehler) console.warn(`[chats] Zug ${id.slice(0, 8)} endete mit Fehler:`, r.fehler)
+    } catch (e) {
+      // Darf den Daemon nicht mitreissen -- ein gestorbener Chat-Zug ist
+      // Sache dieser Sitzung, nicht des ganzen Prozesses.
+      console.warn(`[chats] Zug ${id.slice(0, 8)} fehlgeschlagen:`, String(e))
+    }
+    // Ein neuer Chat steht erst nach dem Indexlauf in der Liste -- nicht
+    // zehn Minuten auf den naechsten regulaeren warten.
+    if (neu) {
+      await chatsIndizieren(DB_PFAD).catch(() => {})
+      verteilen('chats', { id })
+    }
+  })
+  return startSeq
+}
+
+/** Chat-Optionen aus Einstellungen + Anfrage; die Spezialisten erst laden, wenn sie gebraucht werden. */
+function chatOptionen(k: Record<string, unknown> | null): { fehler: string } | { optionen: ChatOptionen } {
+  const e = einstellungen.lesen()
+  return chatOptionenBauen(e, k, () => agentDefinitionen(e.rollenAus), existsSync(VAULT) ? VAULT : null)
+}
+
 /**
  * Endstatus eines Laufs schreiben, ohne zu werfen.
  *
@@ -651,9 +713,11 @@ const server = createServer(async (req, res) => {
     if (pfad === '/api/freigabe' && req.method === 'POST') {
       const k = (await koerperLesen(req)) as Record<string, unknown> | null
       const id = textFeld(k, 'id') ?? ''
-      const erlaubt = k?.erlaubt === true
+      // Neben ja/nein: immer (Sitzung), Antworten auf AskUserQuestion,
+      // Modus nach einem angenommenen Plan, Rueckmeldung (freigaben.ts).
+      const entscheidung = entscheidungLesen(k)
       const durch = textFeld(k, 'durch') ?? 'ui'
-      const ok = supervisor.freigabeEntscheiden(id, erlaubt, durch)
+      const ok = supervisor.freigabeEntscheiden(id, entscheidung.erlaubt, durch, entscheidung)
       return json(ok ? 200 : 404, { ok })
     }
 
@@ -722,46 +786,47 @@ const server = createServer(async (req, res) => {
       const statusVorher = supervisor.agentenListe(laufIdVorher).find((a) => a.agentId === 'chat')?.status
       if (!(await chatZuege.freiWerden(id, statusVorher, CHAT_AUSLAUF_WARTEN_MS))) return besetzt()
 
-      const kopf = chatKopfLesen(DB_PFAD, id)
-      if (!kopf) return json(404, { fehler: 'Sitzung unbekannt' })
+      const opt = chatOptionen(k)
+      if ('fehler' in opt) return json(400, { fehler: opt.fehler })
 
-      const f = await fortsetzungVorbereiten(DB_PFAD, id, process.env.HOME ?? '/opt/cockpit')
+      // Ein eben erst im Cockpit begonnener Chat steht womoeglich noch nicht
+      // im Index (der laeuft erst nach dem ersten Zug) -- dann reicht die
+      // Zuordnung aus chat_fortsetzung.
+      const kopf = chatKopfLesen(DB_PFAD, id)
+      const f = kopf
+        ? await fortsetzungVorbereiten(DB_PFAD, id, process.env.HOME ?? '/opt/cockpit')
+        : fortsetzungLesen(DB_PFAD, id)
       if (!f) return json(404, { fehler: 'Sitzung unbekannt' })
 
       // Zweite Pruefung ohne await dazwischen: zwei gleichzeitige Anfragen
       // kommen beide an den awaits oben vorbei, aber nur eine hierueber.
       if (chatZuege.laeuft(id)) return besetzt()
-      const startSeq = db.letzteSeq(f.laufId)
-
-      // Nicht awaiten: die Antwort geht gleich raus, der Zug laeuft weiter und
-      // die Oberflaeche verfolgt ihn per Poll auf /api/lauf/<laufId>.
-      chatZuege.starten(id, startSeq, async () => {
-        try {
-          const r = await supervisor.agentStarten({
-            runId: f.laufId,
-            agentId: 'chat',
-            role: 'chat',
-            label: `Chat: ${kopf.titel}`.slice(0, 60),
-            prompt: text,
-            cwd: f.cwd,
-            resume: f.aktuelleSession,
-            ...(existsSync(VAULT) ? { zusatzVerzeichnisse: [VAULT] } : {}),
-            systemPromptZusatz:
-              `Cans Obsidian-Vault (persoenliche Notizen, SOPs) liegt nur lesend unter ${VAULT}. ` +
-              'Bei Fragen zu seinem Setup dort mit Grep/Glob/Read nachsehen. Schreiben dort ist ' +
-              'sinnlos -- es ist nur ein Spiegel.',
-            autoErlauben: (toolName, input) => vaultZugriffErlaubt(toolName, input, VAULT),
-          })
-          const neueSession = supervisor.agentenListe(f.laufId).find((a) => a.agentId === 'chat')?.sessionId
-          if (neueSession) fortsetzungAktualisieren(DB_PFAD, id, neueSession)
-          if (r.fehler) console.warn(`[chats] Weiterschreiben ${id.slice(0, 8)} endete mit Fehler:`, r.fehler)
-        } catch (e) {
-          // Darf den Daemon nicht mitreissen -- ein gestorbener Chat-Zug ist
-          // Sache dieser Sitzung, nicht des ganzen Prozesses.
-          console.warn(`[chats] Weiterschreiben ${id.slice(0, 8)} fehlgeschlagen:`, String(e))
-        }
-      })
+      // Die Oberflaeche verfolgt den Zug per WS bzw. Poll auf /api/lauf/<laufId>.
+      // Ohne Sitzungsdatei (erster Zug eines neuen Chats ist vorher
+      // gescheitert) wird neu begonnen, unter derselben Id.
+      const neu = !kopf && !sitzungVorhanden(DB_PFAD, id)
+      const startSeq = chatZugStarten(id, f, text, kopf?.titel ?? text.slice(0, 50), opt.optionen, neu)
       return json(202, { laufId: f.laufId, cwd: f.cwd, startSeq })
+    }
+
+    // Neuer Chat: Session-Id vergibt das Cockpit selbst (SDK sessionId), die
+    // Antwort traegt sie sofort -- die Oberflaeche springt gleich in den Chat.
+    if (pfad === '/api/chats' && req.method === 'POST') {
+      const k = (await koerperLesen(req)) as Record<string, unknown> | null
+      const text = (textFeld(k, 'text') ?? '').trim()
+      if (!text) return json(400, { fehler: 'text fehlt' })
+      const cwd = textFeld(k, 'cwd') || einstellungen.lesen().arbeitsordner
+      const schlecht = cwdPruefen(cwd)
+      if (schlecht) return json(400, { fehler: schlecht })
+      if (!existsSync(cwd)) return json(400, { fehler: `Ordner gibt es nicht: ${cwd}` })
+      const opt = chatOptionen(k)
+      if ('fehler' in opt) return json(400, { fehler: opt.fehler })
+
+      const id = randomUUID()
+      chatRegistrieren(DB_PFAD, id, `chat-${id}`, cwd)
+      const f: Fortsetzung = { laufId: `chat-${id}`, aktuelleSession: id, cwd }
+      const startSeq = chatZugStarten(id, f, text, text.slice(0, 50), opt.optionen, true)
+      return json(202, { id, laufId: f.laufId, cwd, startSeq })
     }
 
     if (pfad === '/api/chats' && req.method === 'GET') {

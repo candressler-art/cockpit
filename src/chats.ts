@@ -635,6 +635,15 @@ function aktuelleDatei(dbPfad: string, sessionId: string): string | null {
 }
 
 /**
+ * Gibt es schon eine Sitzungsdatei? Ein neuer Chat, dessen erster Zug
+ * scheiterte, bevor die CLI etwas schrieb, hat keine -- dann muss der naechste
+ * Zug wieder neu anfangen statt ins Leere fortzusetzen.
+ */
+export function sitzungVorhanden(dbPfad: string, sessionId: string): boolean {
+  return aktuelleDatei(dbPfad, sessionId) !== null
+}
+
+/**
  * Eine Sitzung im Format der Chat-Ansicht (nachrichten.ts): Text, Denken,
  * Werkzeugaufrufe und -ergebnisse, Hinweise. Fuer einen gerade erst
  * begonnenen Chat, den der Index noch nicht kennt, reicht der Eintrag in
