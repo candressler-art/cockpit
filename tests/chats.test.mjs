@@ -26,7 +26,7 @@ process.env.COCKPIT_SESSIONS = spiegel
 process.env.CLAUDE_CONFIG_DIR = claudeConfig
 
 const {
-  chatsIndizieren, chatLesen, fortsetzungLesen, fortsetzungVorbereiten, fortsetzungAktualisieren,
+  chatsIndizieren, chatLesen, fortsetzungLesen, fortsetzungVorbereiten, fortsetzungAktualisieren, chatFuerSitzung,
 } = await import('../dist/chats.js')
 const { vaultZugriffErlaubt } = await import('../dist/vaultZugriff.js')
 
@@ -260,6 +260,10 @@ let f
   const gelesen = fortsetzungLesen(dbPfad, sessionId)
   pruefe('fortsetzungAktualisieren traegt die neue Session-Id ein', gelesen?.aktuelleSession === neueSession)
   pruefe('laufId und cwd bleiben beim Aktualisieren unveraendert', gelesen?.laufId === f.laufId && gelesen?.cwd === f.cwd)
+  // Rueckblick der Nutzung: Sitzungs-Id -> Chat, auch ueber die Fortsetzung.
+  pruefe('chatFuerSitzung: direkte Id', chatFuerSitzung(dbPfad, sessionId)?.id === sessionId)
+  pruefe('chatFuerSitzung: fortgesetzte Sitzung fuehrt zum Chat', chatFuerSitzung(dbPfad, neueSession)?.id === sessionId)
+  pruefe('chatFuerSitzung: unbekannt -> null', chatFuerSitzung(dbPfad, 'gibt-es-nicht') === null)
 }
 
 // --- vaultZugriffErlaubt: automatische Freigabe nur fuer Lesezugriffe -----

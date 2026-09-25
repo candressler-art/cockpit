@@ -345,6 +345,36 @@ export function nutzungLesen(dbPfad: string, abTag: string, jetzt = Date.now()):
   return { zeitzone: ZEITZONE, heute: tagVon(jetzt), tage, modelle, projekte, stunden }
 }
 
+export interface TagesSitzung {
+  sitzung: string
+  projekt: string | null
+  tokens: number
+  antworten: number
+  /** Erste und letzte Antwort an diesem Tag (ms). */
+  von: number
+  bis: number
+}
+
+/**
+ * Was an einem Tag los war, je Sitzung -- fuer den Rueckblick ("was habe ich
+ * gemacht"). Die Sitzungs-Id ist zugleich die Chat-Id, die Oberflaeche kann
+ * also direkt verlinken. Subagenten tragen die Id ihres Chats und zaehlen dort.
+ */
+export function tagSitzungen(dbPfad: string, tag: string): TagesSitzung[] {
+  return (handle(dbPfad).prepare(
+    `SELECT sitzung, MAX(projekt) AS projekt, ${TOKENS_SQL} AS tokens, COUNT(*) AS antworten,
+            MIN(ts) AS von, MAX(ts) AS bis
+     FROM nutzung WHERE tag = ? AND sitzung IS NOT NULL GROUP BY sitzung ORDER BY von`,
+  ).all(tag) as Record<string, number | string | null>[]).map((r) => ({
+    sitzung: String(r.sitzung),
+    projekt: r.projekt === null ? null : String(r.projekt),
+    tokens: Number(r.tokens ?? 0),
+    antworten: Number(r.antworten ?? 0),
+    von: Number(r.von),
+    bis: Number(r.bis),
+  }))
+}
+
 export interface Kennzahlen {
   heute: number
   sieben: number

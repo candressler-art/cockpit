@@ -423,6 +423,21 @@ export function chatKopfLesen(dbPfad: string, sessionId: string): (ChatKopf & { 
   return { ...zeileZuKopf(r), pfad: String(r.pfad) }
 }
 
+/**
+ * Zu welchem Chat gehoert eine Sitzungs-Id? Direkt, oder ueber die
+ * Fortsetzung (ein weitergeschriebener Chat laeuft unter neuer Id weiter).
+ * null: kein Chat -- etwa ein Agent eines Team-Auftrags.
+ */
+export function chatFuerSitzung(dbPfad: string, sitzung: string): { id: string; titel: string } | null {
+  const h = handle(dbPfad)
+  const r = (h.prepare('SELECT session_id, titel FROM chats WHERE session_id = ?').get(sitzung)
+    ?? h.prepare(
+      `SELECT c.session_id, c.titel FROM chat_fortsetzung f JOIN chats c ON c.session_id = f.session_id
+       WHERE f.aktuelle_session = ?`,
+    ).get(sitzung)) as { session_id: string; titel: string } | undefined
+  return r ? { id: String(r.session_id), titel: String(r.titel) } : null
+}
+
 export interface Fortsetzung {
   laufId: string
   aktuelleSession: string

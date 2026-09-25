@@ -19,7 +19,7 @@ import { erkennen } from './hoeren.js'
 import { GespraechBelegt, gespraechAntworten } from './gespraech.js'
 import {
   chatsIndizieren, chatsSuchen, verlaufLesen, chatKopfLesen, zuletztBenutzteOrdner,
-  fortsetzungLesen, fortsetzungVorbereiten, fortsetzungAktualisieren, chatRegistrieren, sitzungVorhanden,
+  fortsetzungLesen, fortsetzungVorbereiten, fortsetzungAktualisieren, chatRegistrieren, sitzungVorhanden, chatFuerSitzung,
   type Fortsetzung,
 } from './chats.js'
 import { chatOptionenBauen, type ChatOptionen } from './chatOptionen.js'
@@ -39,7 +39,7 @@ import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { EinstellungsSpeicher, auswahlListen } from './einstellungen.js'
 import { ordnerAuflisten, OrdnerFehler } from './verzeichnisse.js'
-import { nutzungIndizieren, nutzungLesen, kennzahlenBerechnen, tagVerschieben, tagVon } from './nutzung.js'
+import { nutzungIndizieren, nutzungLesen, kennzahlenBerechnen, tagVerschieben, tagVon, tagSitzungen } from './nutzung.js'
 import { kontenLesen } from './konten.js'
 
 const PORT = Number(process.env.COCKPIT_PORT ?? 8765)
@@ -1019,6 +1019,14 @@ const server = createServer(async (req, res) => {
       const heute = tagVon(Date.now())
       const bericht = nutzungLesen(DB_PFAD, tagVerschieben(heute, -(tage - 1)))
       return json(200, { ...bericht, kennzahlen: kennzahlenBerechnen(bericht.tage, bericht.heute) })
+    }
+
+    if (pfad === '/api/nutzung/tag' && req.method === 'GET') {
+      // Rueckblick: was war an diesem Tag los, je Chat.
+      const tag = url.searchParams.get('tag') ?? ''
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(tag)) return json(400, { fehler: 'tag: JJJJ-MM-TT' })
+      const sitzungen = tagSitzungen(DB_PFAD, tag).map((s) => ({ ...s, chat: chatFuerSitzung(DB_PFAD, s.sitzung) }))
+      return json(200, { tag, sitzungen })
     }
 
     if (pfad === '/api/rollen' && req.method === 'GET') {

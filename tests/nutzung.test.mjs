@@ -2,7 +2,7 @@
 // Zeilen je Antwort, kopierte Sitzungsdatei, Link-Wurzeln), inkrementelles
 // Lesen, Auswertung und Kennzahlen. Gegen dist/.
 import {
-  zeileAuswerten, tagVon, stundeVon, nutzungIndizieren, nutzungLesen, kennzahlenBerechnen, tagVerschieben,
+  zeileAuswerten, tagVon, stundeVon, nutzungIndizieren, nutzungLesen, kennzahlenBerechnen, tagVerschieben, tagSitzungen,
 } from '../dist/nutzung.js'
 import { mkdtempSync, mkdirSync, writeFileSync, appendFileSync, symlinkSync, copyFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -104,6 +104,12 @@ writeFileSync(join(spiegel, 's1', 'subagents', 'agent-1.jsonl'), antwort('sub1',
 {
   const b = nutzungLesen(dbPfad, '2026-09-21', Date.parse('2026-09-22T12:00:00Z'))
   pruefe('abTag filtert', b.tage.length === 2 && b.tage[0].tag === '2026-09-21')
+}
+{
+  const s = tagSitzungen(dbPfad, '2026-09-21')
+  pruefe('Tag: eine Sitzung mit Subagent', s.length === 1 && s[0].sitzung === 's1' && s[0].antworten === 2 && s[0].tokens === 222)
+  pruefe('Tag: Projekt und Zeitspanne', s[0].projekt === 'projekt-a' && s[0].von === Date.parse('2026-09-21T10:00:00Z') && s[0].bis === Date.parse('2026-09-21T11:00:00Z'))
+  pruefe('Tag ohne Nutzung: leer', tagSitzungen(dbPfad, '2026-01-01').length === 0)
 }
 rmSync(wurzel, { recursive: true, force: true })
 
