@@ -119,8 +119,15 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
     eingabe.ordnerFestlegen(kopf.fortsetzung?.cwd ?? kopf.zielCwd ?? kopf.cwd)
     const lief = kopf.fortsetzung?.laeuft
     laeuftSetzen(Boolean(lief))
-    if (lief) await laufNachholen(nr, kopf.fortsetzung.startSeq ?? 0)
-    else {
+    if (lief) {
+      await laufNachholen(nr, kopf.fortsetzung.startSeq ?? 0)
+      // Wettlauf beim Anhalten: der Agent ist schon 'stopped', der Server
+      // raeumt den Zug aber erst einen Moment spaeter ab. Ohne diesen
+      // Nachgang stuende "Claude arbeitet" fuer immer da -- es kommt kein
+      // Ereignis mehr, das es beendet. zugBeendet prueft nach kurzer Pause
+      // erneut und laedt dann wieder.
+      if (nr === ladeNr && ENDZUSTAENDE.has(status)) zugBeendet({})
+    } else {
       // Auch ohne laufenden Zug koennen Freigaben offen sein -- etwa nach
       // einem Neuladen der Seite, waehrend der Zug wartet. Die kaemen sonst
       // nie wieder in Sicht.
@@ -190,10 +197,12 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
     } else if (e.kind === 'permission_decision') {
       const fid = e.payload?.id
       if (fid && freigaben.delete(String(fid))) freigabenZeichnen()
-    } else if ((e.kind === 'error' && !/^Lauf endet mit Fehler/.test(e.summary ?? '')) || (e.kind === 'rate_limit' && e.payload?.istLimit)) {
+    } else if ((e.kind === 'error' && !/^Lauf endet mit Fehler|Operation aborted|aborted by user/.test(e.summary ?? '')) || (e.kind === 'rate_limit' && e.payload?.istLimit)) {
       // rate_limit ohne istLimit ist nur der laufende Nutzungsstand der SDK
       // ("Limit allowed 40 %") -- kein Grund, den Chat zu unterbrechen. Und
       // "Lauf endet mit Fehler (...)" ist nur das Echo des eigentlichen Fehlers.
+      // "Operation aborted" ist das Anhalten selbst -- kein Fehler, dafuer
+      // steht am Zugende "Angehalten".
       hinweisDazu(e.kind === 'error' ? 'fehler' : 'limit', e.summary)
     } else if (e.kind === 'protocol' && e.payload?.nach) {
       // Kontowechsel des Supervisors: ruhig erwaehnen, der Zug laeuft weiter.
@@ -231,6 +240,7 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
       const schonFehler = hinweise.some((h0) => h0.art === 'fehler' || h0.art === 'limit')
       if (status === 'failed' && !schonFehler) hinweisDazu('fehler', `Der Zug ist fehlgeschlagen${a.lastError ? `: ${a.lastError}` : '.'}`)
       if (status === 'waiting_ratelimit') hinweisDazu('limit', 'Kein Konto ist gerade nutzbar (Limit oder Anmeldung) -- der Zug wurde angehalten.')
+      if (status === 'stopped') hinweisDazu('info', 'Angehalten.')
       // Die Datei ist die Wahrheit; die Hinweise dieses Zugs stehen nicht
       // darin und bleiben erhalten.
       const h0 = hinweise
@@ -364,13 +374,19 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
       }
       if (sichtbar.every((b) => b.typ === 'hinweis')) {
         antwortSchliessen()
-        for (const b of sichtbar) kinder.push(hinweisEl(b.text, 'limit'))
+        for (const b of sichtbar) kinder.push(hinweisEl(b.text, b.art ?? 'limit'))
         continue
       }
       if (!antwort) antwort = h('div.antwort')
       for (const b of sichtbar) antwort.append(blockEl(b, ergebnisse, unter, n))
     }
     antwortSchliessen()
+    // Letzte Frage ohne Antwort und nichts laeuft: angehalten oder
+    // abgebrochen (dasselbe wie zwischen zwei Fragen, src/nachrichten.ts).
+    const letzte = haupt[haupt.length - 1]
+    if (!laeuft && !hinweise.length && letzte?.rolle === 'user' && letzte.bloecke.some((b) => b.typ === 'text')) {
+      kinder.push(hinweisEl('Ohne Antwort (angehalten oder abgebrochen).', 'info'))
+    }
     for (const x of hinweise) kinder.push(hinweisEl(x.text, x.art))
     leeren(verlaufEl, kinder)
     kopfZeichnen()

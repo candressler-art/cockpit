@@ -425,6 +425,11 @@ select.chip option { background: var(--mantle); color: var(--text); }
   .eingabe-feld { font-size: 16px; } /* unter 16px zoomt iOS beim Fokus */
   .chip { max-width: 170px; padding: 0 8px; }
   .optionen-chip { display: inline-flex; }
+  /* Ein langer Ordnerpfad soll kuerzer werden, nicht den Senden-Knopf in eine
+     eigene Zeile schieben: Basis 0, waechst bis max-width, den Rest nimmt der
+     Abstandhalter (Gefunden im Ende-zu-Ende-Test mit /tmp/umbau/e2e/arbeit). */
+  .ordner-chip { flex: 100 1 0; min-width: 0; }
+  .ordner-chip span { min-width: 0; }
   .eingabe-optionen { display: none; }
   .eingabe.optionen-offen .eingabe-optionen { display: flex; flex-wrap: wrap; gap: 6px; order: -1; width: 100%; padding-bottom: 4px; }
   .eingabe.optionen-offen .eingabe-optionen .chip { max-width: none; flex: 1 1 auto; }

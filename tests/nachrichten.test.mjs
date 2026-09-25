@@ -103,7 +103,9 @@ pruefe('Ergebnis als Zeichenkette', normalisieren({ type: 'user', message: { con
   pruefe('Verlauf: kaputte Zeilen uebersprungen, synthetische weg', nachrichten.length === 3 && !gekuerzt)
   pruefe('Verlauf: Limitmeldung als Hinweis', nachrichten[1].bloecke[0].typ === 'hinweis')
   pruefe('Verlauf: echte Antwort bleibt Text', nachrichten[2].bloecke[0].typ === 'text')
-  const viele = Array.from({ length: 10 }, (_, i) => JSON.stringify({ type: 'user', uuid: String(i), message: { content: `n${i}` } })).join('\n')
+  const viele = Array.from({ length: 10 }, (_, i) => JSON.stringify(i % 2
+    ? { type: 'assistant', uuid: String(i), message: { content: [{ type: 'text', text: `a${i}` }] } }
+    : { type: 'user', uuid: String(i), message: { content: `n${i}` } })).join('\n')
   const r = verlaufNormalisieren(viele, () => false, 4)
   pruefe('Verlauf: die letzten max behalten', r.gekuerzt && r.nachrichten.length === 4 && r.nachrichten[0].id === '6')
 }
@@ -137,7 +139,31 @@ pruefe('Ergebnis als Zeichenkette', normalisieren({ type: 'user', message: { con
     z({ type: 'user', uuid: 'u1', message: { content: 'x' } }),
     z({ type: 'user', uuid: 'u2', message: { content: 'x' } }),
   ].join('\n')
-  pruefe('gleiche Frage ohne Limit dazwischen bleibt', verlaufNormalisieren(direkt, limit).nachrichten.length === 2)
+  const d2 = verlaufNormalisieren(direkt, limit).nachrichten
+  pruefe('gleiche Frage ohne Limit dazwischen bleibt', d2.filter((n) => n.rolle === 'user').length === 2)
+}
+
+// --- Angehaltener Zug: Frage ohne Antwort bekommt einen Hinweis --------------
+// Gefunden im Ende-zu-Ende-Test: nach dem Anhalten schreibt die CLI nichts
+// in die Datei, im Chat standen zwei Fragen kommentarlos untereinander.
+{
+  const z = (o) => JSON.stringify(o)
+  const zeilen = [
+    z({ type: 'user', uuid: 'u1', message: { content: 'Aufsatz bitte' } }),
+    z({ type: 'user', uuid: 'u2', message: { content: 'Dann kurz' } }),
+    z({ type: 'assistant', uuid: 'a2', message: { content: [{ type: 'text', text: 'Kurz.' }] } }),
+  ].join('\n')
+  const { nachrichten } = verlaufNormalisieren(zeilen, () => false)
+  pruefe('ohne Antwort: Hinweis zwischen den Fragen', nachrichten.length === 4 && nachrichten[1].bloecke[0].typ === 'hinweis' && nachrichten[1].bloecke[0].art === 'info')
+  pruefe('ohne Antwort: Hinweis hat eigene Id', nachrichten[1].id !== nachrichten[0].id && nachrichten[1].id !== nachrichten[2].id)
+  // Werkzeugergebnisse sind user-Zeilen, aber keine Fragen.
+  const mitWerkzeug = [
+    z({ type: 'user', uuid: 'u1', message: { content: 'Lies x' } }),
+    z({ type: 'assistant', uuid: 'a1', message: { content: [{ type: 'tool_use', id: 't1', name: 'Read', input: {} }] } }),
+    z({ type: 'user', uuid: 'r1', message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'x' }] } }),
+    z({ type: 'user', uuid: 'u2', message: { content: 'Und y?' } }),
+  ].join('\n')
+  pruefe('nach Werkzeugergebnis kein Hinweis', !verlaufNormalisieren(mitWerkzeug, () => false).nachrichten.some((n) => n.bloecke.some((b) => b.typ === 'hinweis')))
 }
 
 // --- Live-Ereignisse ----------------------------------------------------------

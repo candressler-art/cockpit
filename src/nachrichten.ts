@@ -18,7 +18,7 @@ export type Block =
   | { typ: 'werkzeug'; id: string; name: string; eingabe: Record<string, unknown> }
   | { typ: 'ergebnis'; zu: string; text: string; fehler: boolean; bilder: number }
   | { typ: 'bild' }
-  | { typ: 'hinweis'; text: string }
+  | { typ: 'hinweis'; text: string; art?: 'info' }
 
 export interface Nachricht {
   id: string
@@ -217,7 +217,7 @@ function istWiederholungNachLimit(bisher: Nachricht[], n: Nachricht): boolean {
   let hinweise = 0
   for (let i = bisher.length - 1; i >= 0; i--) {
     const m = bisher[i]!
-    if (m.rolle === 'assistant' && m.bloecke.every((b) => b.typ === 'hinweis')) { hinweise++; continue }
+    if (m.rolle === 'assistant' && m.bloecke.every((b) => b.typ === 'hinweis' && !b.art)) { hinweise++; continue }
     return m.rolle === 'user' && hinweise > 0 && nurTextVon(m) === text
   }
   return false
@@ -257,6 +257,12 @@ export function verlaufNormalisieren(
       }
     } else if (istWiederholungNachLimit(alle, n)) {
       continue
+    } else if (nurTextVon(n) !== null && alle.length && nurTextVon(alle[alle.length - 1]!) !== null && alle[alle.length - 1]!.rolle === 'user') {
+      // Frage auf Frage: die erste blieb ohne Antwort. Beim Anhalten schreibt
+      // die CLI nichts in die Datei -- ohne diesen Hinweis stuenden zwei
+      // Fragen kommentarlos untereinander.
+      alle.push({ id: `${n.id}-ohne-antwort`, rolle: 'assistant', ts: n.ts, modell: null, eltern: null,
+        bloecke: [{ typ: 'hinweis', text: 'Ohne Antwort (angehalten oder abgebrochen).', art: 'info' }] })
     }
     alle.push(n)
   }
