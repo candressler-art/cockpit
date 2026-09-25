@@ -14,6 +14,7 @@ import {
   KontenVerwaltung,
   nutzungBeimLadenFiltern,
   sitzungsdateiVorhanden,
+  wochenPrognose,
 } from '../dist/konten.js'
 import { nutzungAusAntwort, nutzungAbfragen, naechsteBackoffMs, guthabenAusAntwort } from '../dist/kontenNutzung.js'
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
@@ -902,6 +903,27 @@ const SDK_LIMIT_PRAEFIXE = ["You've hit your", "You've reached your"]
   pruefe('Sitzung: Datei da -> ja', sitzungsdateiVorhanden(dir, 'abc') === true)
   pruefe('Sitzung: andere Id -> nein', sitzungsdateiVorhanden(dir, 'abd') === false)
   rmSync(dir, { recursive: true, force: true })
+}
+
+// --- Wochenprognose -------------------------------------------------------------
+{
+  const TAG = 86_400_000
+  const jetzt = 1_790_000_000_000
+  // Reset in 4 Tagen -> 3 Tage vergangen. 60 % in 3 Tagen = 20 %/Tag, die
+  // restlichen 40 % reichen 2 Tage -- vor dem Reset.
+  const reset = (jetzt + 4 * TAG) / 1000
+  let p = wochenPrognose(0.6, reset, jetzt)
+  pruefe('Prognose: Tempo reicht nicht bis zum Reset', p?.reicht === false && Math.abs(p.leerAm - (jetzt + 2 * TAG)) < 1000)
+  p = wochenPrognose(0.3, reset, jetzt)
+  pruefe('Prognose: 10 %/Tag reicht bis zum Reset', p?.reicht === true && p.leerAm === null)
+  p = wochenPrognose(1, reset, jetzt)
+  pruefe('Prognose: voll -> leer jetzt', p?.reicht === false && p.leerAm === jetzt)
+  pruefe('Prognose: ohne Messung unbekannt', wochenPrognose(null, reset, jetzt) === null)
+  pruefe('Prognose: ohne Reset unbekannt', wochenPrognose(0.5, null, jetzt) === null)
+  // Kurz nach dem Reset ist das Tempo Zufall (eine Sitzung = "50 %/Stunde").
+  pruefe('Prognose: in den ersten Stunden des Fensters unbekannt',
+    wochenPrognose(0.05, (jetzt + 7 * TAG - 3_600_000) / 1000, jetzt) === null)
+  pruefe('Prognose: abgelaufenes Fenster unbekannt', wochenPrognose(0.5, (jetzt - 1000) / 1000, jetzt) === null)
 }
 
 console.log(`\n${ok}/${gesamt} bestanden`)

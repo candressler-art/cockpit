@@ -44,6 +44,43 @@ export interface KontoMitZustand extends Konto {
   /** Woher der Wert stammt -- fuer die Oberflaeche, damit man dem Wert die
    *  richtige Verlaesslichkeit zutraut (siehe kontenNutzung.ts). */
   quelle: 'usage_api' | 'rate_limit_event' | null
+  /** Reset des 5h-Fensters in ms, null wenn unbekannt. */
+  fuenfStundenResetAm: number | null
+  /** Reset des Wochenfensters in ms, null wenn unbekannt. */
+  siebenTageResetAm: number | null
+  /** Reicht das Wochenlimit beim bisherigen Tempo bis zum Reset? null: zu
+   *  wenig Daten fuer eine ehrliche Aussage (siehe wochenPrognose). */
+  wochePrognose: WochenPrognose | null
+}
+
+export interface WochenPrognose {
+  reicht: boolean
+  /** Wann das Wochenlimit beim bisherigen Tempo erreicht waere (ms); null, wenn es reicht. */
+  leerAm: number | null
+}
+
+const WOCHE_MS = 7 * 86_400_000
+/** Vorher ist das Tempo Zufall: eine Sitzung direkt nach dem Reset hiesse "20 % pro Stunde". */
+const PROGNOSE_MINDESTENS_MS = 6 * 3_600_000
+
+/**
+ * Lineare Hochrechnung des Wochenfensters: Anteil geteilt durch die seit
+ * Fensterbeginn vergangene Zeit ergibt das Tempo, damit der Zeitpunkt, an
+ * dem 100 % erreicht waeren. Linear ist grob (nachts arbeitet niemand), aber
+ * ehrlich und nachvollziehbar -- eine Kurve, die Wochentage gewichtet, haette
+ * bei einer Woche Verlauf mehr Rauschen als Aussage.
+ * `resetSek` kommt wie alle resetsAt-Felder in Sekunden.
+ */
+export function wochenPrognose(anteil: number | null, resetSek: number | null, jetzt: number): WochenPrognose | null {
+  if (anteil === null || resetSek === null) return null
+  const reset = resetSek * 1000
+  if (reset <= jetzt) return null
+  if (anteil >= 1) return { reicht: false, leerAm: jetzt }
+  const vergangen = jetzt - (reset - WOCHE_MS)
+  if (vergangen < PROGNOSE_MINDESTENS_MS) return null
+  if (anteil <= 0) return { reicht: true, leerAm: null }
+  const leerAm = jetzt + ((1 - anteil) * vergangen) / anteil
+  return leerAm >= reset ? { reicht: true, leerAm: null } : { reicht: false, leerAm: Math.round(leerAm) }
 }
 
 /**
@@ -472,6 +509,9 @@ export class KontenVerwaltung {
         siebenTageAnteil: n?.stand.siebenTageAnteil ?? null,
         gemessenAm: n?.stand.gemessenAm ?? null,
         quelle: n?.quelle ?? null,
+        fuenfStundenResetAm: n?.stand.fuenfStundenResetsAt ? n.stand.fuenfStundenResetsAt * 1000 : null,
+        siebenTageResetAm: n?.stand.siebenTageResetsAt ? n.stand.siebenTageResetsAt * 1000 : null,
+        wochePrognose: n ? wochenPrognose(n.stand.siebenTageAnteil, n.stand.siebenTageResetsAt, jetzt) : null,
       }
     })
   }
