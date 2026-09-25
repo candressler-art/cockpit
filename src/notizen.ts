@@ -1,6 +1,6 @@
 // Bereich Notizen: den Obsidian-Vault durchsuchen und lesen.
 //
-// Anders als der Graph-Index (vault.ts) geht hier Notiztext ueber die API --
+// Hier geht Notiztext ueber die API (frueher nur Titel und Verweise) --
 // Can will seine Notizen im Cockpit lesen (UMBAU-PLAN, Zielbild). Erreichbar
 // ist der Dienst nur im Tailnet, und der Chat-Agent liest den Vault ohnehin.
 // Gelesen wird aber nur, was notizenLaden() als Notiz kennt: .md-Dateien

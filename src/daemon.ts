@@ -16,7 +16,6 @@ import { standLesen, verlaufAnhaengen, type SystemStand, type VerlaufPunkt } fro
 import { rollenLaden, rollenListe, agentDefinitionen } from './rollen.js'
 import { sprechenGecacht } from './stimme.js'
 import { erkennen } from './hoeren.js'
-import { GespraechBelegt, gespraechAntworten } from './gespraech.js'
 import {
   chatsIndizieren, chatsSuchen, verlaufLesen, chatKopfLesen, zuletztBenutzteOrdner,
   fortsetzungLesen, fortsetzungVorbereiten, fortsetzungAktualisieren, chatRegistrieren, sitzungVorhanden, chatFuerSitzung,
@@ -25,7 +24,7 @@ import {
 import { chatOptionenBauen, type ChatOptionen } from './chatOptionen.js'
 import { entscheidungLesen } from './freigaben.js'
 import { AufgabenSammler, AUFGABEN_FENSTER_MS, agentAusZeile } from './aufgaben.js'
-import { vaultIndizieren, vaultGraphLesen, vaultBeobachten, vaultDa, VAULT } from './vault.js'
+import { vaultDa, VAULT } from './vault.js'
 import { notizenLaden, notizenSuchen, notizLesen } from './notizen.js'
 import { vaultZugriffErlaubt } from './vaultZugriff.js'
 import { konsoleBefehl, verlaufAufnehmen, type KonsoleEintrag } from './konsole.js'
@@ -446,16 +445,6 @@ await rollenLaden()
 // lesen dauert Sekunden -- der Daemon soll deswegen nicht spaeter lauschen.
 // Unveraenderte Dateien werden uebersprungen, spaetere Laeufe sind billig.
 void chatsIndizieren(DB_PFAD).catch((e) => console.warn('[chats] Index fehlgeschlagen:', String(e)))
-void vaultIndizieren().catch((e) => console.warn('[vault] Index fehlgeschlagen:', String(e)))
-vaultBeobachten()
-// Nachlauf fuer den Fall, dass fs.watch nichts meldet -- auf manchen
-// Dateisystemen (und bei Syncthing, das ueber Umbenennungen schreibt) greift
-// die Beobachtung nicht zuverlaessig. Der Kommentar in vault.ts versprach
-// diesen Zeitgeber schon, es gab ihn nur nicht.
-setInterval(
-  () => void vaultIndizieren().catch(() => {}),
-  15 * 60_000,
-).unref()
 setInterval(
   () => void chatsIndizieren(DB_PFAD).catch(() => {}),
   10 * 60_000,
@@ -662,45 +651,6 @@ const server = createServer(async (req, res) => {
       return json(200, { laeufe: db.laeufeLesen() })
     }
 
-    if (pfad === '/api/lauf' && req.method === 'POST') {
-      const k = (await koerperLesen(req)) as Record<string, unknown> | null
-      const prompt = (textFeld(k, 'prompt') ?? '').trim()
-      const cwd = textFeld(k, 'cwd') ?? process.env.HOME ?? '.'
-      const label = textFeld(k, 'label') ?? 'Chat'
-      const model = textFeld(k, 'model') || undefined
-      if (!prompt) return json(400, { fehler: 'prompt fehlt' })
-      const schlecht = cwdPruefen(cwd)
-      if (schlecht) return json(400, { fehler: schlecht })
-
-      const runId = randomUUID()
-      db.runAnlegen(runId, label, cwd)
-      json(202, { runId })
-
-      // Nicht awaiten: der Lauf laeuft weiter, die Antwort ist schon raus.
-      void supervisor
-        .agentStarten({
-          runId,
-          agentId: 'chat',
-          role: 'chat',
-          label,
-          prompt,
-          cwd,
-          model,
-        })
-        .then((r) => {
-          // Von Hand gestoppt heisst 'stopped' wie beim Orchestrator-Lauf --
-          // sonst stuende der Abbruch als 'failed' ("Operation aborted") in
-          // der Laufliste und saehe nach einem Absturz aus.
-          const gestoppt = supervisor.agentenListe(runId).some((a) => a.status === 'stopped')
-          laufAbschliessen(runId, gestoppt ? 'stopped' : r.fehler ? 'failed' : 'done', gestoppt ? 'von Hand abgebrochen' : r.fehler)
-        })
-        .catch((e) => laufAbschliessen(runId, 'failed', String(e)))
-        // Wie bei orchestratorLaufStarten: eine frische runId je Aufruf, sonst
-        // bleibt der Agent dieses Laufs fuer immer in supervisor.agenten.
-        .finally(() => supervisor.laufVergessen(runId))
-      return
-    }
-
     if (pfad.startsWith('/api/lauf/') && req.method === 'GET') {
       const teile = pfad.split('/').filter(Boolean)
       const runId = teile[2] ?? ''
@@ -838,17 +788,6 @@ const server = createServer(async (req, res) => {
     if (pfad === '/api/notizen/lesen' && req.method === 'GET') {
       const n = await notizLesen(VAULT, url.searchParams.get('id') ?? '')
       return n ? json(200, n) : json(404, { fehler: 'Notiz nicht gefunden' })
-    }
-
-    if (pfad === '/api/vault/graph' && req.method === 'GET') {
-      const g = vaultGraphLesen()
-      // Agenten dieses Laufs dazu, wenn einer genannt ist: der Tab zeigt
-      // Notizen und Agenten in EINER Szene, und beides aus zwei Anfragen
-      // zusammenzusetzen waere nur Gelegenheit fuer Zwischenstaende, in denen
-      // Kanten auf noch nicht geladene Knoten zeigen.
-      const runId = url.searchParams.get('run')
-      const agenten = runId ? db.agentenLesen(runId) : []
-      return json(200, { ...g, spiegelDa: await vaultDa(), agenten })
     }
 
     // Weiterschreiben MUSS vor den beiden GET-Routen unten stehen: sonst
@@ -990,21 +929,6 @@ const server = createServer(async (req, res) => {
         // Derselbe Vertrag wie /api/sprechen: 503 heisst "Dienst nicht da",
         // nicht "etwas ist kaputt" -- die Oberflaeche unterscheidet danach.
         return json(503, { fehler: String(e) })
-      }
-    }
-
-    if (pfad === '/api/gespraech' && req.method === 'POST') {
-      const k = (await koerperLesen(req)) as Record<string, unknown> | null
-      const text = (textFeld(k, 'text') ?? '').trim()
-      if (!text) return json(400, { fehler: 'text fehlt' })
-      const neu = k?.neu === true
-      const resume = neu ? undefined : textFeld(k, 'sessionId') || undefined
-      try {
-        const antwort = await gespraechAntworten(supervisor, text, resume)
-        return json(200, antwort)
-      } catch (e) {
-        if (e instanceof GespraechBelegt) return json(409, { fehler: e.message })
-        return json(500, { fehler: String(e) })
       }
     }
 

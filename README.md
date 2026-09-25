@@ -1,8 +1,10 @@
 # Cockpit
 
-Eine Zentrale für Claude-Code-Agenten: ein Orchestrator beauftragt Worker, und
-man sieht live, wer gerade was tut, wie die beiden miteinander reden und was
-es kostet.
+Claude Code im Browser, am Handy und in der Desktop-App: Chats wie in Claude
+Desktop (Modell, Denkaufwand, Berechtigungsmodus, Freigaben, Spezialisten,
+To-do-Listen), dazu Team-Auftraege (ein Orchestrator beauftragt Worker),
+Nutzung und Limits aller Konten, Serverlast, Notizen und ein Terminal mit
+Freigabe.
 
 ## Wozu
 
@@ -83,8 +85,8 @@ Benachrichtigungsanfragen ausschliesslich fuer die Herkunft des Daemons.
 Dieselbe Stelle setzt `HardwareAccelerationPolicy::Always` und
 `enable_webgl(true)`, weil `WEBKIT_DISABLE_DMABUF_RENDERER=1` (noetig gegen
 das leere Fenster unter Wayland/Hyprland) WebKit sonst die Grundlage nimmt,
-von sich aus einen beschleunigten Kontext fuer three.js im Vault-Tab
-anzulegen.
+von sich aus einen beschleunigten Kontext anzulegen (damals fuer die
+3D-Ansicht, die es nicht mehr gibt; die Einstellung schadet nicht).
 
 ### Umgebungsvariablen
 
@@ -102,7 +104,6 @@ anzulegen.
 | `PIPER_TIMEOUT_MS` | `20000` | wie lange auf Piper gewartet wird |
 | `WHISPER_HOST/PORT` | `127.0.0.1:10300` | Spracherkennung |
 | `WHISPER_TIMEOUT_MS` | `20000` | wie lange auf Whisper gewartet wird |
-| `COCKPIT_GESPRAECH_MODELL` | `claude-sonnet-5` | Modell fuer den Sprachgespraech-Agenten |
 | `COCKPIT_MCP_BROWSER` | — | ueberschreibt den Browser-MCP-Server |
 | `COCKPIT_KONTEN_DIR` | `~/.claude-konten` | Verzeichnis der Zusatzkonten (siehe unten) |
 
@@ -114,26 +115,43 @@ anzulegen.
 | `src/db.ts` | SQLite mit WAL, Backfill ab Sequenznummer, Aufräumen verwaister Läufe |
 | `src/normalisieren.ts` | SDK-Nachricht → Cockpit-Ereignis, defensiv gegen neue Varianten |
 | `src/protokoll.ts` | Vier-Fälle-Protokoll, Report-Typ, Blocker, Wiederholungserkennung |
-| `src/supervisor.ts` | Eine SDK-Session je Agent, Freigabe-Broker, Verbrauchszähler |
+| `src/supervisor.ts` | Eine SDK-Session je Agent, Freigabe-Broker, Verbrauchszähler, Kontowechsel |
 | `src/orchestrator.ts` | Runden, Fallauswertung, Leseanfragen, Stoppbedingungen |
 | `src/daemon.ts` | HTTP, WebSocket, REST |
-| `src/rollen.ts` | Fachrollen aus `rollen/*.md`: Modell, Werkzeuge, Prompt |
+| `src/nachlieferung.ts` | Senden an WebSocket-Klienten, Nachlieferung nach `folgen` |
+| `src/einstellungen.ts` | Einstellungen in der DB: Modell, Denkaufwand, Modus, Ordner, Spezialisten, Team |
+| `src/chatOptionen.ts` | Einstellungen + Wahl des Zuges → SDK-Optionen eines Chats |
+| `src/chatZuege.ts` | Buchfuehrung ueber laufende Chat-Zuege |
+| `src/freigaben.ts` | Entscheidung der Oberflaeche → Antwort an die SDK (immer erlauben, Rueckfragen, Plan) |
+| `src/chats.ts` | Index der Claude-Code-Sessions (FTS5), Fortsetzen, Verlauf lesen |
+| `src/nachrichten.ts` | Sitzungszeilen und Live-Ereignisse → Nachrichten der Chat-Ansicht |
+| `src/aufgaben.ts` | Was laeuft: Agenten, To-do-Listen, Spezialisten, Team-Stand |
+| `src/nutzung.ts` | Tokenverbrauch je Tag ueber alle Konten (Nutzungsraster) |
+| `src/rollen.ts` | Fachrollen aus `rollen/*.md`: Modell, Werkzeuge, Prompt; Spezialisten |
 | `src/mcp.ts` | Katalog der MCP-Server; der Browser laeuft ueber stdio |
-| `src/system.ts` | Auslastung beider Server: Beszel-Hub, `/proc` als Notbehelf |
-| `src/chats.ts` | Index der Claude-Code-Sessions, Volltextsuche ueber FTS5 |
-| `src/vault.ts` | Index des Obsidian-Vaults: Titel, Wikilinks, Tags |
+| `src/system.ts` | Auslastung beider Server: Beszel-Hub, `/proc` als Notbehelf, Verlauf 1 h |
+| `src/verzeichnisse.ts` | Ordner durchsuchen fuer die Projektwahl |
+| `src/vault.ts` | Ort und Muster des Obsidian-Vaults |
+| `src/notizen.ts` | Notizen durchsuchen und lesen |
+| `src/vaultZugriff.ts` | Lesezugriffe des Chat-Agenten im Vault ohne Freigabe |
 | `src/stimme.ts` | Sprachausgabe ueber Piper (Wyoming-Protokoll) |
 | `src/hoeren.ts` | Spracherkennung ueber Whisper (Wyoming-Protokoll) |
-| `src/gespraech.ts` | Sprachgespraech: werkzeugloser Antwort-Agent mit Gedaechtnis |
 | `src/wav.ts` | WAV-Kopf bauen und lesen |
 | `src/wyoming.ts` | Wyoming-Rahmen schreiben/zerlegen, ohne Netzwerk -- von hoeren.ts genutzt |
 | `src/audio.ts` | PCM auf 16 kHz resampeln |
 | `src/konsole.ts` | Befehle mit Freigabepflicht |
 | `src/konten.ts` | mehrere Claude-Code-Konten: Erkennung, Wahl, Sperrung bei Limit |
+| `src/kontenNutzung.ts` | Limits und Guthaben je Konto abfragen |
+| `src/discord.ts` | Status- und Freigabekanal ueber Discord |
+| `src/eingaben.ts`, `src/httpFehler.ts` | Pruefung von API-Eingaben, Statuscodes |
+| `web/index.html`, `web/app.js` | Geruest: Seitenleiste (am Handy Schublade), Router ueber den URL-Hash |
+| `web/ui/*.js` | Chat, Eingabe, Werkzeuge/Diff, Chatliste und die Bereiche |
+| `web/stil.css`, `web/bereiche.css` | Stil (dunkles Farbschema) |
 | `web/bus.js` | die eine WebSocket-Verbindung, Abonnements je Nachrichtentyp |
-| `web/tabs.js` | Tab-Registry und Router ueber den URL-Hash |
-| `web/tabs/*.js` | die fuenf Ansichten: Lauf, Chats, Vault, Konsole, Server |
-| `web/index.html` | Geruest, Kopfzeile, Stile |
+| `web/vendor/` | marked, DOMPurify, highlight.js -- erzeugt von `scripts/vendor.mjs` |
+
+Die Oberflaeche hat keinen Build-Schritt: der Daemon liefert `web/` so aus,
+wie es im Repo liegt.
 
 ## Das Protokoll
 
@@ -197,18 +215,18 @@ Token-Refresh) -- das Konto zaehlt dann als ungemessen (0 %), und es greift
 der Wechsel beim Limit. Laeuft ein Konto in ein Nutzungslimit, wird es bis zum
 gemessenen oder geschaetzten Reset gesperrt und der Agent macht per `resume`
 mit dem naechsten freien Konto weiter, statt in `waiting_ratelimit` zu parken
--- sichtbar als Protokollzeile im Lauf-Log. Erst wenn alle Konten gesperrt
+-- sichtbar als Hinweis im Chat. Erst wenn alle Konten gesperrt
 sind, gilt das alte Warteverhalten. `GET /api/konten` und `POST /api/konten`
-lesen bzw. setzen den Vorzug; Server-Tab und Zentrale zeigen je Konto Woche
-und 5 Stunden, den Modus (ausgeglichen/manuell) und wer als naechstes drankaeme.
+lesen bzw. setzen den Vorzug; der Bereich Nutzung zeigt je Konto Woche und
+5 Stunden, den Modus (ausgeglichen/manuell) und wer als naechstes drankaeme.
 
 ## Fachrollen
 
 `AgentRole` in `src/typen.ts` ist die **Stellung** im Lauf (orchestrator,
-worker, chat, subagent) -- daran haengt der Graph mit seinen drei Ebenen. Die
+worker, chat, subagent) -- danach ordnet der Bereich Aufgaben die Agenten. Die
 **Spezialisierung** steht daneben als `AgentState.fachrolle`. Waeren die
-Fachrollen in `AgentRole` gelandet, fielen sie alle in die Worker-Ebene und
-der Graph waere still falsch.
+Fachrollen in `AgentRole` gelandet, waere die Stellung eines Rechercheurs im
+Lauf nicht mehr ablesbar.
 
 | Rolle | Modell | Werkzeuge | Zweck |
 |---|---|---|---|
@@ -225,75 +243,59 @@ Je Auftrag, nicht je Antwort -- eine Runde darf einen Rechercheur und einen
 Coder gleichzeitig beschaeftigen. Fehlt die Zeile, gilt `coder`; damit laufen
 Auftraege aus der Zeit vor den Fachrollen unveraendert weiter.
 
-## Die Tabs
+## Die Oberflaeche
 
-| Tab | Was er zeigt |
+Links die Seitenleiste mit "Neuer Chat", der Chatliste (Suche) und den
+Bereichen; am Handy ist sie eine Schublade. Jeder Stand hat eine Adresse
+(`#/chat/<id>`, `#/nutzung`, `#/notizen/<id>` ...), Zurueck funktioniert.
+
+| Bereich | Was er zeigt |
 |---|---|
-| **Zentrale** | Wissenskern, Nutzungsfenster, Serverlast, Agenten, Auftrag starten, Sprachgespraech |
-| **Lauf** | Live-Log, Agentengraph, Zeitachse, Freigaben -- die urspruengliche Ansicht |
-| **Chats** | die Claude-Code-Sessions vom Desktop, durchsuchbar und lesbar |
-| **Vault** | Notizen und Agenten in einer 3D-Szene (three.js, fest eingelegt) |
-| **Konsole** | Befehle auf dem Server, jeder einzeln freizugeben |
-| **Server** | Auslastung beider Maschinen: CPU, Speicher, Platte, Temperatur |
+| **Chat** | Verlauf mit Markdown, Werkzeugzeilen, Diffs, To-do-Listen und Spezialisten; Eingabe mit Ordner, Modell, Denkaufwand, Modus und Mikrofon; Freigaben, Rueckfragen und Plan direkt im Chat |
+| **Aufgaben** | was laeuft: je Chat oder Team-Auftrag die Agenten, To-do-Listen, Spezialisten; Fragen des Orchestrators und Freigaben der Worker beantworten; Team-Auftrag starten |
+| **Nutzung** | Jahresraster, Kennzahlen, Rueckblick je Tag, Konten mit Limits, Reset, Prognose, Guthaben und Vorzug |
+| **Server** | Auslastung beider Maschinen mit Verlauf der letzten Stunde |
+| **Notizen** | Obsidian-Vault durchsuchen und lesen, Verweise und Rueckverweise |
+| **Terminal** | Befehle auf dem Server, jeder einzeln freizugeben |
+| **Einstellungen** | Vorgaben fuer Modell, Denkaufwand, Modus, Arbeitsordner, Spezialisten, Team, Sprache |
 
 Vault und Sessions kommen per Syncthing vom Desktop, beide als `receiveonly` --
 der Spiegel schreibt nie zurueck. Details in `deploy/stacks/README.md`.
 
-## Sprachgespräch
+Pruefen im Browser: `node scripts/oberflaeche-pruefen.mjs [url] [ansichten]`
+(1280 und 375 px, Konsolenfehler, Ueberbreite, Bilder nach
+`nachtschicht-bilder/`).
 
-Das Mikro in der Zentrale (`web/tabs/zentrale.js`, Sprachbereich unten) fuehrt
-ein echtes Gespraech, nicht nur eine Pegelanzeige:
+## Sprache
 
-1. Antippen startet die Aufnahme. Ein AudioWorklet (`web/hoerer-prozessor.js`,
-   Fallback ScriptProcessorNode) greift das Mikrofonsignal ab, das
-   `sprachpegel.js` fuer die Wellenform ohnehin offen haelt -- kein zweites
-   `getUserMedia()`. `web/hoeren.js` baut daraus 16-bit-PCM und ein WAV.
-   Bewusst kein `MediaRecorder` und keine Web-Speech-API: beide fehlen im
-   WebKitGTK der Tauri-Huelle, und die Web-Speech-API liefe ohnehin ueber
-   Googles Server.
-2. Die Aufnahme endet von selbst nach 1,2 s unter der Pegelschwelle, sobald
-   einmal Sprache erkannt wurde (Kunstpausen am Anfang brechen also nicht
-   sofort ab), spaetestens nach 60 s. Erneutes Antippen beendet sie sofort.
-3. Das WAV geht an `POST /api/hoeren`. `src/hoeren.ts` liest den WAV-Kopf
-   (`src/wav.ts`), resampelt bei Bedarf auf 16 kHz (`src/audio.ts`) und
-   schickt das PCM per Wyoming-Protokoll (`src/wyoming.ts`) an den
-   `whisper`-Container (`deploy/stacks/whisper.yml`, Modell `small-int8`,
-   Sprache `de`). Antwort: erkannter Text plus Dauer -- gemessen auf
-   servertwo rund 5,7-5,9 s fuer einen kurzen Satz (`base-int8` war mit
-   ~2,5 s schneller, verschluckte dabei aber Woerter wie "Wetter" und
-   "Orchestrator"; Begruendung der Wahl steht in `deploy/stacks/whisper.yml`).
-4. Der erkannte Text geht an `POST /api/gespraech`. `src/gespraech.ts` laesst
-   ihn ueber den Supervisor beantworten -- **ohne Werkzeuge** (`tools: []`),
-   mit einem kurzen deutschen Systemprompt fuer gesprochene Antworten (kein
-   Markdown, keine Aufzaehlungen, kein Code) und `COCKPIT_GESPRAECH_MODELL`
-   (Vorgabe `claude-sonnet-5`). Weil es ueber den Supervisor laeuft, greift
-   bei einem Nutzungslimit derselbe Kontowechsel wie ueberall sonst. Ohne
-   Werkzeuge gibt es nichts freizugeben -- kein Orchestrator-Lauf, keine
-   Freigabe-Anfrage.
-5. Die Antwort erscheint als Text im kleinen Verlauf unter der Sprachleiste
-   und wird ueber `stimme.sagen()` vorgelesen (Piper, mit Browserstimme als
-   Rueckfall) -- respektiert die vorhandene Stimmwahl: bei "stumm" bleibt es
-   bei Text.
+**Diktieren:** das Mikrofon in der Chat-Eingabe nimmt auf und schreibt den
+erkannten Text ins Eingabefeld (abschicken tut man selbst). Ein AudioWorklet
+(`web/hoerer-prozessor.js`, Fallback ScriptProcessorNode) greift das Signal
+ab, `web/hoeren.js` baut daraus 16-bit-PCM und ein WAV. Bewusst kein
+`MediaRecorder` und keine Web-Speech-API: beide fehlen im WebKitGTK der
+Tauri-Huelle, und die Web-Speech-API liefe ueber Googles Server. Die Aufnahme
+endet nach 1,2 s Stille, sobald einmal Sprache erkannt wurde, spaetestens
+nach 60 s. Das WAV geht an `POST /api/hoeren`; `src/hoeren.ts` resampelt bei
+Bedarf auf 16 kHz und schickt es per Wyoming-Protokoll an den
+`whisper`-Container (`deploy/stacks/whisper.yml`, Modell `small-int8`,
+Sprache `de`, rund 6 s fuer einen kurzen Satz).
 
-**Gedaechtnis:** `src/gespraech.ts` fuehrt die SDK-Session per `resume` fort;
-der Browser haelt die `sessionId` und schickt sie bei jeder Runde mit. Der
-Knopf "Neues Gespräch" verwirft sie -- die naechste Runde beginnt ohne
-Vorgeschichte. Auf dem Server steht dieselbe Session unter der Kennung
-`gespraech` wie eine Konsolen-Freigabe unter `konsole` -- kein echter Lauf in
-der Tabelle `runs`, taucht also nicht im Tab "Lauf" auf.
+**Sprachausgabe:** Piper (`POST /api/sprechen`, Browserstimme als Rueckfall)
+meldet je nach Stufe in den Einstellungen wartende Freigaben und Fragen; die
+Stufe gilt je Geraet.
 
-**Zustaende** im Sprachbereich: bereit -- hört zu -- versteht… -- denkt… --
-spricht -- bereit. Fehler werden benannt statt verschluckt: "Mikrofon nicht
-freigegeben", "Spracherkennung nicht erreichbar" (Whisper aus oder
-unerreichbar), "Antwort nicht bekommen".
+Das fruehere Sprachgespraech der Zentrale (werkzeugloser Antwort-Agent,
+`/api/gespraech`) ist mit der Zentrale weggefallen -- gesprochen wird jetzt
+in einen normalen Chat.
 
-## Die Konsole hat keine Shell im Netz
+## Das Terminal hat keine Shell im Netz
 
 Jeder Befehl geht durch denselben Freigabe-Broker wie ein Werkzeugaufruf eines
-Agenten: er wird angefragt, erscheint im Tab, laeuft erst nach einem
+Agenten: er wird angefragt, erscheint im Bereich Terminal, laeuft erst nach einem
 ausdruecklichen Ja und steht danach im selben Nachweis. Ein "immer erlauben"
-gibt es absichtlich nicht -- es wuerde genau das aushoehlen, wofuer der Tab so
-gebaut ist.
+gibt es absichtlich nicht -- es wuerde genau das aushoehlen, wofuer der Bereich so
+gebaut ist. Der Bereich Terminal zeigt die letzten 30 Befehle (`GET
+/api/konsole`).
 
 Dasselbe gilt fuer den Browser der Agenten: er haengt an der Fachrolle, laeuft
 je Sitzung in einem eigenen Container ueber `docker run --rm -i` und behaelt
@@ -303,35 +305,42 @@ kein Profil.
 
 | Endpunkt | Methode | Zweck |
 |---|---|---|
+| `/api/gesundheit` | GET | Status und letzter Limitstand |
 | `/api/laeufe` | GET | Liste der Läufe |
 | `/api/lauf/<id>?seit=<seq>` | GET | Agenten, Ereignisse ab Sequenznummer, offene Freigaben |
-| `/api/lauf` | POST | Einzelnen Chat-Agenten starten |
-| `/api/orchestrator` | POST | Orchestrator-Lauf starten |
-| `/api/freigabe` | POST | Offene Freigabe entscheiden |
-| `/api/abbrechen` | POST | Agent (`runId`, `agentId`) oder ganzen Lauf (`runId`) abbrechen; `ok` auch bei Einzellaeufen ohne Orchestrator, `gestoppt` = Zahl gestoppter Agenten |
-| `/api/gesundheit` | GET | Status und letzter Limitstand |
-| `/api/rollen` | GET | verfuegbare Fachrollen |
-| `/api/konten` | GET | Konten mit Anmelde-, Sperr-, Vorzugs- und Nutzungsstand, dazu `modus`, `naechstesKonto`, `abstandPunkte` |
+| `/api/chats?q=` | GET | Chats suchen |
+| `/api/chats` | POST | neuer Chat `{text, cwd?, modell?, aufwand?, berechtigung?}` -> `202 {id, laufId, cwd, startSeq}` |
+| `/api/chats/<id>` | GET | ein Chat als Nachrichten |
+| `/api/chats/<id>/weiter` | POST | weiterschreiben `{text, modell?, aufwand?, berechtigung?}` |
+| `/api/freigabe` | POST | Freigabe entscheiden `{id, erlaubt, immer?, antworten?, modus?, nachricht?}` |
+| `/api/abbrechen` | POST | Agent (`runId`, `agentId`) oder ganzen Lauf (`runId`) abbrechen |
+| `/api/orchestrator` | POST | Team-Auftrag starten |
+| `/api/orchestrator/antwort` | POST | Frage des Orchestrators beantworten `{runId, text}` |
+| `/api/aufgaben` | GET | laufende und kuerzliche Chats/Auftraege mit Agenten, To-dos, Spezialisten |
+| `/api/einstellungen` | GET, POST | Einstellungen lesen bzw. teilweise aendern |
+| `/api/verzeichnisse?pfad=` | GET | Ordner, Favoriten, zuletzt benutzte |
+| `/api/rollen` | GET | Fachrollen und Spezialisten |
+| `/api/konten` | GET | Konten mit Anmelde-, Sperr-, Vorzugs- und Nutzungsstand, Guthaben, Prognose |
 | `/api/konten` | POST | bevorzugtes Konto setzen (`name`, `null` hebt es auf) |
-| `/api/system` | GET | Auslastung beider Server |
-| `/api/chats?q=` | GET | Sessions suchen |
-| `/api/chats/<id>` | GET | eine Session als Beitraege |
-| `/api/vault/graph?run=<id>` | GET | Notizen, Verknuepfungen und Agenten |
-| `/api/konsole` | POST | Befehl anfragen (Freigabe noetig) |
+| `/api/nutzung` | GET | Tokens je Tag und Kennzahlen |
+| `/api/nutzung/tag?tag=` | GET | Sitzungen eines Tages mit Chat |
+| `/api/system` | GET | Auslastung beider Server, Verlauf 1 h |
+| `/api/notizen?q=` | GET | Notizen suchen (ohne `q` die neuesten) |
+| `/api/notizen/lesen?id=` | GET | eine Notiz mit Verweisen und Rueckverweisen |
+| `/api/konsole` | GET, POST | letzte Befehle bzw. Befehl anfragen (Freigabe noetig) |
 | `/api/sprechen` | POST | Text als WAV; 503, wenn Piper fehlt |
 | `/api/hoeren` | POST | WAV-Audio (Body) als Text erkennen; 503, wenn Whisper fehlt |
-| `/api/gespraech` | POST | Eine Runde Sprachgespraech: `{text, sessionId?, neu?}` -> `{text, sessionId}` |
+
+Ueber den WebSocket (`/ws`) kommen `ereignis`, `agent`, `delta` (Live-Text),
+`freigabe`, `aufgaben`, `chats`, `einstellungen`, `konsole`, `limit`,
+`system`, `orchestrator` und `lauf_ende`.
 
 ## Stand
 
-Alle geplanten Stufen sind umgesetzt: Umzug auf servertwo, Tab-Geruest und PWA,
-Server-Auslastung, Fachrollen, Vault-Graph, Chat-Verzeichnis, Sprachausgabe,
-Sprachgespraech (Spracherkennung + Antwort-Agent), Konsole mit Freigabe und
-der Browser fuer die Agenten.
+Umgebaut nach `UMBAU-PLAN.md` (September 2026): die Oberflaeche folgt Claude
+Desktop, die Zentrale mit Wissenskern, der Lauf-Graph und die alten Tabs sind
+entfernt. Fortschritt und offene Punkte stehen in `UMBAU-LOGBUCH.md`.
 
 Nicht verifiziert: ob die PWA sich im Handy-Chrome wirklich installieren laesst
-(der Service Worker scheitert im eingebauten Browser-Fenster), der
-Kaltstart der Autostart-Kette auf dem Desktop, und ein echtes
-Sprachgespraech ueber ein physisches Mikrofon -- getestet wurde die Kette
-End-zu-Ende mit einer per Piper erzeugten WAV-Datei anstelle einer echten
-Aufnahme (siehe Abschlussbericht).
+und ein Diktat ueber ein physisches Mikrofon (die Kette wurde mit einer per
+Piper erzeugten WAV-Datei geprueft).

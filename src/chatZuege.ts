@@ -17,7 +17,7 @@ type Zug = { startSeq: number; fertig: Promise<void> }
 
 /**
  * Status, in denen ein Agent nichts mehr tut -- nur noch auslaufen kann.
- * Dieselbe Liste, nach der web/tabs/chats.js das Pollen beendet und "Senden"
+ * Dieselbe Liste, nach der web/ui/chat.js den Zug beendet und "Senden"
  * wieder freigibt ('waiting_ratelimit': alle Konten gesperrt, Zug endet).
  */
 const ENDZUSTAENDE = new Set(['done', 'failed', 'stopped', 'waiting_ratelimit'])

@@ -78,8 +78,7 @@ export interface AgentStartOptionen {
    * Basis-Werkzeugmenge (SDK 'tools'). Anders als allowedTools NIMMT dies
    * Werkzeuge aus dem Modellkontext, statt sie nur freizugeben -- []
    * deaktiviert alle eingebauten Werkzeuge, der Agent sieht sie gar nicht
-   * erst. Fuers Sprachgespraech (gespraech.ts): kein Werkzeug, keine
-   * Freigabe noetig.
+   * erst. Derzeit setzt es kein Aufrufer (frueher das Sprachgespraech).
    */
   tools?: string[]
   /** Eigener Systemprompt, ersetzt die Vorgabe der CLI. */

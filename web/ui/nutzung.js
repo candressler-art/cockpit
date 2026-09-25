@@ -49,6 +49,17 @@ function resetText(ms) {
   return d.toLocaleDateString('de-DE', { day: 'numeric', month: 'short' })
 }
 
+/**
+ * Anteil (0..1) als ganze Prozent -- null heisst "keine Messung" und darf nie
+ * als 0 % erscheinen: ein abgelaufenes Token saehe sonst aus wie ein leeres Limit.
+ */
+export const anteilProzent = (anteil) => (anteil === null || anteil === undefined ? null : Math.round(anteil * 100))
+
+/** Woher die Zahlen eines Kontos stammen, oder dass es noch keine gibt. */
+export const messungText = (k) => (k.gemessenAm
+  ? `gemessen ${uhrzeit(k.gemessenAm)}${k.quelle === 'rate_limit_event' ? ' (aus einem Chat)' : ''}`
+  : 'noch nicht gemessen')
+
 function dauerText(ms) {
   const min = Math.max(0, Math.round(ms / 60000))
   if (min < 60) return `${min} Min.`
@@ -236,8 +247,7 @@ export function nutzungBauen() {
             ? 'Beim bisherigen Tempo reicht das Wochenlimit bis zum Reset.'
             : `Beim bisherigen Tempo ist das Wochenlimit ${resetText(k.wochePrognose.leerAm)} erreicht (in ${dauerText(k.wochePrognose.leerAm - jetzt)}).`))
       }
-      if (k.gemessenAm) zeilen.push(h('div.gemessen', {}, `gemessen ${uhrzeit(k.gemessenAm)}${k.quelle === 'rate_limit_event' ? ' (aus einem Chat)' : ''}`))
-      else zeilen.push(h('div.gemessen', {}, 'noch nicht gemessen'))
+      zeilen.push(h('div.gemessen', {}, messungText(k)))
       zeilen.push(guthabenZeile(d.guthaben?.[k.name]))
     } else {
       zeilen.push(h('div.leise.klein', {}, 'Auf dem Server mit ', h('code', {}, `CLAUDE_CONFIG_DIR=${k.configDir} claude /login`), ' anmelden.'))
@@ -256,7 +266,7 @@ export function nutzungBauen() {
   }
 
   function fensterZeile(name, anteil, resetAm) {
-    const p = anteil === null || anteil === undefined ? null : Math.round(anteil * 100)
+    const p = anteilProzent(anteil)
     const klasse = p === null ? '' : p >= 90 ? '.hoch' : p >= 70 ? '.mittel' : ''
     return h('div.fenster', {},
       h('span.fenster-name', {}, name),
