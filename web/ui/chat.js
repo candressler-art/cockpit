@@ -17,6 +17,7 @@ import { markdown } from './markdown.js'
 import { werkzeugZeichnen, rollenSetzen, todoListe } from './werkzeuge.js'
 import { aktuelleTodos } from './taskliste.js'
 import { eingabeBauen } from './eingabe.js'
+import { anhaengeTrennen, mitAnhaengen, istBild } from './anhangtext.js'
 import { freigabeKarteBauen, freigabeNormalisieren } from './freigabekarten.js'
 
 const ENDZUSTAENDE = new Set(['done', 'failed', 'stopped', 'waiting_ratelimit'])
@@ -262,7 +263,10 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
 
   // --- Senden / Anhalten ----------------------------------------------------
   async function senden(text, optionen) {
-    const vorlaeufig = { id: '', rolle: 'user', ts: Date.now(), bloecke: [{ typ: 'text', text }], modell: null, eltern: null, vorlaeufig: true }
+    // So, wie der Daemon den Prompt baut -- dann erkennt ereignisVerarbeiten
+    // die wiederholte Eingabe und nutzerBlase zeigt die Anhaenge gleich.
+    const prompt = mitAnhaengen(text, optionen.anhaenge ?? [])
+    const vorlaeufig = { id: '', rolle: 'user', ts: Date.now(), bloecke: [{ typ: 'text', text: prompt }], modell: null, eltern: null, vorlaeufig: true }
     if (!id) {
       const r = await api('/api/chats', { body: { text, ...optionen } })
       ladeNr++
@@ -400,11 +404,22 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
   }
 
   function nutzerBlase(n, bloecke) {
-    const text = bloecke.filter((b) => b.typ === 'text').map((b) => b.text).join('\n\n')
+    const { text, anhaenge } = anhaengeTrennen(bloecke.filter((b) => b.typ === 'text').map((b) => b.text).join('\n\n'))
     const bilder = bloecke.filter((b) => b.typ === 'bild').length
     return h('div.nutzer', {},
       h('div.blase', { title: uhrzeit(n.ts) }, text,
+        anhaenge.length ? h('div.blase-anhaenge', {}, ...anhaenge.map(anhangEl)) : null,
         bilder ? h('div.bild-hinweis', {}, `${bilder} Bild${bilder > 1 ? 'er' : ''} angehängt`) : null))
+  }
+
+  /** Bild als Vorschau, andere Dateien als Name -- beides oeffnet die Datei. */
+  function anhangEl(a) {
+    const url = bus.api(`/api/anhaenge/datei?pfad=${encodeURIComponent(a.pfad)}`)
+    if (istBild(a.name)) {
+      return h('a.blase-bild', { href: url, target: '_blank', rel: 'noopener', title: a.name },
+        h('img', { src: url, alt: a.name, loading: 'lazy' }))
+    }
+    return h('a.blase-datei', { href: url, title: a.pfad, download: a.name }, symbol('datei', 14), h('span', {}, a.name))
   }
 
   function hinweisEl(text, art = 'info') {

@@ -5,6 +5,13 @@
  */
 import { h, symbol, api, pfadKurz, melden, fehlerText } from './dom.js'
 import * as bus from '../bus.js'
+import { istBild } from './anhangtext.js'
+
+/** Wie src/anhaenge.ts -- vorher pruefen spart den Upload, der ohnehin abgelehnt wuerde. */
+const MAX_ANHANG_BYTES = 20 * 1024 * 1024
+const MAX_ANHAENGE = 10
+/** Nur Anhaenge, kein Text: damit der Agent weiss, was er tun soll. */
+const NUR_ANHANG_TEXT = 'Sieh dir die angehängten Dateien an.'
 
 /** Einstellungen + Auswahllisten aus /api/einstellungen, einmal geladen und bei WS-Aenderung nachgezogen. */
 let vorgaben = null
@@ -29,6 +36,8 @@ export function eingabeBauen(opt) {
   const wahl = { cwd: null, modell: null, aufwand: null, berechtigung: null }
   let ordnerFest = null // bei bestehenden Chats: der Ordner steht fest
   let laeuft = false
+  /** {name, groesse, pfad (nach dem Hochladen), fehler, vorschau (Object-URL bei Bildern)} */
+  let anhaenge = []
 
   const feld = h('textarea.eingabe-feld', {
     rows: 1, placeholder: 'Schreib Claude eine Nachricht …', 'aria-label': 'Nachricht',
@@ -39,6 +48,9 @@ export function eingabeBauen(opt) {
   const modellWahl = h('select.chip', { 'aria-label': 'Modell', title: 'Modell' })
   const aufwandWahl = h('select.chip', { 'aria-label': 'Denkaufwand', title: 'Denkaufwand' })
   const modusWahl = h('select.chip', { 'aria-label': 'Berechtigungen', title: 'Berechtigungen' })
+  const klammerKnopf = h('button.chip.rund', { type: 'button', title: 'Dateien anhängen (auch hineinziehen oder einfügen)', 'aria-label': 'Dateien anhängen' }, symbol('klammer', 15))
+  const dateiWahl = h('input', { type: 'file', multiple: true, hidden: true, tabindex: '-1' })
+  const anhangListe = h('div.eingabe-anhaenge', { hidden: true })
   const mikroKnopf = h('button.chip.rund', { type: 'button', title: 'Diktieren', 'aria-label': 'Diktieren' }, symbol('mikro', 15))
 
   // Am Handy passen vier Auswahlfelder nicht in eine Zeile. Dort stehen
@@ -48,10 +60,11 @@ export function eingabeBauen(opt) {
   const optionen = h('div.eingabe-optionen', {}, modellWahl, aufwandWahl, modusWahl)
   const el = h('div.eingabe', {},
     h('div.eingabe-rahmen', {},
+      anhangListe,
       feld,
       h('div.eingabe-leiste', {},
         ordnerKnopf, optionenKnopf, optionen,
-        h('span.spacer'), mikroKnopf, sendeKnopf)))
+        h('span.spacer'), klammerKnopf, dateiWahl, mikroKnopf, sendeKnopf)))
   optionenKnopf.addEventListener('click', () => {
     const auf = !el.classList.contains('optionen-offen')
     el.classList.toggle('optionen-offen', auf)
@@ -84,16 +97,88 @@ export function eingabeBauen(opt) {
   })
 
   function knopfZustand() {
-    const leer = !feld.value.trim()
+    const leer = !feld.value.trim() && !anhaenge.length
+    const laedt = anhaenge.some((a) => !a.pfad && !a.fehler)
     sendeKnopf.replaceChildren(symbol(laeuft && leer ? 'stopp' : 'senden', 18))
-    sendeKnopf.title = laeuft && leer ? 'Anhalten' : 'Senden (Enter)'
+    sendeKnopf.title = laeuft && leer ? 'Anhalten' : laedt ? 'Anhänge laden noch …' : 'Senden (Enter)'
     sendeKnopf.setAttribute('aria-label', sendeKnopf.title)
     sendeKnopf.classList.toggle('stopp', laeuft && leer)
-    sendeKnopf.disabled = !laeuft && leer
+    sendeKnopf.disabled = (!laeuft && leer) || (!leer && laedt)
   }
 
+  // --- Anhaenge -------------------------------------------------------------
+  // Jede Datei geht sofort an den Daemon (POST /api/anhaenge), beim Senden
+  // nur noch ihr Pfad. Der Agent liest sie dort mit Read (src/anhaenge.ts).
+  function anhaengeZeichnen() {
+    anhangListe.hidden = !anhaenge.length
+    anhangListe.replaceChildren(...anhaenge.map((a) => {
+      const weg = h('button.anhang-weg', { type: 'button', title: `${a.name} entfernen`, 'aria-label': `${a.name} entfernen` }, symbol('kreuz', 12))
+      weg.addEventListener('click', () => anhangEntfernen(a))
+      const zustand = a.fehler ? 'fehler' : a.pfad ? 'fertig' : 'laedt'
+      return h(`div.anhang.${zustand}`, { title: a.fehler ? `${a.name}: ${a.fehler}` : a.name },
+        a.vorschau ? h('img.anhang-bild', { src: a.vorschau, alt: '' }) : h('span.anhang-symbol', {}, symbol('datei', 16)),
+        h('span.anhang-name', {}, a.name),
+        a.fehler ? h('span.anhang-info', {}, 'Fehler') : !a.pfad ? h('span.anhang-info', {}, '…') : null,
+        weg)
+    }))
+    knopfZustand()
+  }
+  function anhangEntfernen(a) {
+    if (a.vorschau) URL.revokeObjectURL(a.vorschau)
+    anhaenge = anhaenge.filter((x) => x !== a)
+    anhaengeZeichnen()
+  }
+  function anhaengeLeeren() {
+    for (const a of anhaenge) if (a.vorschau) URL.revokeObjectURL(a.vorschau)
+    anhaenge = []
+    anhaengeZeichnen()
+  }
+  async function dateienHinzufuegen(dateien) {
+    for (const d of dateien) {
+      if (anhaenge.length >= MAX_ANHAENGE) { melden(`Höchstens ${MAX_ANHAENGE} Anhänge je Nachricht.`, 'info'); break }
+      // Eingefuegte Bildschirmfotos heissen im Browser nur "image.png".
+      const name = d.name || `bild.${(d.type.split('/')[1] || 'png').replace('jpeg', 'jpg')}`
+      const a = { name, groesse: d.size, pfad: null, fehler: null, vorschau: istBild(name) ? URL.createObjectURL(d) : null }
+      anhaenge.push(a)
+      if (d.size > MAX_ANHANG_BYTES) a.fehler = 'größer als 20 MB'
+      else if (!d.size) a.fehler = 'leer'
+      anhaengeZeichnen()
+      if (a.fehler) continue
+      fetch(bus.api(`/api/anhaenge?name=${encodeURIComponent(name)}`), { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: d })
+        .then(async (r) => {
+          const j = await r.json().catch(() => ({}))
+          if (!r.ok) throw new Error(j?.fehler ?? `HTTP ${r.status}`)
+          a.pfad = j.pfad
+        })
+        .catch((e) => { a.fehler = fehlerText(e) })
+        .finally(anhaengeZeichnen)
+    }
+  }
+  klammerKnopf.addEventListener('click', () => dateiWahl.click())
+  dateiWahl.addEventListener('change', () => { dateienHinzufuegen([...dateiWahl.files]); dateiWahl.value = '' })
+  feld.addEventListener('paste', (ev) => {
+    const dateien = [...(ev.clipboardData?.files ?? [])]
+    if (!dateien.length) return
+    ev.preventDefault()
+    dateienHinzufuegen(dateien)
+  })
+  // Hineinziehen: ueberall auf die Eingabe. Der Zaehler faengt dragleave ab,
+  // das beim Wechsel auf ein Kindelement feuert.
+  let ziehTiefe = 0
+  const zieheDateien = (ev) => [...(ev.dataTransfer?.types ?? [])].includes('Files')
+  el.addEventListener('dragenter', (ev) => { if (!zieheDateien(ev)) return; ev.preventDefault(); ziehTiefe++; el.classList.add('ziehen') })
+  el.addEventListener('dragover', (ev) => { if (zieheDateien(ev)) ev.preventDefault() })
+  el.addEventListener('dragleave', () => { if (ziehTiefe && !--ziehTiefe) el.classList.remove('ziehen') })
+  el.addEventListener('drop', (ev) => {
+    if (!zieheDateien(ev)) return
+    ev.preventDefault()
+    ziehTiefe = 0
+    el.classList.remove('ziehen')
+    dateienHinzufuegen([...ev.dataTransfer.files])
+  })
+
   async function senden() {
-    const text = feld.value.trim()
+    const text = feld.value.trim() || (anhaenge.length ? NUR_ANHANG_TEXT : '')
     if (!text) {
       if (laeuft) opt.beiStopp?.()
       return
@@ -102,17 +187,24 @@ export function eingabeBauen(opt) {
       melden('Claude arbeitet noch -- warte auf das Ende oder halte an.', 'info')
       return
     }
+    if (anhaenge.some((a) => !a.pfad && !a.fehler)) return
+    if (anhaenge.some((a) => a.fehler)) {
+      melden('Ein Anhang ist fehlgeschlagen -- entferne ihn, bevor du sendest.', 'fehler')
+      return
+    }
     const w = vorgaben?.werte ?? {}
     const optionen = {
       cwd: ordnerFest ? undefined : (wahl.cwd ?? w.arbeitsordner),
       modell: modellWahl.value || undefined,
       aufwand: aufwandWahl.disabled ? undefined : (aufwandWahl.value || undefined),
       berechtigung: modusWahl.value || undefined,
+      ...(anhaenge.length ? { anhaenge: anhaenge.map((a) => a.pfad) } : {}),
     }
     sendeKnopf.disabled = true
     try {
       await opt.beiSenden(text, optionen)
       feld.value = ''
+      anhaengeLeeren()
       groesse()
     } catch (e) {
       melden(`Senden fehlgeschlagen: ${fehlerText(e)}`, 'fehler')

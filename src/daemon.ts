@@ -5,7 +5,7 @@
 import { createServer } from 'node:http'
 import { readFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
-import { join, extname, resolve as pfadAuflösen } from 'node:path'
+import { join, dirname, extname, resolve as pfadAuflösen } from 'node:path'
 import { WebSocketServer, type WebSocket } from 'ws'
 import { CockpitDb } from './db.js'
 import { Supervisor } from './supervisor.js'
@@ -27,6 +27,7 @@ import { AufgabenSammler, AUFGABEN_FENSTER_MS, agentAusZeile } from './aufgaben.
 import { vaultDa, VAULT } from './vault.js'
 import { notizenLaden, notizenSuchen, notizLesen } from './notizen.js'
 import { vaultZugriffErlaubt } from './vaultZugriff.js'
+import { anhangSpeichern, anhaengePruefen, promptMitAnhaengen, alteAnhaengeLoeschen, MAX_ANHANG_BYTES } from './anhaenge.js'
 import { konsoleBefehl, verlaufAufnehmen, type KonsoleEintrag } from './konsole.js'
 import { cwdPruefen, folgenLesen, zahlLesen } from './eingaben.js'
 import { nutzungAbfragen, guthabenAbfragen, type Guthaben } from './kontenNutzung.js'
@@ -45,6 +46,8 @@ import { kontenLesen } from './konten.js'
 const PORT = Number(process.env.COCKPIT_PORT ?? 8765)
 const HOST = process.env.COCKPIT_HOST ?? '127.0.0.1'
 const DB_PFAD = process.env.COCKPIT_DB ?? join(process.env.HOME ?? '.', '.cockpit', 'cockpit.db')
+/** In den Chat gezogene Dateien (anhaenge.ts), neben der DB. */
+const ANHAENGE = process.env.COCKPIT_ANHAENGE ?? join(dirname(DB_PFAD), 'anhaenge')
 const WEB_DIR = pfadAuflösen(import.meta.dirname, '..', 'web')
 
 const db = new CockpitDb(DB_PFAD)
@@ -326,7 +329,9 @@ function chatZugStarten(
         liveText: opt.liveText,
         ...(existsSync(VAULT) ? { zusatzVerzeichnisse: [VAULT] } : {}),
         systemPromptZusatz: opt.systemPromptZusatz,
-        autoErlauben: (toolName, input) => vaultZugriffErlaubt(toolName, input, VAULT),
+        // Vault und Anhaenge nur lesen -- dafuer keine Freigabe.
+        autoErlauben: (toolName, input) =>
+          vaultZugriffErlaubt(toolName, input, VAULT) || vaultZugriffErlaubt(toolName, input, ANHAENGE),
       })
       const neueSession = supervisor.agentenListe(f.laufId).find((a) => a.agentId === 'chat')?.sessionId
       if (neueSession) fortsetzungAktualisieren(DB_PFAD, id, neueSession)
@@ -469,6 +474,13 @@ const nutzungPuls = (): Promise<unknown> =>
 void nutzungPuls()
 setInterval(() => void nutzungPuls(), 10 * 60_000).unref()
 
+// Anhaenge nach ANHANG_TAGE wegraeumen -- beim Start und einmal am Tag.
+const anhaengeAufraeumen = (): void => {
+  try { alteAnhaengeLoeschen(ANHAENGE) } catch (e) { console.warn('[anhaenge] Aufraeumen fehlgeschlagen:', String(e)) }
+}
+anhaengeAufraeumen()
+setInterval(anhaengeAufraeumen, 24 * 60 * 60_000).unref()
+
 // --- HTTP --------------------------------------------------------------------
 
 /**
@@ -505,6 +517,11 @@ function herkunftErlaubt(origin: string | undefined, host: string | undefined): 
     return false
   }
   return false
+}
+
+/** Anhaenge, die der Browser als Bild zeigen darf. */
+const ANHANG_BILDER: Record<string, string> = {
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp',
 }
 
 const MIME: Record<string, string> = {
@@ -798,6 +815,8 @@ const server = createServer(async (req, res) => {
       const k = (await koerperLesen(req)) as Record<string, unknown> | null
       const text = (textFeld(k, 'text') ?? '').trim()
       if (!text) return json(400, { fehler: 'text fehlt' })
+      const anh = anhaengePruefen(ANHAENGE, k?.anhaenge)
+      if ('fehler' in anh) return json(400, { fehler: anh.fehler })
       const besetzt = () => json(409, { fehler: 'Diese Sitzung schreibt gerade schon weiter' })
       // Direkt nach "Stoppen" steht der Agent schon auf 'stopped', laeuft
       // aber noch aus -- dann kurz warten statt 409 (siehe chatZuege.ts).
@@ -824,7 +843,7 @@ const server = createServer(async (req, res) => {
       // Ohne Sitzungsdatei (erster Zug eines neuen Chats ist vorher
       // gescheitert) wird neu begonnen, unter derselben Id.
       const neu = !kopf && !sitzungVorhanden(DB_PFAD, id)
-      const startSeq = chatZugStarten(id, f, text, kopf?.titel ?? text.slice(0, 50), opt.optionen, neu)
+      const startSeq = chatZugStarten(id, f, promptMitAnhaengen(text, anh.pfade), kopf?.titel ?? text.slice(0, 50), opt.optionen, neu)
       return json(202, { laufId: f.laufId, cwd: f.cwd, startSeq })
     }
 
@@ -858,6 +877,8 @@ const server = createServer(async (req, res) => {
       const k = (await koerperLesen(req)) as Record<string, unknown> | null
       const text = (textFeld(k, 'text') ?? '').trim()
       if (!text) return json(400, { fehler: 'text fehlt' })
+      const anh = anhaengePruefen(ANHAENGE, k?.anhaenge)
+      if ('fehler' in anh) return json(400, { fehler: anh.fehler })
       const cwd = textFeld(k, 'cwd') || einstellungen.lesen().arbeitsordner
       const schlecht = cwdPruefen(cwd)
       if (schlecht) return json(400, { fehler: schlecht })
@@ -868,7 +889,7 @@ const server = createServer(async (req, res) => {
       const id = randomUUID()
       chatRegistrieren(DB_PFAD, id, `chat-${id}`, cwd)
       const f: Fortsetzung = { laufId: `chat-${id}`, aktuelleSession: id, cwd }
-      const startSeq = chatZugStarten(id, f, text, text.slice(0, 50), opt.optionen, true)
+      const startSeq = chatZugStarten(id, f, promptMitAnhaengen(text, anh.pfade), text.slice(0, 50), opt.optionen, true)
       return json(202, { id, laufId: f.laufId, cwd, startSeq })
     }
 
@@ -940,6 +961,36 @@ const server = createServer(async (req, res) => {
         // Serverstimme gerade nicht da ist, und auf seine eigene umschalten.
         // Stumm bleiben waere die schlechteste Antwort.
         return json(503, { fehler: String(e) })
+      }
+    }
+
+    // Vorschau eines Anhangs im Chatverlauf. Nur Dateien im Anhang-Ordner;
+    // Bilder als Bild, alles andere (auch SVG -- koennte Skript enthalten)
+    // nur zum Herunterladen.
+    if (pfad === '/api/anhaenge/datei' && req.method === 'GET') {
+      const anh = anhaengePruefen(ANHAENGE, [url.searchParams.get('pfad') ?? ''])
+      const datei = 'pfade' in anh ? anh.pfade[0] : undefined
+      if (!datei) return json(404, { fehler: 'Anhang nicht gefunden' })
+      const bildTyp = ANHANG_BILDER[extname(datei).toLowerCase()]
+      res.writeHead(200, {
+        'content-type': bildTyp ?? 'application/octet-stream',
+        'x-content-type-options': 'nosniff',
+        'cache-control': 'private, max-age=86400',
+        ...(bildTyp ? {} : { 'content-disposition': 'attachment' }),
+      })
+      return res.end(await readFile(datei))
+    }
+
+    // Datei fuer den Chat ablegen: roher Koerper, Name in ?name=. Die Antwort
+    // traegt den Pfad, den die Oberflaeche beim Senden in `anhaenge` mitgibt.
+    if (pfad === '/api/anhaenge' && req.method === 'POST') {
+      const daten = await koerperBinaerLesen(req, MAX_ANHANG_BYTES)
+      if (!daten) return json(413, { fehler: `Datei leer oder groesser als ${MAX_ANHANG_BYTES / 1024 / 1024} MB` })
+      try {
+        return json(201, anhangSpeichern(ANHAENGE, url.searchParams.get('name') ?? '', daten))
+      } catch (e) {
+        console.warn('[anhaenge] Speichern fehlgeschlagen:', String(e))
+        return json(500, { fehler: 'Datei konnte nicht gespeichert werden' })
       }
     }
 

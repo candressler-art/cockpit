@@ -309,10 +309,12 @@ kein Profil.
 | `/api/laeufe` | GET | Liste der Läufe |
 | `/api/lauf/<id>?seit=<seq>` | GET | Agenten, Ereignisse ab Sequenznummer, offene Freigaben |
 | `/api/chats?q=` | GET | Chats suchen |
-| `/api/chats` | POST | neuer Chat `{text, cwd?, modell?, aufwand?, berechtigung?}` -> `202 {id, laufId, cwd, startSeq}` |
+| `/api/chats` | POST | neuer Chat `{text, cwd?, modell?, aufwand?, berechtigung?, anhaenge?}` -> `202 {id, laufId, cwd, startSeq}` |
 | `/api/chats/<id>` | GET | ein Chat als Nachrichten |
 | `/api/chats/<id>` | PATCH | nur Cockpit-Eintrag: `{titel?, angeheftet?, ausgeblendet?}` (Titel leer = Original; ausgeblendet bis zur naechsten Aktivitaet) |
-| `/api/chats/<id>/weiter` | POST | weiterschreiben `{text, modell?, aufwand?, berechtigung?}` |
+| `/api/chats/<id>/weiter` | POST | weiterschreiben `{text, modell?, aufwand?, berechtigung?, anhaenge?}` |
+| `/api/anhaenge?name=` | POST | Datei (roher Body, bis 20 MB) fuer den Chat ablegen -> `201 {pfad, name, groesse}`; `pfad` beim Senden in `anhaenge` mitgeben. Der Prompt nennt die Pfade, der Agent liest sie mit Read ohne Freigabe (`src/anhaenge.ts`). Ablage neben der DB (`anhaenge/<Datum>/`, `COCKPIT_ANHAENGE`), nach 30 Tagen geloescht |
+| `/api/anhaenge/datei?pfad=` | GET | Anhang fuer die Vorschau im Chat (nur Bilder inline, sonst Download) |
 | `/api/freigabe` | POST | Freigabe entscheiden `{id, erlaubt, immer?, antworten?, modus?, nachricht?}` |
 | `/api/abbrechen` | POST | Agent (`runId`, `agentId`) oder ganzen Lauf (`runId`) abbrechen |
 | `/api/orchestrator` | POST | Team-Auftrag starten |

@@ -19,6 +19,7 @@ import { homedir } from 'node:os'
 import { USAGE_LIMIT_ERROR_PREFIXES } from '@anthropic-ai/claude-agent-sdk'
 import { verlaufNormalisieren, type Nachricht } from './nachrichten.js'
 import { DB_WARTEN_MS } from './db.js'
+import { ANHANG_KOPF } from './anhaenge.js'
 
 const SPIEGEL = process.env.COCKPIT_SESSIONS ?? '/var/lib/cockpit/sessions-desktop'
 
@@ -169,7 +170,8 @@ interface Gelesen {
  * mitten im Satz bleibt.
  */
 export function titelAusEingabe(eingabe: string): string {
-  return eingabe
+  // Der Anhang-Block (Pfade der angehaengten Dateien) gehoert nicht in den Titel.
+  return (eingabe.split(`\n\n${ANHANG_KOPF}`)[0] ?? '')
     .replace(/\s+/g, ' ')
     .trim()
     .replace(/^(?:(?:#{1,6}|>|[-*+]|\d+[.)])(?:\s+|$))+/, '')
