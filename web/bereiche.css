@@ -173,6 +173,77 @@ a.tag-eintrag:hover { background: var(--surface0); }
 .balken-spur > span { display: block; height: 100%; background: var(--akzent); border-radius: 4px; }
 .balken-wert { text-align: right; font: 12px var(--mono); color: var(--subtext); }
 
+/* --- Aufgaben ------------------------------------------------------------------ */
+/* Kopf bleibt am Handy stehen (ohne Titel, den zeigt die obere Leiste): der Team-Knopf braucht einen Platz. */
+.a-kopfzeile { display: flex; align-items: center; gap: 12px; }
+.a-abschnitt { font-size: 13px; font-weight: 600; color: var(--subtext); text-transform: uppercase; letter-spacing: .04em; margin: 18px 0 8px; display: flex; align-items: center; gap: 8px; }
+.a-abschnitt .leise { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.a-zahl { font-size: 11.5px; background: var(--surface0); color: var(--text); border-radius: 10px; padding: 0 7px; letter-spacing: 0; }
+.a-leer { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; color: var(--overlay); padding: 44px 16px 28px; }
+.a-leer strong { color: var(--text); font-weight: 500; }
+.a-leer span { max-width: 440px; font-size: 13.5px; }
+.a-lauf { border: 1px solid var(--surface0); border-radius: var(--radius); background: var(--mantle); padding: 12px 16px; margin-bottom: 12px; min-width: 0; }
+.a-lauf.wartet { border-color: color-mix(in srgb, var(--lila) 45%, var(--surface0)); }
+details.a-lauf { padding: 0; }
+details.a-lauf > :not(summary) { margin-left: 16px; margin-right: 16px; }
+details.a-lauf[open] { padding-bottom: 12px; }
+details.a-lauf > summary { padding: 10px 16px; cursor: pointer; list-style: none; }
+details.a-lauf > summary::-webkit-details-marker { display: none; }
+.a-pfeil { color: var(--overlay); transition: transform .15s; flex: 0 0 auto; }
+details[open] > summary .a-pfeil { transform: rotate(90deg); }
+.a-kopf { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.a-titel-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.a-titel { font-weight: 500; font-size: 14.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.a-meta { font-size: 12.5px; color: var(--overlay); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.a-punkt { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; background: var(--surface2); }
+.a-punkt.laeuft { background: var(--akzent); animation: puls 1.4s ease-in-out infinite; }
+.a-punkt.wartet { background: var(--lila); animation: puls 1.4s ease-in-out infinite; }
+.a-punkt.ok { background: var(--gruen); }
+.a-punkt.fehler { background: var(--rot); }
+.a-zustand.laeuft { color: var(--akzent); }
+.a-zustand.wartet { color: var(--lila); }
+.a-zustand.ok { color: var(--gruen); }
+.a-zustand.fehler { color: var(--rot); }
+.a-stand { font-size: 13.5px; margin: 10px 0 0; color: var(--subtext); }
+.a-frage { margin: 10px 0 0; display: flex; flex-direction: column; gap: 8px; }
+.a-frage .frage-text { white-space: pre-wrap; }
+.a-agenten { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.a-agent, .a-spezialist { border-left: 3px solid var(--rolle); background: var(--base); border-radius: 8px; padding: 8px 10px; min-width: 0; }
+.a-agent.ok, .a-agent.aus, .a-spezialist.ok { opacity: .8; }
+.a-agent-kopf { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.a-agent-kopf .rollen-sym { width: 24px; height: 24px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 7px; background: var(--surface0); color: var(--rolle); font-size: 13px; }
+.a-agent-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.a-agent-name { font-size: 14px; font-weight: 500; display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+.a-auftrag { font-weight: 400; color: var(--subtext); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.a-jetzt { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 13px; color: var(--subtext); min-width: 0; }
+.a-jetzt-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; font-family: var(--mono); font-size: 12.5px; }
+.a-hinweis.wartet { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 8px; font-size: 13px; color: var(--orange); }
+.a-ohne-liste { font-size: 13px; margin-top: 8px; }
+.a-todo { margin-top: 8px; }
+.a-todo .todos { padding: 4px 0 0; }
+.a-todo-kopf { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--overlay); text-transform: uppercase; letter-spacing: .04em; }
+.a-fortschritt { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; text-transform: none; font: 12px var(--mono); }
+.a-balken { width: 64px; height: 5px; background: var(--surface0); border-radius: 3px; overflow: hidden; }
+.a-balken > span { display: block; height: 100%; background: var(--gruen); }
+.a-spezialisten { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.a-agent .a-spezialist { background: var(--mantle); }
+.a-knoepfe { display: flex; gap: 8px; justify-content: flex-end; margin-top: 10px; flex-wrap: wrap; }
+.knopf-schmal { padding: 5px 10px; font-size: 13px; text-decoration: none; color: var(--text); }
+.knopf-schmal.gefahr { color: var(--rot); }
+
+.team-form { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+.team-form .n-karte-kopf { margin-bottom: 0; }
+.team-erklaerung { margin: 0; font-size: 13.5px; color: var(--overlay); }
+.team-zeile { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.team-zeile .ordner-knopf { min-width: 0; }
+.team-mehr summary { cursor: pointer; font-size: 13.5px; color: var(--subtext); }
+.team-felder { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
+.team-feld { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--overlay); min-width: 0; }
+.team-feld .auswahl, .team-feld .zahl-feld { width: 100%; min-width: 0; }
+.team-vorgabe { font-size: 12.5px; margin-top: 8px; }
+.team-note:empty { display: none; }
+.team-knoepfe { display: flex; justify-content: flex-end; gap: 8px; }
+
 @media (max-width: 1000px) {
   .kacheln { grid-template-columns: repeat(3, 1fr); }
   .zwei-spalten { grid-template-columns: 1fr; gap: 0; }
@@ -183,6 +254,13 @@ a.tag-eintrag:hover { background: var(--surface0); }
   .kachel-wert { font-size: 19px; }
   .n-karte { padding: 12px; }
   .konten { grid-template-columns: 1fr; }
+  .team-felder { grid-template-columns: 1fr 1fr; }
+  .a-kopfzeile { justify-content: flex-end; padding-bottom: 0; }
+  .a-lauf { padding: 10px 12px; }
+  details.a-lauf { padding: 0; }
+  details.a-lauf > summary { padding: 10px 12px; }
+  details.a-lauf > :not(summary) { margin-left: 12px; margin-right: 12px; }
+  .a-agent-name { flex-direction: column; gap: 0; }
   /* Am Handy laedt der Bereich beim Oeffnen neu -- der Knopf schwebte nur ueber den Kacheln. */
   .nur-desktop { display: none !important; }
 }

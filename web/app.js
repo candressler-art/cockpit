@@ -20,6 +20,7 @@ import { chatBereich } from './ui/chat.js'
 import { chatListeBauen } from './ui/chatliste.js'
 import { einstellungenBauen } from './ui/einstellungen.js'
 import { nutzungBauen } from './ui/nutzung.js'
+import { aufgabenBauen } from './ui/aufgaben.js'
 
 await bus.basisErmitteln()
 // Die Stimmstufe ist je Geraet (localStorage) -- vor der ersten Meldung lesen.
@@ -36,7 +37,7 @@ const platzhalter = (titel, text) => () => {
 }
 
 const BEREICHE = [
-  { id: 'aufgaben', titel: 'Aufgaben', symbol: 'aufgaben', bauen: platzhalter('Aufgaben', 'Hier siehst du bald, welcher Agent gerade was tut und was er noch vorhat.') },
+  { id: 'aufgaben', titel: 'Aufgaben', symbol: 'aufgaben', bauen: aufgabenBauen },
   { id: 'nutzung', titel: 'Nutzung', symbol: 'nutzung', bauen: nutzungBauen },
   { id: 'server', titel: 'Server', symbol: 'server', bauen: platzhalter('Server', 'Auslastung beider Server.') },
   { id: 'notizen', titel: 'Notizen', symbol: 'notizen', bauen: platzhalter('Notizen', 'Den Obsidian-Vault durchsuchen und lesen.') },

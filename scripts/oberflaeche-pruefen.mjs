@@ -14,7 +14,10 @@ const nur = process.argv[3]?.split(',')
 const ordner = join(import.meta.dirname, '..', 'nachtschicht-bilder')
 mkdirSync(ordner, { recursive: true })
 
-// [name, hash, optional: Aktion nach dem Laden]
+import { aufgabenVoll as AUFGABEN_VOLL_BAUEN } from './aufgaben-attrappe.mjs'
+const aufgabenVoll = (s) => s.route('**/api/aufgaben', (r) => r.fulfill({ json: AUFGABEN_VOLL_BAUEN() }))
+
+// [name, hash, optional: Aktion nach dem Laden, optional: Vorbereitung vor dem Laden]
 const ANSICHTEN = [
   ['neu', '#/chat'],
   ['chat', '#/chat/', async (s, breite) => {
@@ -37,6 +40,14 @@ const ANSICHTEN = [
     if (breite < 760) await s.locator('#seiteAuf').click()
   }],
   ['aufgaben', '#/aufgaben'],
+  ['aufgaben-voll', '#/aufgaben', async (s) => {
+    await s.locator('details.a-lauf summary').first().click()
+  }, aufgabenVoll],
+  ['aufgaben-team', '#/aufgaben', async (s) => {
+    await s.locator('.bereich-kopf .knopf.primaer').click()
+    await s.locator('.team-mehr summary').click()
+  }],
+  ['aufgaben-fehler', '#/aufgaben', null, (s) => s.route('**/api/aufgaben', (r) => r.fulfill({ status: 500, json: { fehler: 'Datenbank gesperrt' } }))],
   ['nutzung', '#/nutzung'],
   ['server', '#/server'],
   ['notizen', '#/notizen'],
@@ -48,7 +59,7 @@ const browser = await chromium.launch()
 let fehler = 0
 for (const [breite, hoehe] of [[1280, 800], [375, 740]]) {
   const kontext = await browser.newContext({ viewport: { width: breite, height: hoehe }, deviceScaleFactor: 1, hasTouch: breite < 760, isMobile: breite < 760 })
-  for (const [name, hash, aktion] of ANSICHTEN) {
+  for (const [name, hash, aktion, vorher] of ANSICHTEN) {
     if (nur && !nur.includes(name)) continue
     const s = await kontext.newPage()
     const meldungen = []
@@ -56,6 +67,7 @@ for (const [breite, hoehe] of [[1280, 800], [375, 740]]) {
     s.on('pageerror', (e) => meldungen.push(`Ausnahme: ${e.message}`))
     s.on('requestfailed', (r) => meldungen.push(`Anfrage fehlgeschlagen: ${r.url()} ${r.failure()?.errorText}`))
     try {
+      if (vorher) await vorher(s)
       await s.goto(`${basis}/${hash}`, { waitUntil: 'networkidle' })
       if (aktion) await aktion(s, breite)
       await s.waitForTimeout(500)
@@ -66,7 +78,8 @@ for (const [breite, hoehe] of [[1280, 800], [375, 740]]) {
     const ueber = await s.evaluate(() => document.documentElement.scrollWidth - innerWidth)
     if (ueber > 0) meldungen.push(`Seite ${ueber}px breiter als der Bildschirm`)
     await s.screenshot({ path: join(ordner, `${name}-${breite}.png`), fullPage: process.env.GANZ === '1' })
-    const echteFehler = meldungen.filter((m) => !m.startsWith('warning'))
+    // In den *-fehler-Ansichten ist die 500-Antwort gewollt -- der Browser meldet sie trotzdem.
+    const echteFehler = meldungen.filter((m) => !m.startsWith('warning') && !(name.endsWith('-fehler') && /status of 500/.test(m)))
     fehler += echteFehler.length
     console.log(`${echteFehler.length ? 'FEHLER' : 'ok    '} ${name} @${breite}${meldungen.length ? `\n        ${meldungen.join('\n        ')}` : ''}`)
     await s.close()

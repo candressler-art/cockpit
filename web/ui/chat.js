@@ -16,6 +16,7 @@ import { h, symbol, api, leeren, uhrzeit, pfadKurz, modellName, melden, fehlerTe
 import { markdown } from './markdown.js'
 import { werkzeugZeichnen, rollenSetzen } from './werkzeuge.js'
 import { eingabeBauen } from './eingabe.js'
+import { freigabeKarteBauen, freigabeNormalisieren } from './freigabekarten.js'
 
 const ENDZUSTAENDE = new Set(['done', 'failed', 'stopped', 'waiting_ratelimit'])
 
@@ -475,14 +476,7 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
       if (freigaben.delete(String(f.id))) freigabenZeichnen()
       return
     }
-    const norm = {
-      id: String(f.id),
-      toolName: f.toolName ?? f.tool_name,
-      // Aus der DB (GET /api/lauf) kommt input als JSON-Text, ueber den Bus als Objekt.
-      input: typeof f.input === 'string' ? safeJson(f.input) : (f.input ?? {}),
-      immerMoeglich: Boolean(f.immerMoeglich),
-      agentId: f.agentId ?? f.agent_id,
-    }
+    const norm = freigabeNormalisieren(f)
     freigaben.set(norm.id, norm)
     freigabenZeichnen()
     nachUnten(true)
@@ -505,89 +499,7 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
   }
 
   function freigabeKarte(f) {
-    const karte = h('div.freigabe-karte')
-    const vonSub = f.agentId && f.agentId !== 'chat'
-    if (f.toolName === 'AskUserQuestion') return frageKarte(f, karte)
-    if (f.toolName === 'ExitPlanMode') {
-      karte.classList.add('plan')
-      karte.append(
-        h('div.freigabe-kopf', {}, symbol('aufgaben', 16), h('strong', {}, 'Claude schlägt einen Plan vor')),
-        h('div.plan-text', {}, markdown(String(f.input?.plan ?? ''))),
-        h('div.freigabe-knoepfe', {},
-          h('button.knopf.primaer', { type: 'button', onclick: () => entscheiden(f, { erlaubt: true, modus: 'acceptEdits' }, karte) }, 'Umsetzen (Änderungen automatisch)'),
-          h('button.knopf', { type: 'button', onclick: () => entscheiden(f, { erlaubt: true, modus: 'default' }, karte) }, 'Umsetzen (nachfragen)'),
-          h('button.knopf', { type: 'button', onclick: () => weiterPlanen(f, karte) }, 'Weiter planen')))
-      return karte
-    }
-    const vorschau = werkzeugZeichnen({ typ: 'werkzeug', id: `f-${f.id}`, name: f.toolName, eingabe: f.input ?? {} }, null, {})
-    if (vorschau.tagName === 'DETAILS') { vorschau.open = true; vorschau.dispatchEvent(new Event('toggle')) }
-    karte.append(
-      h('div.freigabe-kopf', {}, symbol('schild', 16),
-        h('strong', {}, `Claude möchte ${werkzeugVerb(f.toolName)}`),
-        vonSub ? h('span.leise', {}, ` (Spezialist)`) : null),
-      vorschau,
-      h('div.freigabe-knoepfe', {},
-        h('button.knopf.primaer', { type: 'button', onclick: () => entscheiden(f, { erlaubt: true }, karte) }, 'Erlauben'),
-        f.immerMoeglich ? h('button.knopf', { type: 'button', title: 'Für den Rest dieses Chats nicht mehr fragen', onclick: () => entscheiden(f, { erlaubt: true, immer: true }, karte) }, 'Immer erlauben') : null,
-        h('button.knopf.gefahr', { type: 'button', onclick: () => entscheiden(f, { erlaubt: false }, karte) }, 'Ablehnen')))
-    return karte
-  }
-
-  function weiterPlanen(f, karte) {
-    const feld = h('textarea.eingabe-klein', { rows: 2, placeholder: 'Was soll am Plan anders werden? (optional)' })
-    const knoepfe = karte.querySelector('.freigabe-knoepfe')
-    knoepfe.replaceWith(h('div.plan-rueckmeldung', {}, feld,
-      h('div.freigabe-knoepfe', {},
-        h('button.knopf.primaer', { type: 'button', onclick: () => entscheiden(f, { erlaubt: false, nachricht: feld.value.trim() || undefined }, karte) }, 'Zurück an Claude'),
-        h('button.knopf', { type: 'button', onclick: () => freigabenZeichnen() }, 'Abbrechen'))))
-    feld.focus()
-  }
-
-  function frageKarte(f, karte) {
-    const fragen = Array.isArray(f.input?.questions) ? f.input.questions : []
-    const antworten = {}
-    karte.classList.add('frage')
-    karte.append(h('div.freigabe-kopf', {}, symbol('frage', 16), h('strong', {}, fragen.length > 1 ? 'Claude hat Rückfragen' : 'Claude hat eine Rückfrage')))
-    const pruefen = () => { los.disabled = fragen.some((q) => !antworten[q.question]) }
-    for (const q of fragen) {
-      const gruppe = h('div.frage-gruppe', {}, h('div.frage-text', {}, q.question))
-      const multi = Boolean(q.multiSelect)
-      const gewaehlt = new Set()
-      const andere = h('input.eingabe-klein', { type: 'text', placeholder: 'Andere Antwort …' })
-      const setzen = () => {
-        const werte = [...gewaehlt]
-        if (andere.value.trim()) werte.push(andere.value.trim())
-        antworten[q.question] = werte.join(', ')
-        pruefen()
-      }
-      for (const o of Array.isArray(q.options) ? q.options : []) {
-        const b = h('button.option', { type: 'button', 'aria-pressed': 'false' },
-          h('span.option-label', {}, o.label), o.description ? h('span.option-text', {}, o.description) : null)
-        b.addEventListener('click', () => {
-          if (!multi) {
-            gewaehlt.clear()
-            andere.value = ''
-            for (const x of gruppe.querySelectorAll('.option')) x.setAttribute('aria-pressed', 'false')
-          }
-          if (gewaehlt.has(o.label)) { gewaehlt.delete(o.label); b.setAttribute('aria-pressed', 'false') } else { gewaehlt.add(o.label); b.setAttribute('aria-pressed', 'true') }
-          setzen()
-        })
-        gruppe.append(b)
-      }
-      andere.addEventListener('input', () => {
-        if (!multi && andere.value.trim()) {
-          gewaehlt.clear()
-          for (const x of gruppe.querySelectorAll('.option')) x.setAttribute('aria-pressed', 'false')
-        }
-        setzen()
-      })
-      gruppe.append(andere)
-      karte.append(gruppe)
-    }
-    const los = h('button.knopf.primaer', { type: 'button', disabled: true, onclick: () => entscheiden(f, { erlaubt: true, antworten }, karte) }, 'Antworten')
-    karte.append(h('div.freigabe-knoepfe', {}, los,
-      h('button.knopf', { type: 'button', onclick: () => entscheiden(f, { erlaubt: false }, karte) }, 'Nicht beantworten')))
-    return karte
+    return freigabeKarteBauen(f, { entscheiden, neuZeichnen: freigabenZeichnen })
   }
 
   // Esc haelt an -- wie in Claude Code. Nur, wenn kein Dialog offen ist.
@@ -597,15 +509,3 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
 
   return { el, zeigen, aktuelleId: () => id }
 }
-
-function werkzeugVerb(name) {
-  return {
-    Bash: 'einen Befehl ausführen', Edit: 'eine Datei ändern', MultiEdit: 'eine Datei ändern', Write: 'eine Datei schreiben',
-    WebFetch: 'eine Webseite abrufen', WebSearch: 'im Web suchen', NotebookEdit: 'ein Notebook ändern',
-  }[name] ?? `${name} benutzen`
-}
-
-function safeJson(t) {
-  try { return JSON.parse(t) } catch { return {} }
-}
-
