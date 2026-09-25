@@ -30,24 +30,24 @@ export interface Auswahl<T extends string> {
  * merken.
  */
 export const MODELLE: Auswahl<string>[] = [
-  { id: 'claude-opus-5-5', name: 'Opus 5.5', hinweis: 'Staerkstes Modell -- fuer anspruchsvolle Arbeit' },
-  { id: 'claude-sonnet-5', name: 'Sonnet 5', hinweis: 'Schnell und stark fuer die meisten Aufgaben' },
-  { id: 'claude-haiku-4-5-20251001', name: 'Haiku 4.5', hinweis: 'Am schnellsten, fuer einfache Aufgaben' },
+  { id: 'claude-opus-5-5', name: 'Opus 5.5', hinweis: 'Stärkstes Modell -- für anspruchsvolle Arbeit' },
+  { id: 'claude-sonnet-5', name: 'Sonnet 5', hinweis: 'Schnell und stark für die meisten Aufgaben' },
+  { id: 'claude-haiku-4-5-20251001', name: 'Haiku 4.5', hinweis: 'Am schnellsten, für einfache Aufgaben' },
 ]
 
 export const AUFWAENDE: Auswahl<Aufwand>[] = [
   { id: 'low', name: 'Niedrig', hinweis: 'Kaum Nachdenken, schnellste Antworten' },
   { id: 'medium', name: 'Mittel', hinweis: 'Etwas Nachdenken' },
-  { id: 'high', name: 'Hoch', hinweis: 'Gruendliches Nachdenken (Vorgabe von Claude Code)' },
-  { id: 'xhigh', name: 'Sehr hoch', hinweis: 'Noch tiefer, dauert laenger' },
-  { id: 'max', name: 'Maximal', hinweis: 'So viel Nachdenken wie moeglich' },
+  { id: 'high', name: 'Hoch', hinweis: 'Gründliches Nachdenken (Vorgabe von Claude Code)' },
+  { id: 'xhigh', name: 'Sehr hoch', hinweis: 'Noch tiefer, dauert länger' },
+  { id: 'max', name: 'Maximal', hinweis: 'So viel Nachdenken wie möglich' },
 ]
 
 export const BERECHTIGUNGEN: Auswahl<Berechtigung>[] = [
-  { id: 'default', name: 'Nachfragen', hinweis: 'Vor Aenderungen und Befehlen um Erlaubnis fragen' },
-  { id: 'acceptEdits', name: 'Aenderungen automatisch', hinweis: 'Dateiaenderungen ohne Rueckfrage, Befehle nur mit Erlaubnis' },
-  { id: 'plan', name: 'Nur planen', hinweis: 'Liest und plant, aendert nichts, bis du den Plan annimmst' },
-  { id: 'bypassPermissions', name: 'Alles erlauben', hinweis: 'Keine Rueckfragen -- nur fuer vertraute Aufgaben' },
+  { id: 'default', name: 'Nachfragen', hinweis: 'Vor Änderungen und Befehlen um Erlaubnis fragen' },
+  { id: 'acceptEdits', name: 'Änderungen automatisch', hinweis: 'Dateiänderungen ohne Rückfrage, Befehle nur mit Erlaubnis' },
+  { id: 'plan', name: 'Nur planen', hinweis: 'Liest und plant, ändert nichts, bis du den Plan annimmst' },
+  { id: 'bypassPermissions', name: 'Alles erlauben', hinweis: 'Keine Rückfragen -- nur für vertraute Aufgaben' },
 ]
 
 export interface TeamEinstellungen {

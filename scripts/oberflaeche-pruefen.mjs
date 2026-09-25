@@ -65,7 +65,7 @@ for (const [breite, hoehe] of [[1280, 800], [375, 740]]) {
     // Waagrecht darf nichts ueberstehen -- am Handy der haeufigste Fehler.
     const ueber = await s.evaluate(() => document.documentElement.scrollWidth - innerWidth)
     if (ueber > 0) meldungen.push(`Seite ${ueber}px breiter als der Bildschirm`)
-    await s.screenshot({ path: join(ordner, `${name}-${breite}.png`) })
+    await s.screenshot({ path: join(ordner, `${name}-${breite}.png`), fullPage: process.env.GANZ === '1' })
     const echteFehler = meldungen.filter((m) => !m.startsWith('warning'))
     fehler += echteFehler.length
     console.log(`${echteFehler.length ? 'FEHLER' : 'ok    '} ${name} @${breite}${meldungen.length ? `\n        ${meldungen.join('\n        ')}` : ''}`)

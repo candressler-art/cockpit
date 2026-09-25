@@ -18,8 +18,11 @@ import * as stimme from './stimme.js'
 import { h, symbol, api, leeren } from './ui/dom.js'
 import { chatBereich } from './ui/chat.js'
 import { chatListeBauen } from './ui/chatliste.js'
+import { einstellungenBauen } from './ui/einstellungen.js'
 
 await bus.basisErmitteln()
+// Die Stimmstufe ist je Geraet (localStorage) -- vor der ersten Meldung lesen.
+stimme.stufeLaden()
 
 // --- Bereiche -----------------------------------------------------------------
 // bauen() erst beim ersten Anzeigen: ein Bereich, den niemand oeffnet, kostet
@@ -37,7 +40,7 @@ const BEREICHE = [
   { id: 'server', titel: 'Server', symbol: 'server', bauen: platzhalter('Server', 'Auslastung beider Server.') },
   { id: 'notizen', titel: 'Notizen', symbol: 'notizen', bauen: platzhalter('Notizen', 'Den Obsidian-Vault durchsuchen und lesen.') },
   { id: 'terminal', titel: 'Terminal', symbol: 'terminal', bauen: platzhalter('Terminal', 'Befehle mit Freigabe.') },
-  { id: 'einstellungen', titel: 'Einstellungen', symbol: 'einstellungen', bauen: platzhalter('Einstellungen', 'Modell, Denken, Berechtigungen, Spezialisten, Konten, Stimme.') },
+  { id: 'einstellungen', titel: 'Einstellungen', symbol: 'einstellungen', bauen: einstellungenBauen },
 ]
 const bereichNach = new Map(BEREICHE.map((b) => [b.id, b]))
 const gebaut = new Map()
