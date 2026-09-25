@@ -20,8 +20,10 @@ export const rolle = (id) => rollen.get(id) ?? null
 const s = (v) => (typeof v === 'string' ? v : v == null ? '' : JSON.stringify(v, null, 2))
 const dateiname = (p) => String(p ?? '').split('/').filter(Boolean).pop() ?? ''
 
+const AUFGABE_STATUS = { completed: 'Aufgabe erledigt', in_progress: 'Aufgabe begonnen', pending: 'Aufgabe offen', deleted: 'Aufgabe entfernt' }
+
 /** Kurzbeschreibung je Werkzeug: [Symbol, Titel, Ziel]. */
-function kopfDaten(name, e) {
+function kopfDaten(name, e, namen = null) {
   switch (name) {
     case 'Bash': return ['terminal', e.description || 'Befehl', e.command]
     case 'BashOutput': return ['terminal', 'Ausgabe lesen', e.bash_id]
@@ -35,6 +37,12 @@ function kopfDaten(name, e) {
     case 'WebSearch': return ['welt', 'Websuche', e.query]
     case 'WebFetch': return ['welt', 'Webseite gelesen', e.url]
     case 'TodoWrite': return ['aufgaben', 'To-do-Liste', '']
+    // Neuere CLI: Punkt fuer Punkt. Der Titel steht nur beim Anlegen, danach
+    // die Nummer -- namen (taskliste.js) loest sie auf.
+    case 'TaskCreate': return ['aufgaben', 'Aufgabe angelegt', e.subject]
+    case 'TaskUpdate': return ['aufgaben', AUFGABE_STATUS[e.status] ?? 'Aufgabe geändert', namen?.get(String(e.taskId)) ?? `#${e.taskId ?? '?'}`]
+    case 'TaskGet': return ['aufgaben', 'Aufgabe angesehen', namen?.get(String(e.taskId)) ?? `#${e.taskId ?? '?'}`]
+    case 'TaskList': return ['aufgaben', 'Aufgaben angesehen', '']
     case 'Skill': return ['stern', 'Skill', e.skill ?? e.command]
     case 'ToolSearch': return ['suche', 'Werkzeuge gesucht', e.query]
     case 'ExitPlanMode': return ['aufgaben', 'Plan', '']
@@ -52,14 +60,15 @@ function kopfDaten(name, e) {
  * Einen Werkzeugaufruf zeichnen.
  * @param w      Block {typ:'werkzeug', id, name, eingabe}
  * @param erg    Block {typ:'ergebnis', text, fehler} oder null (laeuft noch)
- * @param opt    { laeuft, unter: Nachrichten des Subagenten, zeichneUnter(nachrichten) }
+ * @param opt    { laeuft, unter: Nachrichten des Subagenten, zeichneUnter(nachrichten),
+ *                 aufgabenNamen: Nummer -> Titel der Task-Liste (taskliste.js) }
  */
 export function werkzeugZeichnen(w, erg, opt = {}) {
   const e = w.eingabe ?? {}
   if (w.name === 'Agent' || w.name === 'Task') return agentKarte(w, erg, opt)
   if (w.name === 'TodoWrite') return todoKarte(e)
 
-  const [sym, titel, ziel] = kopfDaten(w.name, e)
+  const [sym, titel, ziel] = kopfDaten(w.name, e, opt.aufgabenNamen)
   const zustand = erg ? (erg.fehler ? 'fehler' : 'ok') : opt.laeuft ? 'laeuft' : 'offen'
   const d = h(`details.werkzeug.${zustand}`)
   d.append(h('summary', {},

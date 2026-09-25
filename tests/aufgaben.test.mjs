@@ -112,5 +112,43 @@ pruefe('DB-Zeile -> Kurzform', z.runId === 'r' && z.startedAt === 5 && z.endedAt
   pruefe('Chat hat keinen Team-Stand', s.liste([agent('chat-x', 'chat', 'running')], J)[0].team === null)
 }
 
+// --- Aufgabenliste der neueren CLI: TaskCreate/TaskUpdate statt TodoWrite ---
+// Gefunden im Ende-zu-Ende-Test: Claude Code bietet TodoWrite nicht mehr an,
+// sondern legt Punkte einzeln an (Nummer steht erst im Ergebnis) und
+// aendert sie per taskId.
+{
+  const t = new AufgabenSammler()
+  const tu = (id, name, input, parent = null) => ev('chat-t', 'chat', 'tool_use', `ruft ${name}`, [{ type: 'tool_use', id, name, input }], parent)
+  const tr = (id, text, fehler = false, parent = null) => ev('chat-t', 'chat', 'tool_result', 'x', [{ type: 'tool_result', tool_use_id: id, content: [{ type: 'text', text }], is_error: fehler }], parent)
+  t.ereignis(tu('c1', 'TaskCreate', { subject: 'Lesen', activeForm: 'Lese' }))
+  pruefe('TaskCreate: Punkt erst mit dem Ergebnis', t.liste([agent('chat-t', 'chat', 'running')], J)[0].agenten[0].todos === null)
+  pruefe('TaskCreate-Ergebnis meldet Aenderung', t.ereignis(tr('c1', 'Task #1 created successfully: Lesen')))
+  t.ereignis(tu('c2', 'TaskCreate', { subject: 'Schreiben' }))
+  t.ereignis(tr('c2', 'Task #2 created successfully: Schreiben'))
+  t.ereignis(tu('c3', 'TaskCreate', { subject: 'Abgelehnt' }))
+  t.ereignis(tr('c3', 'Permission denied', true))
+  pruefe('TaskUpdate meldet Aenderung', t.ereignis(tu('u1', 'TaskUpdate', { taskId: '1', status: 'in_progress' })))
+  let td = t.liste([agent('chat-t', 'chat', 'running')], J)[0].agenten[0].todos
+  pruefe('Task-Liste: zwei Punkte, fehlgeschlagener fehlt', td?.length === 2 && td[1].inhalt === 'Schreiben')
+  pruefe('Task-Liste: Status und Verlaufsform', td[0].status === 'in_progress' && td[0].aktiv === 'Lese' && td[1].status === 'pending')
+  t.ereignis(tu('u2', 'TaskUpdate', { taskId: '1', status: 'completed' }))
+  t.ereignis(tu('u3', 'TaskUpdate', { taskId: '2', status: 'deleted' }))
+  t.ereignis(tu('u4', 'TaskUpdate', { taskId: '99', status: 'completed' }))
+  td = t.liste([agent('chat-t', 'chat', 'running')], J)[0].agenten[0].todos
+  pruefe('Task-Liste: erledigt und geloescht', td.length === 1 && td[0].status === 'completed')
+  // Ohne Nummer im Ergebnis zaehlt die Reihenfolge (wie die CLI nummeriert).
+  t.ereignis(tu('c4', 'TaskCreate', { subject: 'Ohne Nummer' }))
+  t.ereignis(tr('c4', 'ok'))
+  t.ereignis(tu('u5', 'TaskUpdate', { taskId: '3', subject: 'Umbenannt' }))
+  td = t.liste([agent('chat-t', 'chat', 'running')], J)[0].agenten[0].todos
+  pruefe('Task-Liste: Nummer aus Reihenfolge, Umbenennen', td.length === 2 && td[1].inhalt === 'Umbenannt')
+  // Ein Spezialist fuehrt seine eigene Liste.
+  t.ereignis(tu('s1', 'Agent', { subagent_type: 'pruefer', description: 'x', prompt: 'p' }))
+  t.ereignis(tu('c5', 'TaskCreate', { subject: 'Sub-Punkt' }, 's1'))
+  t.ereignis(tr('c5', 'Task #1 created successfully: Sub-Punkt', false, 's1'))
+  const ag = t.liste([agent('chat-t', 'chat', 'running')], J)[0].agenten[0]
+  pruefe('Task-Liste des Spezialisten getrennt', ag.spezialisten[0].todos?.[0]?.inhalt === 'Sub-Punkt' && ag.todos.length === 2)
+}
+
 console.log(`\n${ok}/${gesamt} Pruefungen bestanden`)
 if (ok !== gesamt) process.exit(1)

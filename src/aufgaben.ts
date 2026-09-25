@@ -3,7 +3,7 @@
 // Taetigkeit.
 //
 // Warum kein eigener To-do-Agent: jeder Agent fuehrt seine Liste selbst mit
-// TodoWrite (der Chat-Systemprompt verlangt das, siehe chatOptionen.ts). Das
+// TodoWrite bzw. TaskCreate/TaskUpdate (der Chat-Systemprompt verlangt das, siehe chatOptionen.ts). Das
 // ist genauer als eine Liste, die ein zweiter Agent von aussen nachfuehrt,
 // und kostet keinen einzigen Token extra -- die Liste steht ohnehin in den
 // Ereignissen. Hier wird sie nur eingesammelt.
@@ -102,6 +102,65 @@ interface Eintrag {
   letzteTaetigkeit: Taetigkeit | null
   spezialisten: Map<string, Spezialist>
   zuletzt: number
+  /** Task-Listen (TaskCreate/TaskUpdate): '' fuer den Agenten selbst, sonst je Spezialist. */
+  tasks: Map<string, TaskBuch>
+}
+
+/**
+ * Aufgabenliste der neueren CLI: statt TodoWrite mit der ganzen Liste legt
+ * Claude Punkte einzeln an (TaskCreate) und aendert sie per Nummer
+ * (TaskUpdate). Die Nummer steht erst im Ergebnis ("Task #3 created ...") --
+ * deshalb zaehlt ein Punkt erst, wenn das Ergebnis da ist; ein abgelehnter
+ * Aufruf legt so auch nichts an. Fehlt die Nummer, zaehlt die Reihenfolge,
+ * wie die CLI selbst nummeriert.
+ */
+export class TaskBuch {
+  private punkte = new Map<string, Todo>()
+  private angefragt = new Map<string, { inhalt: string; aktiv: string | null }>()
+  private zaehler = 0
+
+  anlegen(toolUseId: string, input: unknown): void {
+    const r = (input ?? {}) as Record<string, unknown>
+    const inhalt = typeof r.subject === 'string' ? r.subject.trim() : ''
+    if (inhalt) this.angefragt.set(toolUseId, { inhalt, aktiv: typeof r.activeForm === 'string' ? r.activeForm : null })
+  }
+
+  /** Ergebnis eines TaskCreate. true, wenn ein Punkt dazukam. */
+  ergebnis(toolUseId: string, text: string, fehler: boolean): boolean {
+    const a = this.angefragt.get(toolUseId)
+    if (!a) return false
+    this.angefragt.delete(toolUseId)
+    if (fehler) return false
+    const nr = /Task #(\w+)/.exec(text)?.[1]
+    const id = nr ?? String(this.zaehler + 1)
+    if (/^\d+$/.test(id)) this.zaehler = Math.max(this.zaehler, Number(id))
+    this.punkte.set(id, { inhalt: a.inhalt, status: 'pending', aktiv: a.aktiv })
+    return true
+  }
+
+  aendern(input: unknown): boolean {
+    const r = (input ?? {}) as Record<string, unknown>
+    const id = String(r.taskId ?? '')
+    const p = this.punkte.get(id)
+    if (!p) return false
+    if (r.status === 'deleted') return this.punkte.delete(id)
+    if (r.status === 'pending' || r.status === 'in_progress' || r.status === 'completed') p.status = r.status
+    if (typeof r.subject === 'string' && r.subject.trim()) p.inhalt = r.subject.trim()
+    if (typeof r.activeForm === 'string') p.aktiv = r.activeForm
+    return true
+  }
+
+  todos(): Todo[] | null {
+    return this.punkte.size ? [...this.punkte.values()].map((t) => ({ ...t })) : null
+  }
+}
+
+/** Text eines tool_result-Blocks (String oder Liste von Textbloecken). */
+function ergebnisText(b: Record<string, unknown>): string {
+  const c = b.content
+  if (typeof c === 'string') return c
+  if (!Array.isArray(c)) return ''
+  return c.map((x) => (x && typeof x === 'object' && typeof (x as { text?: unknown }).text === 'string' ? (x as { text: string }).text : '')).join('\n')
 }
 
 function todosLesen(input: unknown): Todo[] | null {
@@ -162,7 +221,7 @@ export class AufgabenSammler {
     const k = `${runId}::${agentId}`
     let e = this.eintraege.get(k)
     if (!e) {
-      e = { todos: null, letzteTaetigkeit: null, spezialisten: new Map(), zuletzt: 0 }
+      e = { todos: null, letzteTaetigkeit: null, spezialisten: new Map(), zuletzt: 0, tasks: new Map() }
       this.eintraege.set(k, e)
     }
     return e
@@ -179,6 +238,20 @@ export class AufgabenSammler {
     // Ereignisse eines Subagenten tragen die tool_use-Id seines Aufrufs.
     const sub = ev.parentToolUseId ? e.spezialisten.get(ev.parentToolUseId) ?? null : null
     let geaendert = false
+    // Task-Liste des Agenten bzw. des Spezialisten, von dem das Ereignis stammt.
+    const taskSchluessel = ev.parentToolUseId ?? ''
+    const taskBuch = (): TaskBuch => {
+      let t = e.tasks.get(taskSchluessel)
+      if (!t) e.tasks.set(taskSchluessel, (t = new TaskBuch()))
+      return t
+    }
+    const taskListeSetzen = (): boolean => {
+      const todos = taskBuch().todos()
+      if (sub) sub.todos = todos
+      else if (!ev.parentToolUseId) e.todos = todos
+      else return false
+      return true
+    }
 
     if (TAETIGKEIT.has(ev.kind)) {
       const t = { text: ev.summary, ts: ev.ts }
@@ -189,7 +262,11 @@ export class AufgabenSammler {
     if (ev.kind === 'tool_use') {
       for (const b of bloecke(ev.payload)) {
         if (b.type !== 'tool_use') continue
-        if (b.name === 'TodoWrite') {
+        if (b.name === 'TaskCreate' && typeof b.id === 'string') {
+          taskBuch().anlegen(b.id, b.input)
+        } else if (b.name === 'TaskUpdate') {
+          if (taskBuch().aendern(b.input)) geaendert = taskListeSetzen() || geaendert
+        } else if (b.name === 'TodoWrite') {
           const todos = todosLesen(b.input)
           if (todos) {
             if (sub) sub.todos = todos
@@ -213,9 +290,14 @@ export class AufgabenSammler {
       }
     }
 
-    if (ev.kind === 'tool_result' && !ev.parentToolUseId) {
+    if (ev.kind === 'tool_result') {
       for (const b of bloecke(ev.payload)) {
         if (b.type !== 'tool_result' || typeof b.tool_use_id !== 'string') continue
+        if (taskBuch().ergebnis(b.tool_use_id, ergebnisText(b), b.is_error === true)) {
+          geaendert = taskListeSetzen() || geaendert
+          continue
+        }
+        if (ev.parentToolUseId) continue
         const s = e.spezialisten.get(b.tool_use_id)
         if (s && s.status === 'laeuft') {
           s.status = b.is_error === true ? 'fehler' : 'fertig'

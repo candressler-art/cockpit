@@ -296,6 +296,8 @@ pre.diff { white-space: pre; overflow-wrap: normal; }
 .live-denken { display: flex; gap: 8px; font-size: 13px; color: var(--overlay); font-style: italic; }
 .live-denken .sym { margin-top: 3px; }
 .arbeitet { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--subtext); }
+.live-todos { margin-top: 6px; border: 1px solid var(--surface0); border-radius: 10px; background: var(--mantle); max-width: 520px; }
+.live-todos .todos { padding: 8px 12px; }
 .stopp-text { margin-left: auto; border: 1px solid var(--surface0); }
 
 /* Freigaben */

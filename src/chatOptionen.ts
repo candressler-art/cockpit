@@ -37,7 +37,7 @@ export function kenntAufwand(modell: string): boolean {
 
 /**
  * Zusatz zum claude_code-Systemprompt fuer Chats (Plan: "Spezialisten und
- * To-do-Listen"). Die Hinweise zu TodoWrite und Spezialisten sind der Grund,
+ * To-do-Listen"). Die Hinweise zur To-do-Liste und zu Spezialisten sind der Grund,
  * warum die Oberflaeche ueberhaupt Checklisten und Spezialisten-Karten zeigen
  * kann -- ohne sie nutzt das Modell beides nur selten.
  */
@@ -45,8 +45,10 @@ export function chatSystemZusatz(vault: string | null, spezialisten: boolean): s
   const teile = [
     'Du arbeitest im Cockpit, Cans Oberflaeche fuer Claude Code. Antworte auf Deutsch, ' +
       'wenn Can Deutsch schreibt.',
-    'Lege bei jeder Aufgabe mit mehr als einem Schritt zuerst mit TodoWrite eine ' +
-      'To-do-Liste an und halte sie waehrend der Arbeit aktuell -- Can sieht sie als Checkliste.',
+    'Lege bei jeder Aufgabe mit mehr als einem Schritt zuerst eine To-do-Liste an ' +
+      '(TaskCreate je Punkt, bzw. TodoWrite, falls es das gibt) und halte sie waehrend der ' +
+      'Arbeit aktuell: Punkt auf in_progress, sobald du ihn beginnst, auf completed, sobald ' +
+      'er fertig ist -- Can sieht sie als Checkliste.',
   ]
   if (spezialisten) {
     teile.push(

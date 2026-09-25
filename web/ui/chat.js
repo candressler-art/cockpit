@@ -14,7 +14,8 @@
 import * as bus from '../bus.js'
 import { h, symbol, api, leeren, uhrzeit, pfadKurz, modellName, melden, fehlerText } from './dom.js'
 import { markdown } from './markdown.js'
-import { werkzeugZeichnen, rollenSetzen } from './werkzeuge.js'
+import { werkzeugZeichnen, rollenSetzen, todoListe } from './werkzeuge.js'
+import { aktuelleTodos } from './taskliste.js'
 import { eingabeBauen } from './eingabe.js'
 import { freigabeKarteBauen, freigabeNormalisieren } from './freigabekarten.js'
 
@@ -25,6 +26,7 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
   let id = null          // Session-Id; null = neuer, noch leerer Chat
   let kopf = null
   let laufId = null
+  let todoStand = { todos: null, namen: new Map() } // aktuelle To-do-Liste (taskliste.js)
   let laeuft = false
   let nachrichten = []
   let ids = new Set()
@@ -333,6 +335,7 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
     for (const d of verlaufEl.querySelectorAll('details[data-schluessel]')) {
       if (d.open) offen.add(d.dataset.schluessel); else offen.delete(d.dataset.schluessel)
     }
+    todoStand = aktuelleTodos(nachrichten)
     const ergebnisse = new Map()
     const unter = new Map()
     const haupt = []
@@ -405,6 +408,7 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
           laeuft: laeuft && !erg,
           unter: unter.get(b.id) ?? [],
           zeichneUnter: (liste) => unterZeichnen(liste, ergebnisse, unter),
+          aufgabenNamen: todoStand.namen,
         })
         if (w.tagName === 'DETAILS') {
           w.dataset.schluessel = b.id
@@ -453,21 +457,16 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
       h('span', {}, STATUS_TEXT[status] ?? 'Claude arbeitet …'),
       todo ? h('span.leise', {}, ` · ${todo.fertig}/${todo.gesamt} erledigt`) : null,
       h('button.knopf-klein.stopp-text', { type: 'button', onclick: anhalten, title: 'Anhalten (Esc)' }, symbol('stopp', 12), 'Anhalten')))
+    // Die Liste selbst nur, solange noch etwas offen ist: TaskCreate/TaskUpdate
+    // zeigen im Verlauf nur einzelne Zeilen, das Ganze sieht man sonst nirgends.
+    if (todo && todo.fertig < todo.gesamt) teile.push(h('div.live-todos', {}, todoListe(todoStand.todos)))
     leeren(liveEl, teile)
     nachUnten()
   }
 
   function letzteTodos() {
-    for (let i = nachrichten.length - 1; i >= 0; i--) {
-      const n = nachrichten[i]
-      if (n.eltern) continue
-      const b = [...n.bloecke].reverse().find((x) => x.typ === 'werkzeug' && x.name === 'TodoWrite')
-      if (b) {
-        const t = Array.isArray(b.eingabe?.todos) ? b.eingabe.todos : []
-        return { fertig: t.filter((x) => x.status === 'completed').length, gesamt: t.length }
-      }
-    }
-    return null
+    const t = todoStand.todos
+    return t ? { fertig: t.filter((x) => x.status === 'completed').length, gesamt: t.length } : null
   }
 
   // --- Freigaben ------------------------------------------------------------
