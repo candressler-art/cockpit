@@ -20,7 +20,13 @@
   mit "immer erlauben", Antworten auf Rueckfragen, Plan annehmen);
   **`/api/aufgaben`** (To-do-Listen und Spezialisten aller Agenten);
   **Nutzungsguthaben** in `/api/konten` (nur Anzeige).
-- **Du musst pruefen** (nach dem Ausrollen): ein echter Chat am Handy und
+- **Neu seit dem Ausrollen (D11, noch nicht live):** Benachrichtigungen
+  (Einstellungen > "Stimme und Benachrichtigungen", je Geraet einschalten):
+  Chat fertig/Fehler, Freigabe, Rueckfrage, Plan, Team-Auftrag -- nur wenn
+  du nicht ins Cockpit schaust; Klick oeffnet den Chat. Dazu "(1) Cockpit"
+  im Tab-Titel. Chat-Titel ohne "# " am Anfang.
+- **Du musst pruefen** (nach dem Ausrollen): Benachrichtigung am Handy
+  (PWA, https -- hier nur ueber http/localhost testbar); ein echter Chat am Handy und
   am PC; Diktieren ueber ein echtes Mikrofon (nur mit WAV-Datei getestet);
   die Desktop-App zeigt dieselbe Oberflaeche (Huelle unveraendert, kein
   Neubau noetig -- src-tauri nicht angefasst).
@@ -102,8 +108,10 @@ Alle Endpunkte und WebSocket-Nachrichten stehen jetzt in README.md
 ## Naechste Schritte
 
 1. (erledigt D11) Ausrollen geprueft und live angesehen.
-2. Danach "Weitere sinnvolle Dinge" (Plan): Benachrichtigung bei fertig/
-   Freigabe, Chat umbenennen/anheften, Tastenkuerzel.
+2. "Weitere sinnvolle Dinge": Benachrichtigung erledigt (D11). Offen:
+   Chat umbenennen/anheften/aus Liste entfernen (nur Cockpit-Eintrag, nie
+   die Datei), Tastenkuerzel (Strg+K gibt es schon; Esc stoppt fehlt).
+3. Danach erneut ausrollen (2. von 3), wenn sich genug gesammelt hat.
 
 ## Ende-zu-Ende (D10, echte Konten, Haiku)
 
@@ -153,3 +161,7 @@ Alle Endpunkte und WebSocket-Nachrichten stehen jetzt in README.md
   neu. Playwright 52 Ansichten ohne Befund.
   Danach Schritt 5 (Ende-zu-Ende, 13 Zuege, 7 Funde behoben, siehe oben);
   Playwright 52 Ansichten ohne Befund; Ausrollen angefordert (1. von 3).
+- **D11** (25.9. 08:06): Ausrollen erfolgreich, live angesehen (s.o.).
+  Chat-Titel ohne Markdown-Zeichen (Index-Version 3 baut einmal neu),
+  Benachrichtigungen (`web/benachrichtigen.js`, Logik `web/ui/meldungen.js`
+  mit Test, Klick im `sw.js`). Playwright 52 Ansichten ok.
