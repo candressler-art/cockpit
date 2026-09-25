@@ -352,3 +352,36 @@ export async function standLesen(): Promise<SystemStand> {
     gemessenAm: Date.now(),
   }
 }
+
+// --- Verlauf -----------------------------------------------------------------
+
+/** Ein Messpunkt der Kurve -- nur was die Oberflaeche zeichnet, sonst waere die Stunde unnoetig schwer. */
+export interface VerlaufPunkt { t: number; cpu: number | null; ram: number | null }
+
+export const VERLAUF_FENSTER_MS = 60 * 60 * 1000
+
+/**
+ * Haengt einen Stand an den Verlauf je Host an und wirft alles aelter als das
+ * Fenster weg. Nur im Speicher: nach einem Neustart beginnt die Kurve neu --
+ * fuer "was war in der letzten Stunde los" reicht das, und die DB bleibt frei
+ * von 180 Zeilen pro Stunde und Host.
+ */
+export function verlaufAnhaengen(
+  verlauf: Record<string, VerlaufPunkt[]>,
+  stand: Pick<SystemStand, 'hosts'>,
+  jetzt = Date.now(),
+  fensterMs = VERLAUF_FENSTER_MS,
+): Record<string, VerlaufPunkt[]> {
+  for (const h of stand.hosts) {
+    // Ein Host ohne Messung bekommt keinen Punkt -- die Luecke ist ehrlicher als eine erfundene Null.
+    if (h.status !== 'ok') continue
+    ;(verlauf[h.name] ??= []).push({ t: jetzt, cpu: h.cpuProzent, ram: h.ramProzent })
+  }
+  const grenze = jetzt - fensterMs
+  for (const [name, punkte] of Object.entries(verlauf)) {
+    const erster = punkte.findIndex((p) => p.t >= grenze)
+    if (erster === -1) delete verlauf[name]
+    else if (erster > 0) punkte.splice(0, erster)
+  }
+  return verlauf
+}

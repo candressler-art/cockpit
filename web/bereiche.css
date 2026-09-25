@@ -264,3 +264,24 @@ details[open] > summary .a-pfeil { transform: rotate(90deg); }
   /* Am Handy laedt der Bereich beim Oeffnen neu -- der Knopf schwebte nur ueber den Kacheln. */
   .nur-desktop { display: none !important; }
 }
+
+/* --- Server --------------------------------------------------------------------- */
+.hosts { display: grid; gap: 0; margin-top: 12px; }
+.host .n-karte-kopf { align-items: center; }
+.punkt { width: 8px; height: 8px; border-radius: 50%; background: var(--overlay); flex: 0 0 auto; }
+.punkt.an { background: var(--gruen); box-shadow: 0 0 0 3px color-mix(in srgb, var(--gruen) 18%, transparent); }
+.host-werte { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px 24px; align-items: start; }
+.host .fenster { grid-template-columns: 64px 1fr 42px; }
+.kurve-ort { margin-top: 14px; border-top: 1px solid var(--surface0); padding-top: 10px; }
+.kurve { display: block; width: 100%; height: 64px; background: linear-gradient(transparent calc(50% - .5px), var(--surface0) calc(50% - .5px) calc(50% + .5px), transparent calc(50% + .5px)); }
+.kurve path { fill: none; stroke-width: 1.6; stroke-linejoin: round; }
+.kurve .linie-cpu { stroke: var(--akzent); }
+.kurve .linie-ram { stroke: var(--lila); opacity: .7; }
+.kurve-legende { display: flex; flex-wrap: wrap; gap: 2px 12px; white-space: nowrap; font-size: 11.5px; color: var(--overlay); margin-top: 4px; }
+.kurve-legende .leg-cpu::before, .kurve-legende .leg-ram::before { content: ""; display: inline-block; width: 10px; height: 2px; margin-right: 5px; vertical-align: middle; }
+.leg-cpu::before { background: var(--akzent); }
+.leg-ram::before { background: var(--lila); }
+.kurve-leer { margin: 12px 0 0; }
+@media (max-width: 760px) {
+  .host-werte { grid-template-columns: 1fr; gap: 8px; }
+}

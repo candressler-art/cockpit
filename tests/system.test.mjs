@@ -1,6 +1,6 @@
 // Beszel-Abbildung und Mischen des eigenen Hosts (src/system.ts).
 import assert from 'node:assert/strict'
-import { beszelAbbilden, eigenenHostMischen, tempAusSensoren } from '../dist/system.js'
+import { beszelAbbilden, eigenenHostMischen, tempAusSensoren, verlaufAnhaengen } from '../dist/system.js'
 
 const jetzt = Date.parse('2026-09-24T19:27:30Z')
 
@@ -66,5 +66,22 @@ assert.equal(m.quelle, 'lokal')
 assert.equal(m.gemessenAm, jetzt + 1)
 const m2 = eigenenHostMischen(zwei, { ...lokal, cpuProzent: 0 })
 assert.equal(m2.cpuProzent, 0, '0 % ist ein Messwert, kein fehlender')
+
+// Verlauf der letzten Stunde je Host: alte Punkte fallen raus, Hosts ohne
+// Messung (status unbekannt) bekommen keinen Punkt, damit die Kurve dort eine
+// Luecke zeigt statt einer erfundenen Null.
+{
+  const v = {}
+  const host = (name, cpu, status = 'ok') => ({ ...lokal, name, status, cpuProzent: cpu, ramProzent: 40 })
+  verlaufAnhaengen(v, { hosts: [host('a', 10), host('b', null, 'unbekannt')], gemessenAm: jetzt - 3_700_000 }, jetzt - 3_700_000)
+  verlaufAnhaengen(v, { hosts: [host('a', 20), host('b', 5)], gemessenAm: jetzt - 60_000 }, jetzt - 60_000)
+  verlaufAnhaengen(v, { hosts: [host('a', 30)], gemessenAm: jetzt }, jetzt)
+  assert.deepEqual(v.a.map((p) => p.cpu), [20, 30], 'Punkt aelter als eine Stunde faellt weg')
+  assert.deepEqual(v.b.map((p) => p.cpu), [5], 'unbekannter Host ergibt keinen Punkt')
+  assert.deepEqual(Object.keys(v.a[0]).sort(), ['cpu', 'ram', 't'])
+  // Verschwindet ein Host ganz, raeumt der Verlauf ihn nach einer Stunde weg.
+  verlaufAnhaengen(v, { hosts: [host('a', 1)], gemessenAm: jetzt + 3_600_000 }, jetzt + 3_600_000)
+  assert.equal(v.b, undefined)
+}
 
 console.log('system: ok')

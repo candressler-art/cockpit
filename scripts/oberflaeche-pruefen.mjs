@@ -17,6 +17,23 @@ mkdirSync(ordner, { recursive: true })
 import { aufgabenVoll as AUFGABEN_VOLL_BAUEN } from './aufgaben-attrappe.mjs'
 const aufgabenVoll = (s) => s.route('**/api/aufgaben', (r) => r.fulfill({ json: AUFGABEN_VOLL_BAUEN() }))
 
+// Zwei Hosts mit einer Stunde Verlauf (einer davon mit Luecke), ein toter,
+// ohne Beszel -- alle Zweige des Server-Bereichs auf einmal.
+function systemVoll() {
+  const jetzt = Date.now()
+  const host = (name, quelle, cpu, ram, platte, extra = {}) => ({ name, quelle, status: 'ok', cpuProzent: cpu, ramProzent: ram, ramGesamtMb: 7693, plattenProzent: platte, plattenGesamtGb: 221, tempC: 47.5, uptimeSek: 457221, container: 3, gemessenAm: jetzt, ...extra })
+  const punkte = (f) => Array.from({ length: 180 }, (_, i) => ({ t: jetzt - (179 - i) * 20000, ...f(i) }))
+  return {
+    hosts: [host('servertwo', 'lokal', 91, 64, 12), host('serverone', 'beszel', 22, 35, 1.6, { ramGesamtMb: null, plattenGesamtGb: null, container: null }), host('drittserver', 'beszel', null, null, null, { status: 'unbekannt', tempC: null, uptimeSek: null })],
+    beszelEingerichtet: false,
+    gemessenAm: jetzt,
+    verlauf: {
+      servertwo: punkte((i) => ({ cpu: 20 + 70 * Math.abs(Math.sin(i / 17)), ram: 60 + (i % 10) / 3 })),
+      serverone: punkte((i) => ({ cpu: i > 60 && i < 80 ? null : 5 + (i % 7) * 3, ram: 35 })).slice(100),
+    },
+  }
+}
+
 // [name, hash, optional: Aktion nach dem Laden, optional: Vorbereitung vor dem Laden]
 const ANSICHTEN = [
   ['neu', '#/chat'],
@@ -50,6 +67,8 @@ const ANSICHTEN = [
   ['aufgaben-fehler', '#/aufgaben', null, (s) => s.route('**/api/aufgaben', (r) => r.fulfill({ status: 500, json: { fehler: 'Datenbank gesperrt' } }))],
   ['nutzung', '#/nutzung'],
   ['server', '#/server'],
+  ['server-voll', '#/server', null, (s) => s.route('**/api/system', (r) => r.fulfill({ json: systemVoll() }))],
+  ['server-fehler', '#/server', null, (s) => s.route('**/api/system', (r) => r.fulfill({ status: 502, json: { fehler: 'Beszel antwortet nicht' } }))],
   ['notizen', '#/notizen'],
   ['terminal', '#/terminal'],
   ['einstellungen', '#/einstellungen'],
@@ -79,7 +98,7 @@ for (const [breite, hoehe] of [[1280, 800], [375, 740]]) {
     if (ueber > 0) meldungen.push(`Seite ${ueber}px breiter als der Bildschirm`)
     await s.screenshot({ path: join(ordner, `${name}-${breite}.png`), fullPage: process.env.GANZ === '1' })
     // In den *-fehler-Ansichten ist die 500-Antwort gewollt -- der Browser meldet sie trotzdem.
-    const echteFehler = meldungen.filter((m) => !m.startsWith('warning') && !(name.endsWith('-fehler') && /status of 500/.test(m)))
+    const echteFehler = meldungen.filter((m) => !m.startsWith('warning') && !(name.endsWith('-fehler') && /status of 50[02]/.test(m)))
     fehler += echteFehler.length
     console.log(`${echteFehler.length ? 'FEHLER' : 'ok    '} ${name} @${breite}${meldungen.length ? `\n        ${meldungen.join('\n        ')}` : ''}`)
     await s.close()

@@ -12,7 +12,7 @@ import { Supervisor } from './supervisor.js'
 import { Orchestrator, type OrchestratorKonfig } from './orchestrator.js'
 import { DiscordAdapter, stopZielAufloesen } from './discord.js'
 import type { CockpitEvent } from './typen.js'
-import { standLesen, type SystemStand } from './system.js'
+import { standLesen, verlaufAnhaengen, type SystemStand, type VerlaufPunkt } from './system.js'
 import { rollenLaden, rollenListe, agentDefinitionen } from './rollen.js'
 import { sprechenGecacht } from './stimme.js'
 import { erkennen } from './hoeren.js'
@@ -379,10 +379,12 @@ supervisor.on('limit', (l: unknown) => verteilen('limit', l))
 // Push. 20 Sekunden sind der Kompromiss -- Beszels Agenten messen ohnehin nur
 // jede Minute, haeufiger zu fragen brachte nur Last ohne neue Zahlen.
 let letzterSystemStand: SystemStand | null = null
+const systemVerlauf: Record<string, VerlaufPunkt[]> = {}
 
 async function systemPuls(): Promise<void> {
   try {
     letzterSystemStand = await standLesen()
+    verlaufAnhaengen(systemVerlauf, letzterSystemStand)
     verteilen('system', letzterSystemStand)
   } catch (e) {
     console.warn('[cockpit] Systemstand nicht ermittelbar:', String(e))
@@ -1072,7 +1074,9 @@ const server = createServer(async (req, res) => {
     if (pfad === '/api/system' && req.method === 'GET') {
       // Den gepollten Stand ausliefern, nicht neu messen: sonst kaeme bei
       // jedem Neuladen der Seite eine CPU-Differenz ueber Millisekunden heraus.
-      return json(200, letzterSystemStand ?? (await standLesen()))
+      // Der Verlauf nur hier, nicht im 20-s-Rundruf: den braucht nur, wer den
+      // Bereich neu oeffnet -- danach haengt die Oberflaeche selbst an.
+      return json(200, { ...(letzterSystemStand ?? (await standLesen())), verlauf: systemVerlauf })
     }
 
     if (pfad === '/api/gesundheit') {
