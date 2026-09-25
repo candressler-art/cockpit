@@ -107,7 +107,7 @@ let db: DatabaseSync | null = null
  * (chats und chats_fts; chat_fortsetzung ist KEIN abgeleiteter Zustand und
  * bleibt unangetastet).
  */
-const INDEX_VERSION = 2
+const INDEX_VERSION = 3
 
 function handle(pfad: string): DatabaseSync {
   if (!db) {
@@ -149,6 +149,21 @@ interface Gelesen {
  * ganze Sitzung aus dem Index werfen. Bei 285 Dateien aus verschiedenen
  * CLI-Versionen ist das kein theoretischer Fall.
  */
+/**
+ * Titel aus der ersten Eingabe, wenn die CLI keinen vergeben hat. Lange
+ * Auftraege beginnen oft mit einer Markdown-Ueberschrift -- "# Umbau..."
+ * sah in der Chatliste roh aus. Nur Zeichen am ANFANG fallen weg, "#1"
+ * mitten im Satz bleibt.
+ */
+export function titelAusEingabe(eingabe: string): string {
+  return eingabe
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^(?:(?:#{1,6}|>|[-*+]|\d+[.)])(?:\s+|$))+/, '')
+    .trim()
+    .slice(0, 70)
+}
+
 function auswerten(
   sessionId: string, pfad: string, roh: string, groesse: number, quelle: 'desktop' | 'server',
 ): Gelesen {
@@ -202,7 +217,7 @@ function auswerten(
   const titel =
     eigenerTitel ??
     aiTitel ??
-    (ersteEingabe ? ersteEingabe.replace(/\s+/g, ' ').slice(0, 70) : `Sitzung ${sessionId.slice(0, 8)}`)
+    ((ersteEingabe && titelAusEingabe(ersteEingabe)) || `Sitzung ${sessionId.slice(0, 8)}`)
 
   // Projektname aus dem Verzeichnisnamen: die CLI kodiert den Pfad dort mit
   // Bindestrichen. Besser als nichts, und der volle cwd steht daneben.
