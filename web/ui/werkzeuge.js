@@ -46,7 +46,7 @@ function kopfDaten(name, e, namen = null) {
     case 'Skill': return ['stern', 'Skill', e.skill ?? e.command]
     case 'ToolSearch': return ['suche', 'Werkzeuge gesucht', e.query]
     case 'ExitPlanMode': return ['aufgaben', 'Plan', '']
-    case 'AskUserQuestion': return ['frage', 'Rueckfrage', '']
+    case 'AskUserQuestion': return ['frage', 'Rückfrage', (e.questions ?? []).map((q) => q.question).join(' · ')]
     default: {
       // mcp__server__werkzeug -> "server: werkzeug"
       const m = /^mcp__(.+?)__(.+)$/.exec(name)

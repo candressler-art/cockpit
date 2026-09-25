@@ -7,7 +7,7 @@
 #
 # small-int8, nicht base-int8: erst mit base-int8 versucht, dann gegen
 # small-int8 gemessen (zwei per Piper erzeugte deutsche Saetze, /api/hoeren,
-# Stand siehe README.md Abschnitt "Sprachgespraech"). base-int8 war knapp
+# Stand siehe README.md Abschnitt "Sprache"). base-int8 war knapp
 # 2,5 s schnell, verschluckte aber "Wetter" und machte aus "Orchestrator"
 # "Orchestrathofer" -- genau die Woerter, die in einem Cockpit-Gespraech
 # zaehlen. small-int8 erkannte beide Saetze korrekt, kostete dafuer knapp

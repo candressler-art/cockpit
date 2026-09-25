@@ -470,7 +470,8 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
     const todo = letzteTodos()
     teile.push(h('div.arbeitet', {},
       h('span.puls-punkt'),
-      h('span', {}, STATUS_TEXT[status] ?? 'Claude arbeitet …'),
+      h('span', {}, status === 'waiting_permission' && [...freigaben.values()].every((f) => f.toolName === 'AskUserQuestion') && freigaben.size
+        ? 'Wartet auf deine Antwort' : STATUS_TEXT[status] ?? 'Claude arbeitet …'),
       todo ? h('span.leise', {}, ` · ${todo.fertig}/${todo.gesamt} erledigt`) : null,
       h('button.knopf-klein.stopp-text', { type: 'button', onclick: anhalten, title: 'Anhalten (Esc)' }, symbol('stopp', 12), 'Anhalten')))
     // Die Liste selbst nur, solange noch etwas offen ist: TaskCreate/TaskUpdate
