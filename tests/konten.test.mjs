@@ -14,7 +14,7 @@ import {
   KontenVerwaltung,
   nutzungBeimLadenFiltern,
 } from '../dist/konten.js'
-import { nutzungAusAntwort, nutzungAbfragen, naechsteBackoffMs } from '../dist/kontenNutzung.js'
+import { nutzungAusAntwort, nutzungAbfragen, naechsteBackoffMs, guthabenAusAntwort } from '../dist/kontenNutzung.js'
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -869,6 +869,26 @@ const SDK_LIMIT_PRAEFIXE = ["You've hit your", "You've reached your"]
     if (alteConfigDir === undefined) delete process.env.CLAUDE_CONFIG_DIR
     else process.env.CLAUDE_CONFIG_DIR = alteConfigDir
   }
+}
+
+// --- Nutzungsguthaben (extra_usage/spend) ---
+{
+  // Form wie am 24.09. live gesehen: aus, nicht umschaltbar, kein Stand.
+  const g = guthabenAusAntwort({
+    five_hour: { utilization: 3 },
+    extra_usage: { is_enabled: false, user_disabled: true, credits_ever_enabled: false, can_toggle: false, balance: null },
+    spend: { used: { amount_minor: 0 } },
+  }, 42)
+  pruefe('Guthaben: aus, vom Nutzer aus, nicht umschaltbar', g && g.aktiv === false && g.vomNutzerAus === true && g.umschaltbar === false && g.jemalsAktiv === false)
+  pruefe('Guthaben: Stand unbekannt, verbraucht 0', g.stand === null && g.verbraucht === 0 && g.gemessenAm === 42)
+  const h = guthabenAusAntwort({
+    extra_usage: { is_enabled: true, balance: { amount_minor: 1250, currency: 'EUR' } },
+    spend: { used: { amount_minor: 399, currency: 'EUR' } },
+  }, 1)
+  pruefe('Guthaben: Betraege in Hauptwaehrung mit Waehrung', h.aktiv && h.stand === 12.5 && h.verbraucht === 3.99 && h.waehrung === 'EUR')
+  pruefe('Guthaben: Zahl als Stand', guthabenAusAntwort({ extra_usage: { balance: 7 } }, 1).stand === 7)
+  pruefe('Guthaben: ohne extra_usage -> null', guthabenAusAntwort({ five_hour: {} }, 1) === null && guthabenAusAntwort(null, 1) === null)
+  pruefe('Guthaben: Unsinn im Betrag -> null', guthabenAusAntwort({ extra_usage: { balance: 'viel' }, spend: { used: 'x' } }, 1).stand === null)
 }
 
 console.log(`\n${ok}/${gesamt} bestanden`)

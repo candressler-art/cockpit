@@ -234,3 +234,90 @@ export function nutzungAusAntwort(body: unknown, jetzt: number): LimitStand | nu
     gemessenAm: jetzt,
   }
 }
+
+// --- Nutzungsguthaben (extra usage) ------------------------------------
+//
+// Dieselbe Adresse OHNE skip_spend=1 liefert zusaetzlich `extra_usage` und
+// `spend` (Plan, Befund vom 24.09.: beide Konten is_enabled:false,
+// can_toggle:false, balance:null, spend.used.amount_minor:0). Einschalten
+// geht nur in claude.ai -- das Cockpit zeigt den Stand nur an.
+//
+// Eigene, seltene Abfrage statt den 10-Minuten-Puls umzustellen: der Puls
+// ist erprobt, und sein skip_spend=1 steht dort mit Absicht (siehe oben).
+// Das Guthaben aendert sich selten; einmal je Stunde reicht.
+//
+// Die Form ist nur aus einer Stichprobe bekannt (balance war null) -- der
+// Leser ist deshalb nachsichtig: Zahl oder {amount_minor, currency}, alles
+// andere wird null statt zu raten.
+
+const GUTHABEN_URL = 'https://api.anthropic.com/api/oauth/usage'
+
+export interface Guthaben {
+  /** Guthaben ist fuer dieses Konto eingeschaltet. */
+  aktiv: boolean
+  /** Laesst sich laut Anthropic ueber die API umschalten (bisher immer false). */
+  umschaltbar: boolean
+  /** Vom Nutzer in claude.ai ausgeschaltet. */
+  vomNutzerAus: boolean
+  /** War schon einmal eingeschaltet. */
+  jemalsAktiv: boolean
+  /** Restguthaben in Hauptwaehrungseinheiten, null wenn unbekannt. */
+  stand: number | null
+  /** Bisher verbraucht, Hauptwaehrungseinheiten. */
+  verbraucht: number | null
+  waehrung: string | null
+  gemessenAm: number
+}
+
+function betragLesen(roh: unknown): { betrag: number | null; waehrung: string | null } {
+  if (typeof roh === 'number' && Number.isFinite(roh)) return { betrag: roh, waehrung: null }
+  const o = roh as Record<string, unknown> | null | undefined
+  if (!o || typeof o !== 'object') return { betrag: null, waehrung: null }
+  const minor = o.amount_minor
+  const waehrung = typeof o.currency === 'string' ? o.currency : null
+  if (typeof minor === 'number' && Number.isFinite(minor)) return { betrag: minor / 100, waehrung }
+  return { betrag: null, waehrung }
+}
+
+/** Antwort ohne skip_spend -> Guthabenstand. null, wenn `extra_usage` fehlt. */
+export function guthabenAusAntwort(body: unknown, jetzt: number): Guthaben | null {
+  const b = body as Record<string, unknown> | null
+  const x = b?.extra_usage as Record<string, unknown> | null | undefined
+  if (!x || typeof x !== 'object') return null
+  const stand = betragLesen(x.balance)
+  const verbraucht = betragLesen((b?.spend as Record<string, unknown> | undefined)?.used)
+  return {
+    aktiv: x.is_enabled === true,
+    umschaltbar: x.can_toggle === true,
+    vomNutzerAus: x.user_disabled === true,
+    jemalsAktiv: x.credits_ever_enabled === true,
+    stand: stand.betrag,
+    verbraucht: verbraucht.betrag,
+    waehrung: stand.waehrung ?? verbraucht.waehrung,
+    gemessenAm: jetzt,
+  }
+}
+
+/** Guthaben eines Kontos abfragen. null bei jedem Fehler -- der alte Stand bleibt dann stehen. */
+export async function guthabenAbfragen(konto: Konto): Promise<Guthaben | null> {
+  const creds = credentialsLesen(konto.configDir)
+  if (!creds) return null
+  // Laeuft fuer das Konto gerade ein 429-Backoff, auch hier nicht fragen.
+  const gesperrtBis = naechsterVersuch.get(konto.name)
+  if (typeof gesperrtBis === 'number' && Date.now() < gesperrtBis) return null
+  try {
+    const antwort = await fetch(GUTHABEN_URL, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${creds.accessToken}`,
+        'Content-Type': 'application/json',
+        'anthropic-version': '2023-06-01',
+      },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    })
+    if (!antwort.ok) return null
+    return guthabenAusAntwort(await antwort.json(), Date.now())
+  } catch {
+    return null
+  }
+}

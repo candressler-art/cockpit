@@ -29,7 +29,7 @@ import { vaultIndizieren, vaultGraphLesen, vaultBeobachten, vaultDa, VAULT } fro
 import { vaultZugriffErlaubt } from './vaultZugriff.js'
 import { konsoleBefehl } from './konsole.js'
 import { cwdPruefen, folgenLesen, zahlLesen } from './eingaben.js'
-import { nutzungAbfragen } from './kontenNutzung.js'
+import { nutzungAbfragen, guthabenAbfragen, type Guthaben } from './kontenNutzung.js'
 import { AnfrageFehler, fehlerStatus, koerperAuswerten, textFeld } from './httpFehler.js'
 import { ChatZuege } from './chatZuege.js'
 import { nachliefern, senden as klientSenden, type Klient } from './nachlieferung.js'
@@ -415,6 +415,22 @@ async function kontenNutzungPuls(): Promise<void> {
 void kontenNutzungPuls()
 setInterval(() => void kontenNutzungPuls(), 10 * 60_000).unref()
 
+// Nutzungsguthaben je Konto (nur Anzeige -- einschalten geht nur in
+// claude.ai). Stuendlich; ein Fehlschlag laesst den alten Stand stehen.
+const guthaben = new Map<string, Guthaben>()
+async function guthabenPuls(): Promise<void> {
+  for (const konto of supervisor.angemeldeteKonten()) {
+    try {
+      const g = await guthabenAbfragen(konto)
+      if (g) guthaben.set(konto.name, g)
+    } catch (e) {
+      console.warn(`[konten] Guthaben fuer '${konto.name}' warf:`, String(e))
+    }
+  }
+}
+void guthabenPuls()
+setInterval(() => void guthabenPuls(), 60 * 60_000).unref()
+
 // Fachrollen beim Start einlesen. Ein Fehler hier soll frueh sichtbar sein --
 // nicht erst, wenn der Orchestrator in Runde drei eine Rolle adressiert.
 await rollenLaden()
@@ -689,7 +705,13 @@ const server = createServer(async (req, res) => {
         runId,
         agenten: db.agentenLesen(runId),
         ereignisse: db.ereignisseSeit(runId, seit.zahl ?? 0),
-        freigaben: db.offeneFreigaben(runId),
+        // "Immer erlauben" kennt nur der Speicher (die SDK-Vorschlaege
+        // stehen nicht in der DB) -- nach einem Neustart ist die Anfrage
+        // ohnehin nicht mehr beantwortbar.
+        freigaben: (() => {
+          const immer = new Set(supervisor.offeneFreigabenListe(runId).filter((f) => f.immerMoeglich).map((f) => f.id))
+          return db.offeneFreigaben(runId).map((f) => ({ ...f, immerMoeglich: immer.has(String(f.id)) }))
+        })(),
       })
     }
 
@@ -998,7 +1020,7 @@ const server = createServer(async (req, res) => {
       // Gesamtbild statt nur der Liste: modus, naechstesKonto und
       // abstandPunkte sind das, was man beim Draufschauen zuerst wissen
       // will, nicht erst aus der Liste selbst ausrechnen soll.
-      return json(200, supervisor.kontenUebersicht())
+      return json(200, { ...supervisor.kontenUebersicht(), guthaben: Object.fromEntries(guthaben) })
     }
 
     if (pfad === '/api/konten' && req.method === 'POST') {
