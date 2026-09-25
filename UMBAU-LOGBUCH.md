@@ -138,19 +138,11 @@ Alle Endpunkte und WebSocket-Nachrichten stehen jetzt in README.md
 
 ## Durchgaenge
 
-- **D1-D3** (24./25.9.): npm install, Merge nacht-optimierung,
-  Einstellungen DB+API, Nutzung, Rollen, `/api/verzeichnisse` (D2 ohne
-  Ergebnis: Sitzungslimit).
-- **D4**: Chat-API, Freigaben, Live-Deltas, `/api/aufgaben`, Guthaben.
-  Hinweis: in der Testinstanz steht der entrypoint neuer Chats als
-  `sdk-cli` (erbt CLAUDE_CODE_ENTRYPOINT aus meiner Shell) -- live nicht.
-- **D5**: Geruest + Chat-Ansicht; Kontowechsel-Fehler gefunden/behoben.
-  Testkonten heissen `zweit`/`dritt` (`haupt` = CLAUDE_CONFIG_DIR).
-- **D6**: Einstellungen + Nutzung; Stimmstufe wurde nie geladen (behoben).
-  Testkonten tragen kuenstliche Messwerte in /tmp/umbau/cockpit.db.
-- **D7**: Aufgaben; CSS-Variablen in h() kamen nie an (behoben).
-- **D8** (25.9. ~05:00): Bereich Server begonnen, vom Sitzungslimit
-  unterbrochen (nicht committet).
+- **D1-D8** (24./25.9.): Merge, Backend (Einstellungen, Nutzung, Rollen,
+  Chat-API, Freigaben, Aufgaben, Guthaben), Geruest, Chat, Einstellungen,
+  Nutzung, Aufgaben, Server begonnen. Testkonten `zweit`/`dritt` mit
+  kuenstlichen Messwerten in /tmp/umbau/cockpit.db; entrypoint neuer Chats
+  der Testinstanz steht als `sdk-cli` (erbt meine Shell), live nicht.
 - **D9** (25.9. 07:21): nacht-optimierung ohne neue Commits. Server aus D8
   fertig (Kurve erst ab 3 Min. Verlauf, Ausrichtung), **Notizen** und
   **Terminal** gebaut, jeweils mit Tests; Playwright alle 52 Ansichten
