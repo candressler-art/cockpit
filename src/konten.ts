@@ -793,3 +793,24 @@ export function versuchPrompt(
   if (istKontowechsel && resumeSessionId && schonGeantwortet) return KONTOWECHSEL_FORTSETZUNGSPROMPT
   return originalPrompt
 }
+
+/**
+ * Liegt die Sitzung `sessionId` im projects/ dieses Konfigordners?
+ *
+ * Der Kontowechsel setzt per resume fort. Bei einem NEUEN Chat mit fest
+ * vergebener Session-Id kennt der Supervisor die Id aber schon aus der
+ * Init-Meldung, auch wenn das erste Konto scheiterte, bevor die CLI
+ * irgendetwas geschrieben hat (Anmeldefehler). resume endete dann mit
+ * "No conversation found" -- und der Zug war verloren, obwohl ein freies
+ * Konto da war. Also vorher nachsehen.
+ */
+export function sitzungsdateiVorhanden(configDir: string, sessionId: string): boolean {
+  const projekte = join(configDir, 'projects')
+  let ordner: string[]
+  try {
+    ordner = readdirSync(projekte)
+  } catch {
+    return false
+  }
+  return ordner.some((o) => existsSync(join(projekte, o, `${sessionId}.jsonl`)))
+}

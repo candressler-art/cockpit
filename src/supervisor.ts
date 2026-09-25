@@ -23,6 +23,7 @@ import {
   versuchPrompt,
   istKontoFehlertext,
   kontoFehlerLabel,
+  sitzungsdateiVorhanden,
   type Konto,
   type KontenUebersicht,
 } from './konten.js'
@@ -366,7 +367,16 @@ export class Supervisor extends EventEmitter {
         const naechstes = this.konten.waehlen(versuchteKonten)
         if (!naechstes) break // alle Konten gesperrt -- altes Wartevehalten bleibt
 
-        resumeSessionId = this.agenten.get(k)?.sessionId ?? resumeSessionId
+        // Nur fortsetzen, was es auch gibt: ein neuer Chat, dessen erstes
+        // Konto vor der ersten geschriebenen Zeile scheiterte, hat noch keine
+        // Sitzungsdatei. Dann mit derselben festen Session-Id frisch beginnen
+        // (einzelnerVersuch setzt sessionId, wenn resume fehlt) -- der Chat
+        // behaelt seine Id, und der Originalauftrag geht mit (versuchPrompt).
+        const bekannt = this.agenten.get(k)?.sessionId ?? resumeSessionId
+        const nurVorgabe = bekannt !== undefined && bekannt === o.sessionId && !o.resume
+        resumeSessionId = nurVorgabe && !sitzungsdateiVorhanden(naechstes.configDir, bekannt)
+          ? undefined
+          : bekannt ?? undefined
         istKontowechsel = true
         this.melden(
           o.runId, o.agentId, 'protocol',

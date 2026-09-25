@@ -13,6 +13,7 @@ import {
   emailLesen,
   KontenVerwaltung,
   nutzungBeimLadenFiltern,
+  sitzungsdateiVorhanden,
 } from '../dist/konten.js'
 import { nutzungAusAntwort, nutzungAbfragen, naechsteBackoffMs, guthabenAusAntwort } from '../dist/kontenNutzung.js'
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
@@ -889,6 +890,18 @@ const SDK_LIMIT_PRAEFIXE = ["You've hit your", "You've reached your"]
   pruefe('Guthaben: Zahl als Stand', guthabenAusAntwort({ extra_usage: { balance: 7 } }, 1).stand === 7)
   pruefe('Guthaben: ohne extra_usage -> null', guthabenAusAntwort({ five_hour: {} }, 1) === null && guthabenAusAntwort(null, 1) === null)
   pruefe('Guthaben: Unsinn im Betrag -> null', guthabenAusAntwort({ extra_usage: { balance: 'viel' }, spend: { used: 'x' } }, 1).stand === null)
+}
+
+// --- Sitzungsdatei vor resume ------------------------------------------------
+{
+  const dir = mkdtempSync(join(tmpdir(), 'sitzung-'))
+  pruefe('Sitzung: ohne projects/ -> nein', sitzungsdateiVorhanden(dir, 'abc') === false)
+  mkdirSync(join(dir, 'projects', '-tmp-x'), { recursive: true })
+  pruefe('Sitzung: leeres Projekt -> nein', sitzungsdateiVorhanden(dir, 'abc') === false)
+  writeFileSync(join(dir, 'projects', '-tmp-x', 'abc.jsonl'), '{}\n')
+  pruefe('Sitzung: Datei da -> ja', sitzungsdateiVorhanden(dir, 'abc') === true)
+  pruefe('Sitzung: andere Id -> nein', sitzungsdateiVorhanden(dir, 'abd') === false)
+  rmSync(dir, { recursive: true, force: true })
 }
 
 console.log(`\n${ok}/${gesamt} bestanden`)
