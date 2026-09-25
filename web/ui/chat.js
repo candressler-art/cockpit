@@ -490,6 +490,9 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
     for (const b of karte.querySelectorAll('button')) b.disabled = true
     try {
       await api('/api/freigabe', { body: { id: f.id, ...koerper } })
+      // Sonst stuende die Auswahl weiter auf "Nur planen", und die naechste
+      // Nachricht finge wieder mit einem Plan an.
+      if (f.toolName === 'ExitPlanMode' && koerper.erlaubt && koerper.modus) eingabe.modusSetzen(koerper.modus)
       freigaben.delete(f.id)
       freigabenZeichnen()
     } catch (e) {

@@ -195,6 +195,8 @@ export function eingabeBauen(opt) {
     /** Fuer bestehende Chats steht der Ordner fest (null = frei waehlbar). */
     ordnerFestlegen(p) { ordnerFest = p; ordnerZeigen() },
     textSetzen(t) { feld.value = t; groesse(); knopfZustand() },
+    /** Nach "Plan umsetzen" gilt der gewaehlte Modus auch fuer die naechste Nachricht (wie in Claude Code). */
+    modusSetzen(m) { wahl.berechtigung = m; modusWahl.value = m; optionenKurz() },
     neuLaden: listenFuellen,
   }
 }
