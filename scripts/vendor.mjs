@@ -4,16 +4,21 @@
 // web/ so aus, wie es im Repo liegt. Deshalb stehen die Dateien committet in
 // web/vendor, und dieses Skript ist nur zum Aktualisieren da
 // (`npm install -D marked dompurify highlight.js && node scripts/vendor.mjs`).
-import { readFileSync, writeFileSync, mkdirSync, copyFileSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 const nm = join(import.meta.dirname, '..', 'node_modules')
 const ziel = join(import.meta.dirname, '..', 'web', 'vendor')
 mkdirSync(ziel, { recursive: true })
 
-copyFileSync(join(nm, 'marked/lib/marked.esm.js'), join(ziel, 'marked.esm.js'))
+// Ohne den Verweis auf die Source-Map: die liegt nicht mit in web/vendor,
+// und der Browser fragte sonst bei jedem Oeffnen der Entwicklerwerkzeuge
+// vergeblich danach.
+const kopieren = (von, nach) => writeFileSync(join(ziel, nach),
+  readFileSync(join(nm, von), 'utf-8').replace(/\n\/\/# sourceMappingURL=.*\s*$/, '\n'))
+kopieren('marked/lib/marked.esm.js', 'marked.esm.js')
 // .js statt .mjs: der Daemon kennt nur .js als JavaScript (MIME-Tabelle).
-copyFileSync(join(nm, 'dompurify/dist/purify.es.mjs'), join(ziel, 'purify.js'))
+kopieren('dompurify/dist/purify.es.mjs', 'purify.js')
 
 // highlight.js liefert den Kern nur als CommonJS; die Sprachen gibt es als
 // eigenstaendige ES-Module. Kern in eine Modulhuelle packen, Sprachen

@@ -884,10 +884,18 @@ const server = createServer(async (req, res) => {
 
     if (pfad.startsWith('/api/chats/') && req.method === 'GET') {
       const id = decodeURIComponent(pfad.slice('/api/chats/'.length))
-      const d = await verlaufLesen(DB_PFAD, id)
+      // Ein gerade angelegter Chat hat noch keine Sitzungsdatei (die CLI
+      // schreibt sie erst mit der ersten Zeile; scheitert der erste Zug vorher,
+      // nie). Er existiert trotzdem -- leer statt 404, sonst stuende in der
+      // Oberflaeche "gibt es nicht", obwohl man weiterschreiben kann.
+      const registriert = fortsetzungLesen(DB_PFAD, id)
+      const d = (await verlaufLesen(DB_PFAD, id)) ?? (registriert ? {
+        kopf: { sessionId: id, titel: null, cwd: registriert.cwd, projekt: null, startedAt: null, endedAt: null, zuege: 0, quelle: 'server' as const },
+        nachrichten: [], gekuerzt: false,
+      } : null)
       if (!d) return json(404, { fehler: 'Sitzung unbekannt' })
       const hierVorhanden = Boolean(d.kopf.cwd && existsSync(d.kopf.cwd))
-      const bestehend = fortsetzungLesen(DB_PFAD, id)
+      const bestehend = registriert
       // Wurde schon fortgeschrieben, gilt DEREN cwd -- die steht fest, sobald
       // der erste Zug lief (fortsetzungVorbereiten), und darf sich hinterher
       // nicht mehr aendern. Sonst zeigte der Kopf ein anderes Verzeichnis an
