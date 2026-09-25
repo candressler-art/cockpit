@@ -30,9 +30,16 @@
   Cockpit-Eintrag, die Sitzungsdatei bleibt; "Rueckgaengig" direkt in der
   Liste; ein ausgeblendeter Chat kommt zurueck, sobald darin
   weitergeschrieben wird (z.B. am PC). Umbenannte Titel findet die Suche.
+  **Dateien und Bilder anhaengen** (D13): Bueroklammer in der Eingabe,
+  hineinziehen oder einfuegen (Strg+V, z.B. Bildschirmfoto), bis 10 Dateien
+  je 20 MB. Liegen auf dem Server unter `/var/lib/cockpit/anhaenge/<Datum>/`
+  (nach 30 Tagen weg); Claude liest sie mit Read ohne Freigabe, sonst
+  nichts ohne Freigabe. Bilder erscheinen als Vorschau in deiner Blase.
 - **Du musst pruefen** (nach dem Ausrollen): Benachrichtigung am Handy
   (PWA, https -- hier nur ueber http/localhost testbar); ein echter Chat am Handy und
   am PC; Diktieren ueber ein echtes Mikrofon (nur mit WAV-Datei getestet);
+  ein Anhang ueber dein Tailnet (falls ein Proxy davorsitzt, darf er
+  20 MB Koerper nicht abweisen -- lokal getestet, nicht ueber den Proxy);
   die Desktop-App zeigt dieselbe Oberflaeche (Huelle unveraendert, kein
   Neubau noetig -- src-tauri nicht angefasst).
 - **Team-Auftraege jetzt ohne Discord bedienbar:** Fragen des
@@ -80,6 +87,10 @@
     Diktieren ins Eingabefeld. Vorgelesen werden nur noch Freigaben/Fragen.
     Faellt dir das Vorlesen von Antworten ab, waere "Antwort vorlesen" im
     Chat der Weg (Piper ist ja da).
+  - *Anhaenge als Datei + Pfad statt Bild-Block*: der Prompt geht als Text
+    an die SDK (und wird beim Kontowechsel neu gebaut); Read zeigt dem
+    Modell Bilder/PDFs genauso. Vorteil: Anhaenge ueberstehen Kontowechsel
+    und bleiben in der Sitzung am PC nachvollziehbar.
   - *Haiku bekommt keinen Denkaufwand* (effort) -- kennt keine Stufen.
   - *Guthaben*: eigene stuendliche Abfrage ohne `skip_spend`, der erprobte
     10-Minuten-Nutzungspuls bleibt, wie er ist. Mit echtem Konto geprueft
@@ -112,20 +123,18 @@ Alle Endpunkte und WebSocket-Nachrichten stehen jetzt in README.md
 
 ## Naechste Schritte
 
-1. (erledigt D11) Ausrollen geprueft und live angesehen.
-2. "Weitere sinnvolle Dinge": 1-3 erledigt (Benachrichtigung D11,
-   umbenennen/anheften D12; Tastenkuerzel gab es schon: Strg+K Suche,
-   Strg+Shift+O neuer Chat, Esc haelt an). Offen: 4. Dateien/Bilder in den
-   Chat ziehen -- erst pruefen, ob chatZugStarten Bild-Bloecke an die SDK
-   geben kann; sonst weglassen.
-3. Danach erneut ausrollen (2. von 3): Benachrichtigungen + Markierung
-   sind genug dafuer, spaetestens im uebernaechsten Durchgang anfordern.
+1. (D13) 2. Ausrollen angefordert (von 3). Im naechsten Durchgang
+   `~/schleife/ausrollen-ergebnis-umbau.txt` lesen, bei Erfolg live ansehen
+   (Chatliste "…"-Menue, Eingabe mit Bueroklammer, Einstellungen >
+   Benachrichtigungen) -- nur GET, keine Anhaenge hochladen (POST).
+2. "Weitere sinnvolle Dinge" 1-4 alle erledigt. Danach nur noch
+   Feinschliff mit Tests; ist nichts Sinnvolles offen: `.umbau-fertig`.
 
 ## Ende-zu-Ende (D10, echte Konten, Haiku)
 
 - Instanz: `/tmp/umbau/e2e/start.sh` (ohne CLAUDE_*-Variablen der Shell,
   eigene DB/Spiegel unter /tmp/umbau/e2e, Port 8796), per Playwright durch
-  die Oberflaeche gefahren. 13 von 15 erlaubten Zuegen verbraucht.
+  die Oberflaeche gefahren. 14 von 15 erlaubten Zuegen verbraucht (14.: Anhang in D13).
 - Geprueft und gut: neuer Chat, Fortsetzen, Freigabe (Bash, Erlauben),
   Plan-Modus (Karte, Umsetzen), Spezialist (pruefer, Karte), Abbrechen,
   **echter Kontowechsel** (haupt im Wochenlimit -> zweit, Hinweis im Chat),
@@ -154,3 +163,8 @@ Alle Endpunkte und WebSocket-Nachrichten stehen jetzt in README.md
   /api/chats/<id>`, Test `chatMarkierung.test.mjs` 22/22), Playwright-
   Ablauf 1280/375 (Menue, Esc, Anheften, Umbenennen Enter/Esc, Kopf,
   Ausblenden + Rueckgaengig) ohne Konsolenfehler; 52 Ansichten ok.
+- **D13** (25.9. 08:27): nacht-optimierung ohne neue Commits. Anhaenge
+  (`src/anhaenge.ts`, `web/ui/anhangtext.js`, Test 38/38), echter
+  Haiku-Zug: Bild ohne Freigabe gelesen, Antwort "Rot.", nach Neuladen
+  Vorschau aus der Sitzungsdatei. Ordner-Chip bricht Leiste nicht mehr um.
+  52 Ansichten ok. 2. Ausrollen angefordert.
