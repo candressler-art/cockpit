@@ -2,10 +2,17 @@
 
 ## Zusammenfassung fuer Can
 
-- **Stand:** Schritte 1-5 erledigt: alle Bereiche gebaut (Chat,
+- **Stand:** Schritte 1-6 erledigt: alle Bereiche gebaut (Chat,
   Aufgaben, Nutzung, Server, Notizen, Terminal, Einstellungen), alte
   Oberflaeche entfernt, README neu, Ende-zu-Ende mit echten Haiku-Zuegen
-  bestanden (13 Zuege). Ausrollen ist angefordert (D10).
+  bestanden (13 Zuege). **Ausgerollt am 25.9. 08:05** (c202fde, Dienst
+  gesund, Sicherung `~/schleife/sicherung-20260925-080518`).
+- **Live gesehen (D11, nur GET, alle POSTs im Browser blockiert):** alle
+  7 Bereiche und ein echter Chat bei 1280 und 375 px, keine
+  Konsolenfehler, keine Ueberbreite. Chatliste zeigt deine Desktop-Chats
+  (Gruppen Gestern/Letzte 7 Tage, PC-Marke), Nutzung mit Jahresraster und
+  Tagesliste, Server mit beiden Hosts (Beszel + lokal), Fuss "verbunden,
+  zweit 56 %".
 - **Fertig (Backend):** Einstellungen in der DB + API; Nutzungsindex +
   `/api/nutzung`; Rollen (`inherit`, Planer-Regel); `/api/verzeichnisse`;
   **Chat-API** (neuer Chat, Weiterschreiben mit Modell/Aufwand/Modus,
@@ -94,8 +101,7 @@ Alle Endpunkte und WebSocket-Nachrichten stehen jetzt in README.md
 
 ## Naechste Schritte
 
-1. Ergebnis des Ausrollens lesen (`~/schleife/ausrollen-ergebnis-umbau.txt`),
-   bei Erfolg Live-Seite per GET/Playwright ansehen (1280/375), hier notieren.
+1. (erledigt D11) Ausrollen geprueft und live angesehen.
 2. Danach "Weitere sinnvolle Dinge" (Plan): Benachrichtigung bei fertig/
    Freigabe, Chat umbenennen/anheften, Tastenkuerzel.
 
