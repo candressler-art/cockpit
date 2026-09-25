@@ -15,6 +15,7 @@ import { h, symbol, api, leeren, pfadKurz, melden, fehlerText } from './dom.js'
 import { einstellungenHolen, ordnerWaehlen } from './eingabe.js'
 import * as bus from '../bus.js'
 import * as stimme from '../stimme.js'
+import * as benachrichtigen from '../benachrichtigen.js'
 
 const STIMM_STUFEN = [
   { id: 'aus', name: 'Aus', hinweis: 'Dieses Gerät spricht nie' },
@@ -98,7 +99,7 @@ export function einstellungenBauen() {
         zeile('Gleichzeitig', 'So viele Agenten arbeiten parallel.',
           zahlFeld(w.team.parallel, 1, 4, (v) => speichern({ team: { parallel: v } }), 'Gleichzeitig'))),
 
-      gruppe('Stimme', 'Gilt nur für dieses Gerät.',
+      gruppe('Stimme und Benachrichtigungen', 'Gilt nur für dieses Gerät.',
         zeile('Sprachausgabe', hinweisVon(STIMM_STUFEN, stimme.stufeLesen()),
           h('div.zeile-knoepfe', {},
             auswahl(STIMM_STUFEN, stimme.stufeLesen(), (v) => {
@@ -108,12 +109,26 @@ export function einstellungenBauen() {
               if (v !== 'aus') stimme.freigeben()
               zeichnen()
             }, 'Sprachausgabe'),
-            h('button.knopf', { type: 'button', disabled: stimme.stufeLesen() === 'aus', onclick: () => stimme.freigeben() }, 'Probe')))),
+            h('button.knopf', { type: 'button', disabled: stimme.stufeLesen() === 'aus', onclick: () => stimme.freigeben() }, 'Probe'))),
+        meldenZeile()),
 
       gruppe('Konten', null,
         zeile('Konten und Limits', 'Welches Konto als Nächstes drankommt, Limits und Guthaben.',
           h('a.knopf', { href: '#/nutzung' }, 'Zur Nutzung', symbol('pfeil', 14)))),
     )
+  }
+
+  /** Erlaubnis fragt der Browser selbst; blockiert laesst sie sich nur dort wieder oeffnen. */
+  function meldenZeile() {
+    const z = benachrichtigen.zustand()
+    const hinweis = {
+      an: 'Wenn Claude fertig ist oder eine Freigabe oder Frage wartet – nur, solange du nicht ins Cockpit schaust.',
+      aus: 'Wenn Claude fertig ist oder eine Freigabe oder Frage wartet.',
+      blockiert: 'Im Browser blockiert. Erlauben lässt es sich nur in den Seiteneinstellungen des Browsers.',
+      unmoeglich: 'Dieser Browser kann keine Benachrichtigungen zeigen.',
+    }[z]
+    return zeile('Benachrichtigungen', hinweis,
+      schalter(z === 'an', async (v) => { await benachrichtigen.setzen(v); zeichnen() }, 'Benachrichtigungen', z === 'blockiert' || z === 'unmoeglich'))
   }
 
   function favoritenZeile(w) {

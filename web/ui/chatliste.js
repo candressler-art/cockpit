@@ -105,5 +105,7 @@ export function chatListeBauen({ beiWahl }) {
     aktivSetzen(id) { aktiv = id; zeichnen() },
     neuLaden: laden,
     sucheFokus: () => suche.focus(),
+    /** Fuer Benachrichtigungen; null, wenn der Chat gerade nicht geladen ist (Suche). */
+    titelVon: (sid) => chats.find((c) => c.sessionId === sid)?.titel ?? null,
   }
 }

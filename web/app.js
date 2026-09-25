@@ -15,6 +15,7 @@
  */
 import * as bus from './bus.js'
 import * as stimme from './stimme.js'
+import * as benachrichtigen from './benachrichtigen.js'
 import { h, symbol, api, leeren } from './ui/dom.js'
 import { chatBereich } from './ui/chat.js'
 import { chatListeBauen } from './ui/chatliste.js'
@@ -198,6 +199,12 @@ bus.abonnieren('lauf_ende', (d) => {
     ? `Der Orchestrator braucht eine Entscheidung. ${d?.ende?.frage ?? ''}`
     : `Der Auftrag ist beendet. Grund: ${grund}.`, { wichtig: true })
 })
+
+// --- Benachrichtigungen --------------------------------------------------------------
+// Nur wenn man nicht hinsieht; was gemeldet wird, steht in ui/meldungen.js.
+for (const typ of ['agent', 'freigabe', 'lauf_ende']) {
+  bus.abonnieren(typ, (d) => benachrichtigen.pruefen(typ, d, { titelVon: chatliste.titelVon }))
+}
 
 wechseln()
 bus.verbinden()
