@@ -125,43 +125,17 @@
 
 ## Durchgaenge
 
-- **D1** (24.9.): npm install, Merge nacht-optimierung, Einstellungen DB+API,
-  Normalisierer-Tests, Nutzung angebunden -- vom Sitzungslimit mitten im
-  Nutzungs-Commit abgebrochen, Logbuch fehlte noch.
-- **D2**: sofort Sitzungslimit, nichts getan.
-- **D3** (25.9. 02:21): Nutzung-Arbeit aus D1 committet, nacht-optimierung
-  erneut gemergt, Logbuch angelegt, Rollen-Tests, `/api/verzeichnisse`.
-- **D4** (25.9. 02:25): nacht-optimierung ohne neue Commits. Chat-API,
-  Freigaben, Live-Deltas, `/api/aufgaben`, Guthaben -- mit Tests
-  (freigaben/aufgaben/db/konten), in der Testinstanz per curl geprueft
-  (feste Session-Id kommt an, Weiterschreiben mit bypassPermissions/effort
-  nimmt die CLI an). Hinweis: in meiner Testumgebung steht der entrypoint
-  neuer Chats als `sdk-cli`, weil die Instanz CLAUDE_CODE_ENTRYPOINT aus
-  meiner Shell erbt -- live (systemd) nicht der Fall.
-  Die Kopie der Live-DB fuer einen Probelauf war per Regel gesperrt --
-  ausgelassen.
-- **D5** (25.9. 02:36): nacht-optimierung ohne neue Commits. Ereignisse
-  tragen normalisierte `nachricht`, GET /api/chats/:id im vollen Format.
-  Neues Geruest + Chat-Ansicht, Playwright 1280/375 ohne Befund. Senden mit
-  Attrappen-Konten geprueft (Anmeldefehler, Kontowechsel) -> Kontowechsel-
-  Fehler gefunden und behoben. Testkonten heissen jetzt `zweit`/`dritt`
-  (`haupt` ist CLAUDE_CONFIG_DIR, Namensgleichheit verwirrte die Liste).
-- **D6** (25.9. 02:56): nacht-optimierung ohne neue Commits. Backend:
-  Reset-Zeiten + Wochenprognose in /api/konten, /api/nutzung/tag (Tests).
-  Bereiche **Einstellungen** und **Nutzung** gebaut, Playwright 1280/375
-  ohne Befund (auch Fehler-/Leerzustand, Bedienung der Schalter). Stimmstufe
-  wurde in der neuen Oberflaeche nie geladen -> behoben. Rollen- und
-  Auswahltexte mit echten Umlauten; Symbol des Fehlersuchers (⌖ fehlte in
-  Schriften) -> ✱. Hilfsskript fuer hohe Bilder: `scripts/.lang-tmp.mjs`
-  (nicht im Repo). Testkonten tragen kuenstliche Messwerte in
-  /tmp/umbau/cockpit.db.
-- **D7** (25.9. 03:10): nacht-optimierung ohne neue Commits. Bereich
-  **Aufgaben** (Laeufe, Agenten, To-do, Spezialisten, Team-Formular,
-  Orchestrator-Frage, Worker-Freigaben) + Backend dazu (Tests).
-  Playwright 1280/375 mit Attrappe: Eingaben/Fokus ueberleben das
-  5-s-Nachladen, Freigabe sendet richtig, keine Konsolenfehler. Gefunden:
-  CSS-Variablen in h() kamen nie an (Rollenfarben fehlten ueberall);
-  Titel eines Team-Auftrags war in Runde 1 der Worker-Name.
+- **D1-D3** (24./25.9.): npm install, Merge nacht-optimierung,
+  Einstellungen DB+API, Nutzung, Rollen, `/api/verzeichnisse` (D2 ohne
+  Ergebnis: Sitzungslimit).
+- **D4**: Chat-API, Freigaben, Live-Deltas, `/api/aufgaben`, Guthaben.
+  Hinweis: in der Testinstanz steht der entrypoint neuer Chats als
+  `sdk-cli` (erbt CLAUDE_CODE_ENTRYPOINT aus meiner Shell) -- live nicht.
+- **D5**: Geruest + Chat-Ansicht; Kontowechsel-Fehler gefunden/behoben.
+  Testkonten heissen `zweit`/`dritt` (`haupt` = CLAUDE_CONFIG_DIR).
+- **D6**: Einstellungen + Nutzung; Stimmstufe wurde nie geladen (behoben).
+  Testkonten tragen kuenstliche Messwerte in /tmp/umbau/cockpit.db.
+- **D7**: Aufgaben; CSS-Variablen in h() kamen nie an (behoben).
 - **D8** (25.9. ~05:00): Bereich Server begonnen, vom Sitzungslimit
   unterbrochen (nicht committet).
 - **D9** (25.9. 07:21): nacht-optimierung ohne neue Commits. Server aus D8
