@@ -5,14 +5,11 @@
 - **Stand:** Schritte 1-6 erledigt: alle Bereiche gebaut (Chat,
   Aufgaben, Nutzung, Server, Notizen, Terminal, Einstellungen), alte
   Oberflaeche entfernt, README neu, Ende-zu-Ende mit echten Haiku-Zuegen
-  bestanden (13 Zuege). **Ausgerollt am 25.9. 08:05** (c202fde, Dienst
-  gesund, Sicherung `~/schleife/sicherung-20260925-080518`).
-- **Live gesehen (D11, nur GET, alle POSTs im Browser blockiert):** alle
-  7 Bereiche und ein echter Chat bei 1280 und 375 px, keine
-  Konsolenfehler, keine Ueberbreite. Chatliste zeigt deine Desktop-Chats
-  (Gruppen Gestern/Letzte 7 Tage, PC-Marke), Nutzung mit Jahresraster und
-  Tagesliste, Server mit beiden Hosts (Beszel + lokal), Fuss "verbunden,
-  zweit 56 %".
+  bestanden (14 Zuege). **Umbau abgeschlossen (D14).** Ausgerollt am
+  25.9. 08:05 (c202fde) und nochmals **08:38 (cb3c993, Stand von D13)**,
+  Dienst gesund, Sicherungen `~/schleife/sicherung-20260925-080518` und
+  `~/schleife/sicherung-20260925-083805`. Live ist jetzt alles unten
+  Beschriebene.
 - **Fertig (Backend):** Einstellungen in der DB + API; Nutzungsindex +
   `/api/nutzung`; Rollen (`inherit`, Planer-Regel); `/api/verzeichnisse`;
   **Chat-API** (neuer Chat, Weiterschreiben mit Modell/Aufwand/Modus,
@@ -20,7 +17,7 @@
   mit "immer erlauben", Antworten auf Rueckfragen, Plan annehmen);
   **`/api/aufgaben`** (To-do-Listen und Spezialisten aller Agenten);
   **Nutzungsguthaben** in `/api/konten` (nur Anzeige).
-- **Neu seit dem Ausrollen (D11, noch nicht live):** Benachrichtigungen
+- **Neu im 2. Ausrollen (D11-D13, live seit 08:38):** Benachrichtigungen
   (Einstellungen > "Stimme und Benachrichtigungen", je Geraet einschalten):
   Chat fertig/Fehler, Freigabe, Rueckfrage, Plan, Team-Auftrag -- nur wenn
   du nicht ins Cockpit schaust; Klick oeffnet den Chat. Dazu "(1) Cockpit"
@@ -35,7 +32,15 @@
   je 20 MB. Liegen auf dem Server unter `/var/lib/cockpit/anhaenge/<Datum>/`
   (nach 30 Tagen weg); Claude liest sie mit Read ohne Freigabe, sonst
   nichts ohne Freigabe. Bilder erscheinen als Vorschau in deiner Blase.
-- **Du musst pruefen** (nach dem Ausrollen): Benachrichtigung am Handy
+- **Live gesehen (D14, nur GET, POSTs im Browser blockiert):** alle 7
+  Bereiche bei 1280 und 375 px ohne Konsolenfehler/Ueberbreite; das
+  "…"-Menue der Chatliste (Anheften/Umbenennen/Aus der Liste nehmen) auch
+  in der Handy-Schublade; Bueroklammer in der Eingabe; Einstellungen mit
+  "Benachrichtigungen" (headless: "Im Browser blockiert", erwartungsgemaess).
+- **Tastenkuerzel:** Strg+K Chatsuche, Esc haelt einen laufenden Chat an,
+  Esc schliesst Menue/Umbenennen.
+- **Am PC zu tun:** nichts zu bauen (src-tauri nie angefasst).
+- **Du musst pruefen:** Benachrichtigung am Handy
   (PWA, https -- hier nur ueber http/localhost testbar); ein echter Chat am Handy und
   am PC; Diktieren ueber ein echtes Mikrofon (nur mit WAV-Datei getestet);
   ein Anhang ueber dein Tailnet (falls ein Proxy davorsitzt, darf er
@@ -123,12 +128,9 @@ Alle Endpunkte und WebSocket-Nachrichten stehen jetzt in README.md
 
 ## Naechste Schritte
 
-1. (D13) 2. Ausrollen angefordert (von 3). Im naechsten Durchgang
-   `~/schleife/ausrollen-ergebnis-umbau.txt` lesen, bei Erfolg live ansehen
-   (Chatliste "…"-Menue, Eingabe mit Bueroklammer, Einstellungen >
-   Benachrichtigungen) -- nur GET, keine Anhaenge hochladen (POST).
-2. "Weitere sinnvolle Dinge" 1-4 alle erledigt. Danach nur noch
-   Feinschliff mit Tests; ist nichts Sinnvolles offen: `.umbau-fertig`.
+Keine. Plan (Schritte 1-6, weitere Dinge 1-4) erledigt, `.umbau-fertig`
+gesetzt. Moegliche spaetere Idee: Prognose "Guthaben reicht noch X Tage"
+(braucht Verlauf; Guthaben ist bei dir ohnehin aus).
 
 ## Ende-zu-Ende (D10, echte Konten, Haiku)
 
@@ -145,8 +147,6 @@ Alle Endpunkte und WebSocket-Nachrichten stehen jetzt in README.md
   "Guthaben aus" stimmt. Schalter bleibt weggelassen (siehe oben).
 - 7 Funde dabei behoben (Details in den Commits von D10).
 - Nicht erzwungen: ein Kontowechsel mitten im Zug (kam echt am Zuganfang).
-- Hinweis: Plan-Modus legt Plaene im Konto-Verzeichnis ab
-  (`<config>/plans/`), normales CLI-Verhalten.
 
 ## Durchgaenge
 
@@ -154,17 +154,8 @@ Alle Endpunkte und WebSocket-Nachrichten stehen jetzt in README.md
   (Schritt 4), Ende-zu-Ende (Schritt 5), 1. Ausrollen angefordert.
   Testkonten `zweit`/`dritt` mit kuenstlichen Messwerten in
   /tmp/umbau/cockpit.db.
-- **D11** (25.9. 08:06): Ausrollen erfolgreich, live angesehen (s.o.).
-  Chat-Titel ohne Markdown-Zeichen (Index-Version 3 baut einmal neu),
-  Benachrichtigungen (`web/benachrichtigen.js`, Logik `web/ui/meldungen.js`
-  mit Test, Klick im `sw.js`). Playwright 52 Ansichten ok.
-- **D12** (25.9. 08:17): nacht-optimierung ohne neue Commits. Chats
-  umbenennen/anheften/ausblenden (`chat_markierung`, `PATCH
-  /api/chats/<id>`, Test `chatMarkierung.test.mjs` 22/22), Playwright-
-  Ablauf 1280/375 (Menue, Esc, Anheften, Umbenennen Enter/Esc, Kopf,
-  Ausblenden + Rueckgaengig) ohne Konsolenfehler; 52 Ansichten ok.
-- **D13** (25.9. 08:27): nacht-optimierung ohne neue Commits. Anhaenge
-  (`src/anhaenge.ts`, `web/ui/anhangtext.js`, Test 38/38), echter
-  Haiku-Zug: Bild ohne Freigabe gelesen, Antwort "Rot.", nach Neuladen
-  Vorschau aus der Sitzungsdatei. Ordner-Chip bricht Leiste nicht mehr um.
-  52 Ansichten ok. 2. Ausrollen angefordert.
+- **D11-D13** (25.9.): Benachrichtigungen, Chats umbenennen/anheften/
+  ausblenden, Anhaenge (echter Haiku-Zug), je 52 Playwright-Ansichten ok,
+  2. Ausrollen angefordert.
+- **D14** (25.9. 08:39): nacht-optimierung ohne neue Commits. 2. Ausrollen
+  erfolgreich, live angesehen (16 Ansichten ok, s.o.). Umbau abgeschlossen.
