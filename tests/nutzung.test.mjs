@@ -3,6 +3,7 @@
 // Lesen, Auswertung und Kennzahlen. Gegen dist/.
 import {
   zeileAuswerten, tagVon, stundeVon, nutzungIndizieren, nutzungLesen, kennzahlenBerechnen, tagVerschieben, tagSitzungen,
+  rueckblickGruppieren,
 } from '../dist/nutzung.js'
 import { mkdtempSync, mkdirSync, writeFileSync, appendFileSync, symlinkSync, copyFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -130,6 +131,40 @@ rmSync(wurzel, { recursive: true, force: true })
   pruefe('heute aktiv: Serie schliesst heute ein', k2.serie === 3 && k2.heute === 5)
   const leer = kennzahlenBerechnen([], '2026-09-24')
   pruefe('leer: alles 0, kein aktivster Tag', leer.serie === 0 && leer.aktivsterTag === null && leer.schnittAktiv30 === 0)
+}
+
+// --- Rueckblick gruppieren --------------------------------------------------
+{
+  const s = (sitzung, projekt, von, tokens) => ({ sitzung, projekt, tokens, antworten: 2, von, bis: von + 60_000 })
+  const arten = {
+    c1: { art: 'chat', chatId: 'c1', titel: 'Chat eins' },
+    c1f: { art: 'chat', chatId: 'c1', titel: 'Chat eins' }, // Fortsetzung desselben Chats
+    l1: { art: 'loop', titel: 'Umbau-Schicht' }, l2: { art: 'loop', titel: 'Umbau-Schicht' }, l3: { art: 'loop', titel: 'Umbau-Schicht' },
+    w1: { art: 'team', runId: 'r1', titel: 'Auftrag A' }, w2: { art: 'team', runId: 'r1', titel: 'Auftrag A' },
+    x1: { art: 'sonst' },
+  }
+  const e = rueckblickGruppieren([
+    s('l1', 'cockpit-umbau', 1000, 10), s('c1', 'cockpit', 500, 5), s('l2', 'cockpit-umbau', 2000, 20),
+    s('w1', 'homelab', 3000, 7), s('l3', 'cockpit-umbau', 4000, 30), s('w2', 'homelab', 3500, 3),
+    s('c1f', 'cockpit', 5000, 1), s('x1', null, 6000, 2),
+  ], (id) => arten[id])
+  pruefe('Rueckblick: 4 Eintraege statt 8 Sitzungen', e.length === 4)
+  const loop = e.find((x) => x.art === 'loop')
+  pruefe('Rueckblick: Loop fasst 3 Durchgaenge zusammen', loop?.sitzungen === 3 && loop.tokens === 60)
+  pruefe('Rueckblick: Loop-Zeitraum von erstem bis letztem', loop?.von === 1000 && loop.bis === 64_000)
+  const team = e.find((x) => x.art === 'team')
+  pruefe('Rueckblick: Team-Auftrag ein Eintrag mit runId', team?.sitzungen === 2 && team.runId === 'r1' && team.titel === 'Auftrag A')
+  const chat = e.find((x) => x.art === 'chat')
+  pruefe('Rueckblick: Fortsetzung zaehlt zum selben Chat', chat?.sitzungen === 2 && chat.chat === 'c1' && chat.tokens === 6)
+  pruefe('Rueckblick: nach Beginn sortiert', e.map((x) => x.art).join(',') === 'chat,loop,team,sonst')
+  pruefe('Rueckblick: Sonstiges heisst "Andere Sitzungen"', e[3].titel === 'Andere Sitzungen' && e[3].chat === null)
+
+  // Ein Loop, dessen Agent per cd in Unterordner wechselt: je Antwort ein
+  // anderes Projekt, aber EIN Startordner laut Index -> EIN Eintrag.
+  const wandernd = rueckblickGruppieren([
+    s('a', 'cockpit-umbau', 1, 1), s('b', 'highlight.js', 2, 1), s('c', 'web', 3, 1),
+  ], () => ({ art: 'loop', titel: 'Umbau-Schicht', projekt: 'cockpit-umbau' }))
+  pruefe('Rueckblick: Ordnerwechsel im Loop teilt ihn nicht', wandernd.length === 1 && wandernd[0].sitzungen === 3 && wandernd[0].projekt === 'cockpit-umbau')
 }
 
 console.log(`\n${ok}/${gesamt} bestanden`)

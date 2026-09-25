@@ -185,16 +185,32 @@ export function nutzungBauen() {
     try {
       const d = await api(`/api/nutzung/tag?tag=${tag}`)
       if (nr !== tagAnfrage) return
-      leeren(liste, d.sitzungen.length ? d.sitzungen.map((s) => {
-        const text = [h('span.tag-titel', {}, s.chat?.titel ?? (s.projekt ? `Auftrag in ${s.projekt}` : 'Sitzung ohne Chat')),
-          h('span.tag-meta', {}, `${uhrzeit(s.von)}${s.bis - s.von > 60000 ? `–${uhrzeit(s.bis)}` : ''} · ${s.projekt ?? ''} · ${kurzZahl(s.tokens)}`)]
-        return s.chat
-          ? h('a.tag-eintrag', { href: `#/chat/${encodeURIComponent(s.chat.id)}` }, symbol('chat', 14), text)
-          : h('div.tag-eintrag', {}, symbol('aufgaben', 14), text)
-      }) : h('div.leise', {}, 'Keine Sitzungen gefunden.'))
+      leeren(liste, d.eintraege.length ? d.eintraege.map(rueckblickEintrag) : h('div.leise', {}, 'Keine Sitzungen gefunden.'))
     } catch (e) {
       if (nr === tagAnfrage) leeren(liste, h('div.fehlertext', {}, fehlerText(e)))
     }
+  }
+
+  /**
+   * Ein Eintrag im Rueckblick. Chats verlinken auf den Chat, Team-Auftraege
+   * auf den Bereich Aufgaben; Loops und Sonstiges sind nur Zeilen. Mehrere
+   * Sitzungen (Loop-Durchgaenge, Worker eines Auftrags) stehen als Zahl dabei
+   * statt als eigene Zeilen.
+   */
+  function rueckblickEintrag(e) {
+    const art = { chat: 'Chat', loop: 'Automatischer Loop', team: 'Team-Auftrag', sonst: 'ohne Chat-Eintrag' }[e.art]
+    const teile = [
+      `${uhrzeit(e.von)}${e.bis - e.von > 60000 ? `–${uhrzeit(e.bis)}` : ''}`,
+      art,
+      e.projekt,
+      e.sitzungen > 1 ? `${e.sitzungen} ${e.art === 'loop' ? 'Durchgänge' : e.art === 'team' ? 'Agenten-Aufrufe' : 'Sitzungen'}` : null,
+      kurzZahl(e.tokens),
+    ].filter(Boolean)
+    const text = [h('span.tag-titel', { title: e.titel }, e.titel), h('span.tag-meta', {}, teile.join(' · '))]
+    const sym = { chat: 'chat', loop: 'aktualisieren', team: 'aufgaben', sonst: 'datei' }[e.art]
+    if (e.art === 'chat') return h('a.tag-eintrag', { href: `#/chat/${encodeURIComponent(e.chat)}` }, symbol(sym, 14), text)
+    if (e.art === 'team') return h('a.tag-eintrag', { href: '#/aufgaben' }, symbol(sym, 14), text)
+    return h(`div.tag-eintrag.${e.art}`, {}, symbol(sym, 14), text)
   }
 
   // --- Konten ---------------------------------------------------------------------
@@ -224,7 +240,7 @@ export function nutzungBauen() {
         h('button.link', { type: 'button', onclick: () => vorzugSetzen(null) }, 'Wieder ausgleichen'))
       : h('div.konten-modus', {}, symbol('info', 14), h('span', {}, 'Ausgeglichen: jeder neue Chat nimmt das Konto mit der meisten Luft im Wochenlimit.'))
     const karten = d.konten.map((k) => kontoKarte(k, d))
-    return [modus, h('div.konten', {}, karten)]
+    return [modus, guthabenGesamtBlock(d), h('div.konten', {}, karten)].filter(Boolean)
   }
 
   function kontoKarte(k, d) {
@@ -241,7 +257,9 @@ export function nutzungBauen() {
     if (k.angemeldet) {
       zeilen.push(fensterZeile('5 Stunden', k.fuenfStundenAnteil, k.fuenfStundenResetAm))
       zeilen.push(fensterZeile('Woche', k.siebenTageAnteil, k.siebenTageResetAm))
-      if (k.wochePrognose) {
+      // Schon voll: dazu sagt die Marke "im Limit bis ..." alles -- eine
+      // Prognose "wird um 12:34 erreicht (in 0 Min.)" waere nur verwirrend.
+      if (k.wochePrognose && !(k.siebenTageAnteil >= 1)) {
         zeilen.push(h(`div.prognose${k.wochePrognose.reicht ? '' : '.knapp'}`, {},
           k.wochePrognose.reicht
             ? 'Beim bisherigen Tempo reicht das Wochenlimit bis zum Reset.'
@@ -279,12 +297,48 @@ export function nutzungBauen() {
   function guthabenZeile(g) {
     if (!g) return h('div.guthaben.leise', {}, symbol('info', 13), 'Guthaben: noch nicht abgefragt')
     if (g.aktiv) {
+      const rest = g.prognose?.rest ?? g.stand
       return h('div.guthaben.an', {}, symbol('haken', 13),
-        `Guthaben an: ${geld(g.stand, g.waehrung)} übrig${g.verbraucht ? `, ${geld(g.verbraucht, g.waehrung)} verbraucht` : ''}`)
+        h('span', {},
+          `Guthaben an: ${rest === null || rest === undefined ? 'Stand unbekannt' : `${geld(rest, g.waehrung)} übrig`}` +
+          `${g.verbraucht ? `, ${geld(g.verbraucht, g.waehrung)} verbraucht` : ''}${g.grenze ? ` (Grenze ${geld(g.grenze, g.waehrung)})` : ''}.`,
+          h('br'), h('span.leise', {}, prognoseText(g.prognose, g.waehrung))))
     }
     return h('div.guthaben', {}, symbol('info', 13),
       h('span', {}, g.vomNutzerAus ? 'Guthaben ausgeschaltet. ' : 'Guthaben aus. ',
         'Einschalten in claude.ai unter Einstellungen → Nutzung.'))
+  }
+
+  /** "Reicht noch ..."-Satz. Ehrlich, wenn es fuer eine Aussage nicht reicht. */
+  function prognoseText(p, waehrung) {
+    if (!p) return ''
+    if (p.proTag === null) {
+      return p.basisTage < 1
+        ? 'Prognose ab einem Tag Verlauf -- das Cockpit misst den Verbrauch stündlich.'
+        : 'Noch keine Prognose möglich.'
+    }
+    if (p.proTag === 0) return `Kein Verbrauch in den letzten ${Math.round(p.basisTage)} Tagen -- es reicht, solange das so bleibt.`
+    const tempo = `${geld(p.proTag, waehrung)} pro Tag (Schnitt ${p.basisTage < 2 ? 'seit gestern' : `der letzten ${Math.round(p.basisTage)} Tage`})`
+    if (p.tage === null) return `Tempo: ${tempo}. Wie viel übrig ist, meldet Anthropic nicht.`
+    return `Tempo: ${tempo} -- reicht noch etwa ${p.tage < 1 ? 'weniger als einen Tag' : `${Math.round(p.tage)} Tage`}, bis ${resetText(p.leerAm)}.`
+  }
+
+  /** Summe ueber alle Konten -- Can denkt in "meinem Guthaben", nicht je Konto. */
+  function guthabenGesamtBlock(d) {
+    const g = d.guthabenGesamt
+    if (!g) return null
+    const alle = Object.values(d.guthaben ?? {})
+    if (g.aktiv === 0) {
+      return h('div.guthaben-gesamt', {}, symbol('info', 14),
+        h('span', {}, alle.length
+          ? `Nutzungsguthaben: auf keinem Konto eingeschaltet. Sobald du es in claude.ai (Einstellungen → Nutzung) einschaltest, stehen hier Stand, Tempo und wie lange es reicht.`
+          : 'Nutzungsguthaben: noch nicht abgefragt.'))
+    }
+    const teile = [`Nutzungsguthaben auf ${g.aktiv} ${g.aktiv === 1 ? 'Konto' : 'Konten'}`]
+    if (g.rest !== null) teile.push(`${geld(g.rest, g.waehrung)} übrig`)
+    if (g.proTag !== null) teile.push(`${geld(g.proTag, g.waehrung)} pro Tag`)
+    if (g.tage !== null) teile.push(`reicht noch etwa ${g.tage < 1 ? 'weniger als einen Tag' : `${Math.round(g.tage)} Tage`} (bis ${resetText(g.leerAm)})`)
+    return h('div.guthaben-gesamt.an', {}, symbol('haken', 14), h('span', {}, teile.join(' · ')))
   }
 
   // --- Diagramme ------------------------------------------------------------------

@@ -16,7 +16,9 @@ import {
   sitzungsdateiVorhanden,
   wochenPrognose,
 } from '../dist/konten.js'
-import { nutzungAusAntwort, nutzungAbfragen, naechsteBackoffMs, guthabenAusAntwort } from '../dist/kontenNutzung.js'
+import {
+  nutzungAusAntwort, nutzungAbfragen, naechsteBackoffMs, guthabenAusAntwort, guthabenPrognose, guthabenRest,
+} from '../dist/kontenNutzung.js'
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -924,6 +926,39 @@ const SDK_LIMIT_PRAEFIXE = ["You've hit your", "You've reached your"]
   pruefe('Prognose: in den ersten Stunden des Fensters unbekannt',
     wochenPrognose(0.05, (jetzt + 7 * TAG - 3_600_000) / 1000, jetzt) === null)
   pruefe('Prognose: abgelaufenes Fenster unbekannt', wochenPrognose(0.5, (jetzt - 1000) / 1000, jetzt) === null)
+}
+
+// --- Guthaben: Rest und Prognose --------------------------------------------
+{
+  const T = 86_400_000
+  const J = 100 * T
+  pruefe('Rest: gemeldeter Stand gewinnt', guthabenRest({ stand: 80, grenze: 100, verbraucht: 30 }) === 80)
+  pruefe('Rest: sonst Grenze minus Verbrauch', guthabenRest({ stand: null, grenze: 100, verbraucht: 30 }) === 70)
+  pruefe('Rest: ohne Stand und Grenze unbekannt', guthabenRest({ stand: null, grenze: null, verbraucht: 30 }) === null)
+  pruefe('Rest: nie negativ', guthabenRest({ stand: null, grenze: 10, verbraucht: 30 }) === 0)
+
+  const kurz = guthabenPrognose([{ ts: J - 3_600_000, verbraucht: 1 }, { ts: J, verbraucht: 2 }], 50, J)
+  pruefe('Prognose: unter einem Tag Verlauf kein Tempo', kurz.proTag === null && kurz.tage === null && kurz.rest === 50)
+
+  const p = guthabenPrognose([
+    { ts: J - 4 * T, verbraucht: 10 }, { ts: J - 2 * T, verbraucht: 14 }, { ts: J, verbraucht: 18 },
+  ], 40, J)
+  pruefe('Prognose: 2 pro Tag ueber 4 Tage', Math.abs(p.proTag - 2) < 1e-9 && Math.abs(p.basisTage - 4) < 1e-9)
+  pruefe('Prognose: 40 Rest reichen 20 Tage', Math.abs(p.tage - 20) < 1e-9 && p.leerAm === J + 20 * T)
+
+  const monat = guthabenPrognose([
+    { ts: J - 6 * T, verbraucht: 90 }, { ts: J - 3 * T, verbraucht: 0 }, { ts: J, verbraucht: 6 },
+  ], 94, J)
+  pruefe('Prognose: nach Monatswechsel zaehlt nur der Abschnitt danach', Math.abs(monat.proTag - 2) < 1e-9)
+
+  const still = guthabenPrognose([{ ts: J - 3 * T, verbraucht: 5 }, { ts: J, verbraucht: 5 }], 95, J)
+  pruefe('Prognose: kein Verbrauch -> Tempo 0, keine Leer-Zeit', still.proTag === 0 && still.tage === null)
+
+  const alt = guthabenPrognose([{ ts: J - 30 * T, verbraucht: 0 }, { ts: J - 20 * T, verbraucht: 50 }], 50, J)
+  pruefe('Prognose: nur die letzten 14 Tage zaehlen', alt.proTag === null)
+
+  const ohneRest = guthabenPrognose([{ ts: J - 2 * T, verbraucht: 0 }, { ts: J, verbraucht: 4 }], null, J)
+  pruefe('Prognose: Tempo auch ohne bekannten Rest', ohneRest.proTag === 2 && ohneRest.tage === null)
 }
 
 console.log(`\n${ok}/${gesamt} bestanden`)

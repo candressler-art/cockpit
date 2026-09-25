@@ -18,7 +18,7 @@ import { sprechenGecacht } from './stimme.js'
 import { erkennen } from './hoeren.js'
 import {
   chatsIndizieren, chatsSuchen, verlaufLesen, chatKopfLesen, zuletztBenutzteOrdner,
-  fortsetzungLesen, fortsetzungVorbereiten, fortsetzungAktualisieren, chatRegistrieren, sitzungVorhanden, chatFuerSitzung, chatMarkieren, type Markierung,
+  fortsetzungLesen, fortsetzungVorbereiten, fortsetzungAktualisieren, chatRegistrieren, sitzungVorhanden, chatMarkieren, sitzungBeschreiben, type Markierung,
   type Fortsetzung,
 } from './chats.js'
 import { chatOptionenBauen, type ChatOptionen } from './chatOptionen.js'
@@ -30,7 +30,7 @@ import { vaultZugriffErlaubt } from './vaultZugriff.js'
 import { anhangSpeichern, anhaengePruefen, promptMitAnhaengen, alteAnhaengeLoeschen, MAX_ANHANG_BYTES } from './anhaenge.js'
 import { konsoleBefehl, verlaufAufnehmen, type KonsoleEintrag } from './konsole.js'
 import { cwdPruefen, folgenLesen, zahlLesen } from './eingaben.js'
-import { nutzungAbfragen, guthabenAbfragen, type Guthaben } from './kontenNutzung.js'
+import { nutzungAbfragen, guthabenAbfragen, guthabenRest, guthabenPrognose, type Guthaben } from './kontenNutzung.js'
 import { AnfrageFehler, fehlerStatus, koerperAuswerten, textFeld } from './httpFehler.js'
 import { ChatZuege } from './chatZuege.js'
 import { nachliefern, senden as klientSenden, type Klient } from './nachlieferung.js'
@@ -40,7 +40,10 @@ import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { EinstellungsSpeicher, auswahlListen, teamAuftragWerte, auftragTitel } from './einstellungen.js'
 import { ordnerAuflisten, OrdnerFehler } from './verzeichnisse.js'
-import { nutzungIndizieren, nutzungLesen, kennzahlenBerechnen, tagVerschieben, tagVon, tagSitzungen } from './nutzung.js'
+import {
+  nutzungIndizieren, nutzungLesen, kennzahlenBerechnen, tagVerschieben, tagVon, tagSitzungen,
+  rueckblickGruppieren, type SitzungsArt,
+} from './nutzung.js'
 import { kontenLesen } from './konten.js'
 
 const PORT = Number(process.env.COCKPIT_PORT ?? 8765)
@@ -433,7 +436,11 @@ async function guthabenPuls(): Promise<void> {
   for (const konto of supervisor.angemeldeteKonten()) {
     try {
       const g = await guthabenAbfragen(konto)
-      if (g) guthaben.set(konto.name, g)
+      if (g) {
+        guthaben.set(konto.name, g)
+        // Verlauf fuer die Prognose "reicht noch X Tage" -- ohne ihn kein Tempo.
+        db.guthabenMerken(konto.name, g)
+      }
     } catch (e) {
       console.warn(`[konten] Guthaben fuer '${konto.name}' warf:`, String(e))
     }
@@ -615,6 +622,38 @@ async function koerperBinaerLesen(
   }
   if (zuGross || stuecke.length === 0) return null
   return Buffer.concat(stuecke)
+}
+
+/**
+ * Guthaben je Konto mit Prognose, dazu die Summe ueber alle Konten -- Can
+ * denkt in "meine 200 Euro", nicht je Konto. Die Summe zaehlt nur aktive
+ * Konten; ihr Tempo ist die Summe der Tempi.
+ */
+function guthabenUebersicht(): {
+  guthaben: Record<string, Guthaben & { prognose: ReturnType<typeof guthabenPrognose> }>
+  guthabenGesamt: { aktiv: number; rest: number | null; proTag: number | null; tage: number | null; leerAm: number | null; waehrung: string | null }
+} {
+  const jetzt = Date.now()
+  const je: Record<string, Guthaben & { prognose: ReturnType<typeof guthabenPrognose> }> = {}
+  let aktiv = 0
+  let rest: number | null = 0
+  let proTag: number | null = 0
+  let waehrung: string | null = null
+  for (const [name, g] of guthaben) {
+    const prognose = guthabenPrognose(db.guthabenVerlauf(name, jetzt - 14 * 86_400_000), guthabenRest(g), jetzt)
+    je[name] = { ...g, prognose }
+    if (!g.aktiv) continue
+    aktiv++
+    waehrung ??= g.waehrung
+    rest = rest !== null && prognose.rest !== null ? rest + prognose.rest : null
+    proTag = proTag !== null && prognose.proTag !== null ? proTag + prognose.proTag : null
+  }
+  if (aktiv === 0) { rest = null; proTag = null }
+  const tage = rest !== null && proTag !== null && proTag > 0 ? rest / proTag : null
+  return {
+    guthaben: je,
+    guthabenGesamt: { aktiv, rest, proTag, tage, leerAm: tage !== null ? Math.round(jetzt + tage * 86_400_000) : null, waehrung },
+  }
 }
 
 const server = createServer(async (req, res) => {
@@ -1067,8 +1106,17 @@ const server = createServer(async (req, res) => {
       // Rueckblick: was war an diesem Tag los, je Chat.
       const tag = url.searchParams.get('tag') ?? ''
       if (!/^\d{4}-\d{2}-\d{2}$/.test(tag)) return json(400, { fehler: 'tag: JJJJ-MM-TT' })
-      const sitzungen = tagSitzungen(DB_PFAD, tag).map((s) => ({ ...s, chat: chatFuerSitzung(DB_PFAD, s.sitzung) }))
-      return json(200, { tag, sitzungen })
+      const eintraege = rueckblickGruppieren(tagSitzungen(DB_PFAD, tag), (sitzung): SitzungsArt => {
+        const b = sitzungBeschreiben(DB_PFAD, sitzung)
+        const projekt = b?.projekt ?? null
+        if (b?.chat) return { art: 'chat', chatId: b.chat.id, titel: b.chat.titel, projekt }
+        // sdk-cli ist `claude -p` -- die Nacht- und Umbau-Loops.
+        if (b?.entrypoint === 'sdk-cli') return { art: 'loop', titel: b.titel, projekt }
+        const lauf = db.laufFuerSitzung(sitzung)
+        if (lauf) return { art: 'team', runId: lauf.runId, titel: lauf.label, projekt }
+        return { art: 'sonst', projekt }
+      })
+      return json(200, { tag, eintraege })
     }
 
     if (pfad === '/api/rollen' && req.method === 'GET') {
@@ -1079,7 +1127,7 @@ const server = createServer(async (req, res) => {
       // Gesamtbild statt nur der Liste: modus, naechstesKonto und
       // abstandPunkte sind das, was man beim Draufschauen zuerst wissen
       // will, nicht erst aus der Liste selbst ausrechnen soll.
-      return json(200, { ...supervisor.kontenUebersicht(), guthaben: Object.fromEntries(guthaben) })
+      return json(200, { ...supervisor.kontenUebersicht(), ...guthabenUebersicht() })
     }
 
     if (pfad === '/api/konten' && req.method === 'POST') {

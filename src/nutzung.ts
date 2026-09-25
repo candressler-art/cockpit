@@ -438,3 +438,81 @@ export function kennzahlenBerechnen(tage: TagesNutzung[], heute: string): Kennza
     schnittAktiv30: aktiv30 > 0 ? Math.round(dreissig / aktiv30) : 0,
   }
 }
+
+/** Was der Rueckblick ueber eine Sitzung wissen muss (der Daemon fuellt es aus Chat-Index und Laufdatenbank). */
+export type SitzungsArt = (
+  | { art: 'chat'; chatId: string; titel: string }
+  | { art: 'loop'; titel: string }
+  | { art: 'team'; runId: string; titel: string }
+  | { art: 'sonst' }
+) & {
+  /**
+   * Projekt aus dem STARTordner der Sitzung (Chat-Index). Das Projekt je
+   * Antwort folgt dem cwd jeder Nachricht -- wechselt ein Agent mit `cd` in
+   * einen Unterordner, stuende dort "web" oder "highlight.js", und ein Loop
+   * zerfiele in mehrere Eintraege.
+   */
+  projekt?: string | null
+}
+
+export interface RueckblickEintrag {
+  art: 'chat' | 'loop' | 'team' | 'sonst'
+  titel: string
+  /** Nur bei art 'chat': die Chat-Id zum Verlinken. */
+  chat: string | null
+  /** Nur bei art 'team': der Auftrag. */
+  runId: string | null
+  projekt: string | null
+  tokens: number
+  antworten: number
+  /** Wie viele Sitzungen dieser Eintrag zusammenfasst (Loop-Durchgaenge, Worker eines Auftrags). */
+  sitzungen: number
+  von: number
+  bis: number
+}
+
+/**
+ * Sitzungen eines Tages zu lesbaren Eintraegen zusammenfassen.
+ *
+ * Vorher stand jede Sitzung einzeln da: ein Loop mit 14 Durchgaengen ergab
+ * 14 Zeilen mit demselben abgeschnittenen Auftragstext, ein Team-Auftrag eine
+ * Zeile je Worker-Aufruf. Jetzt: ein Eintrag je Chat, je Loop (gleicher
+ * Auftrag im gleichen Projekt) und je Team-Auftrag; der Rest je Projekt.
+ * Reine Funktion, damit sie ohne Datenbank testbar ist.
+ */
+export function rueckblickGruppieren(
+  sitzungen: TagesSitzung[],
+  beschreiben: (sitzung: string) => SitzungsArt,
+): RueckblickEintrag[] {
+  const gruppen = new Map<string, RueckblickEintrag>()
+  for (const s of sitzungen) {
+    const b = beschreiben(s.sitzung)
+    const projekt = b.projekt ?? s.projekt
+    const schluessel = b.art === 'chat' ? `chat:${b.chatId}`
+      : b.art === 'loop' ? `loop:${projekt ?? ''}:${b.titel}`
+        : b.art === 'team' ? `team:${b.runId}`
+          : `sonst:${projekt ?? ''}`
+    const vorhanden = gruppen.get(schluessel)
+    if (vorhanden) {
+      vorhanden.tokens += s.tokens
+      vorhanden.antworten += s.antworten
+      vorhanden.sitzungen++
+      vorhanden.von = Math.min(vorhanden.von, s.von)
+      vorhanden.bis = Math.max(vorhanden.bis, s.bis)
+      continue
+    }
+    gruppen.set(schluessel, {
+      art: b.art,
+      titel: b.art === 'sonst' ? 'Andere Sitzungen' : b.titel,
+      chat: b.art === 'chat' ? b.chatId : null,
+      runId: b.art === 'team' ? b.runId : null,
+      projekt,
+      tokens: s.tokens,
+      antworten: s.antworten,
+      sitzungen: 1,
+      von: s.von,
+      bis: s.bis,
+    })
+  }
+  return [...gruppen.values()].sort((a, b) => a.von - b.von)
+}

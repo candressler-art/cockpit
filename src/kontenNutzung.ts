@@ -265,6 +265,8 @@ export interface Guthaben {
   stand: number | null
   /** Bisher verbraucht, Hauptwaehrungseinheiten. */
   verbraucht: number | null
+  /** Monatliche Obergrenze, die in claude.ai gesetzt ist, null wenn keine. */
+  grenze: number | null
   waehrung: string | null
   gemessenAm: number
 }
@@ -285,7 +287,10 @@ export function guthabenAusAntwort(body: unknown, jetzt: number): Guthaben | nul
   const x = b?.extra_usage as Record<string, unknown> | null | undefined
   if (!x || typeof x !== 'object') return null
   const stand = betragLesen(x.balance)
-  const verbraucht = betragLesen((b?.spend as Record<string, unknown> | undefined)?.used)
+  const spend = b?.spend as Record<string, unknown> | undefined
+  const verbraucht = betragLesen(spend?.used)
+  const grenzeMonat = betragLesen(x.monthly_limit)
+  const grenzeSpend = betragLesen(spend?.limit)
   return {
     aktiv: x.is_enabled === true,
     umschaltbar: x.can_toggle === true,
@@ -293,8 +298,69 @@ export function guthabenAusAntwort(body: unknown, jetzt: number): Guthaben | nul
     jemalsAktiv: x.credits_ever_enabled === true,
     stand: stand.betrag,
     verbraucht: verbraucht.betrag,
+    grenze: grenzeMonat.betrag ?? grenzeSpend.betrag,
     waehrung: stand.waehrung ?? verbraucht.waehrung,
     gemessenAm: jetzt,
+  }
+}
+
+/** Was vom Guthaben noch uebrig ist: der gemeldete Stand, sonst Grenze minus Verbrauch. */
+export function guthabenRest(g: Pick<Guthaben, 'stand' | 'grenze' | 'verbraucht'>): number | null {
+  if (g.stand !== null) return Math.max(0, g.stand)
+  if (g.grenze !== null && g.verbraucht !== null) return Math.max(0, g.grenze - g.verbraucht)
+  return null
+}
+
+export interface GuthabenPrognose {
+  /** Verbrauch je Tag im Beobachtungszeitraum (Hauptwaehrung), null ohne genug Verlauf. */
+  proTag: number | null
+  /** Wie viele Tage der Verlauf abdeckt, auf den sich proTag stuetzt. */
+  basisTage: number
+  /** Restguthaben, null wenn Anthropic weder Stand noch Grenze meldet. */
+  rest: number | null
+  /** Tage bis leer beim bisherigen Tempo; null = nicht absehbar (kein Verbrauch oder Rest unbekannt). */
+  tage: number | null
+  /** Zeitpunkt, an dem es leer waere (ms), passend zu `tage`. */
+  leerAm: number | null
+}
+
+/** Mindestens so viel Verlauf, bevor ein Tempo behauptet wird -- ein einzelner Abend ist kein Tempo. */
+const PROGNOSE_MINDESTENS_MS = 24 * 3_600_000
+/** So weit zurueck zaehlt das Tempo: aktuell genug, aber laenger als ein Ausreisser-Tag. */
+const PROGNOSE_FENSTER_MS = 14 * 86_400_000
+
+/**
+ * Wie lange reicht das Guthaben beim bisherigen Tempo? Reine Funktion ueber den
+ * gespeicherten Verlauf (aufsteigend). Faellt der Verbrauch zwischendurch
+ * (Monatswechsel), zaehlt nur der Abschnitt danach -- sonst ergaebe der
+ * Sprung ein negatives Tempo.
+ */
+export function guthabenPrognose(
+  verlauf: { ts: number; verbraucht: number | null }[],
+  rest: number | null,
+  jetzt: number,
+): GuthabenPrognose {
+  let punkte = verlauf.filter((p) => p.verbraucht !== null && p.ts >= jetzt - PROGNOSE_FENSTER_MS && p.ts <= jetzt)
+  for (let i = punkte.length - 1; i > 0; i--) {
+    if ((punkte[i]!.verbraucht as number) < (punkte[i - 1]!.verbraucht as number)) {
+      punkte = punkte.slice(i)
+      break
+    }
+  }
+  const erster = punkte[0]
+  const letzter = punkte[punkte.length - 1]
+  const spanne = erster && letzter ? letzter.ts - erster.ts : 0
+  if (!erster || !letzter || spanne < PROGNOSE_MINDESTENS_MS) {
+    return { proTag: null, basisTage: spanne / 86_400_000, rest, tage: null, leerAm: null }
+  }
+  const proTag = Math.max(0, ((letzter.verbraucht as number) - (erster.verbraucht as number)) / (spanne / 86_400_000))
+  const tage = rest !== null && proTag > 0 ? rest / proTag : null
+  return {
+    proTag,
+    basisTage: spanne / 86_400_000,
+    rest,
+    tage,
+    leerAm: tage !== null ? Math.round(jetzt + tage * 86_400_000) : null,
   }
 }
 

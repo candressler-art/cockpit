@@ -119,6 +119,21 @@ CREATE TABLE IF NOT EXISTS einstellungen (
   id    INTEGER PRIMARY KEY CHECK (id = 1),
   werte TEXT NOT NULL
 );
+
+-- Stand des Nutzungsguthabens je Konto, einmal je Stunde (guthabenPuls im
+-- Daemon). Ohne Verlauf gibt es kein Tempo und damit keine Prognose "reicht
+-- noch X Tage". Aelter als 60 Tage wird geloescht -- die Prognose schaut nur
+-- auf die letzten zwei Wochen.
+CREATE TABLE IF NOT EXISTS guthaben_verlauf (
+  konto      TEXT NOT NULL,
+  ts         INTEGER NOT NULL,
+  aktiv      INTEGER NOT NULL,
+  verbraucht REAL,
+  stand      REAL,
+  grenze     REAL,
+  waehrung   TEXT,
+  PRIMARY KEY (konto, ts)
+);
 `
 
 /** Wie lange ein Schreibzugriff auf eine fremde Sperre wartet (ms). */
@@ -520,6 +535,38 @@ export class CockpitDb {
         stand.siebenTageAnteil, stand.siebenTageResetsAt,
         stand.gemessenAm, quelle,
       )
+  }
+
+  /** Einen Guthabenstand festhalten (und alles aelter als 60 Tage wegwerfen). */
+  guthabenMerken(konto: string, g: {
+    gemessenAm: number; aktiv: boolean; verbraucht: number | null; stand: number | null
+    grenze: number | null; waehrung: string | null
+  }): void {
+    this.db.prepare(
+      `INSERT OR REPLACE INTO guthaben_verlauf (konto, ts, aktiv, verbraucht, stand, grenze, waehrung)
+       VALUES (?,?,?,?,?,?,?)`,
+    ).run(konto, g.gemessenAm, g.aktiv ? 1 : 0, g.verbraucht, g.stand, g.grenze, g.waehrung)
+    this.db.prepare('DELETE FROM guthaben_verlauf WHERE ts < ?').run(g.gemessenAm - 60 * 86_400_000)
+  }
+
+  /** Verlauf eines Kontos ab `ab` (ms), aufsteigend. */
+  guthabenVerlauf(konto: string, ab: number): { ts: number; aktiv: boolean; verbraucht: number | null; stand: number | null }[] {
+    return (this.db.prepare(
+      'SELECT ts, aktiv, verbraucht, stand FROM guthaben_verlauf WHERE konto = ? AND ts >= ? ORDER BY ts',
+    ).all(konto, ab) as { ts: number; aktiv: number; verbraucht: number | null; stand: number | null }[])
+      .map((r) => ({ ts: Number(r.ts), aktiv: r.aktiv === 1, verbraucht: r.verbraucht, stand: r.stand }))
+  }
+
+  /**
+   * Zu welchem Team-Auftrag eine Sitzung gehoert -- fuer den Rueckblick, der
+   * die vielen Worker-Sitzungen eines Auftrags zu einem Eintrag zusammenfasst.
+   */
+  laufFuerSitzung(sessionId: string): { runId: string; label: string } | null {
+    const r = this.db.prepare(
+      `SELECT a.run_id AS run_id, r.label AS label FROM agents a JOIN runs r ON r.run_id = a.run_id
+       WHERE a.session_id = ? AND a.role != 'chat' LIMIT 1`,
+    ).get(sessionId) as { run_id: string; label: string } | undefined
+    return r ? { runId: String(r.run_id), label: String(r.label) } : null
   }
 
   close(): void {

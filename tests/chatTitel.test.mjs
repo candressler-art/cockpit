@@ -9,7 +9,11 @@ const pruefe = (name, ist, soll) => {
   console.log(`  ${ist === soll ? 'ok   ' : 'FEHLT'} ${name}${ist === soll ? '' : ` -- ist ${JSON.stringify(ist)}`}`)
 }
 
-pruefe('Ueberschrift', titelAusEingabe('# Umbau-Schicht: Cockpit\n\nDu arbeitest'), 'Umbau-Schicht: Cockpit Du arbeitest')
+// Beginnt die Eingabe mit einer Ueberschrift, ist nur sie der Titel -- vorher
+// klebte der erste Absatz dran ("Umbau-Schicht: Cockpit Du arbeitest ...").
+pruefe('Ueberschrift allein ist der Titel', titelAusEingabe('# Umbau-Schicht: Cockpit\n\nDu arbeitest'), 'Umbau-Schicht: Cockpit')
+pruefe('Ueberschrift mit fuehrender Leerzeile', titelAusEingabe('\n## Plan fuer X\nText'), 'Plan fuer X')
+pruefe('ohne Ueberschrift: Zeilen zusammengezogen', titelAusEingabe('Erste Zeile\nzweite Zeile'), 'Erste Zeile zweite Zeile')
 pruefe('tiefe Ueberschrift', titelAusEingabe('### Plan'), 'Plan')
 pruefe('Zitat und Liste', titelAusEingabe('> - **Wichtig**: los'), '**Wichtig**: los')
 pruefe('Aufzaehlung', titelAusEingabe('1. Erster Schritt'), 'Erster Schritt')

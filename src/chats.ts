@@ -119,9 +119,9 @@ let db: DatabaseSync | null = null
  * Stand des Index-Schemas. Der Index ist abgeleiteter Zustand -- statt
  * Spalten nachzuruesten, wird er bei einem Sprung einfach neu gebaut
  * (chats und chats_fts; chat_fortsetzung ist KEIN abgeleiteter Zustand und
- * bleibt unangetastet).
+ * bleibt unangetastet). 4: Titel aus Markdown-Ueberschrift (titelAusEingabe).
  */
-const INDEX_VERSION = 3
+const INDEX_VERSION = 4
 
 function handle(pfad: string): DatabaseSync {
   if (!db) {
@@ -171,7 +171,13 @@ interface Gelesen {
  */
 export function titelAusEingabe(eingabe: string): string {
   // Der Anhang-Block (Pfade der angehaengten Dateien) gehoert nicht in den Titel.
-  return (eingabe.split(`\n\n${ANHANG_KOPF}`)[0] ?? '')
+  let text = eingabe.split(`\n\n${ANHANG_KOPF}`)[0] ?? ''
+  // Beginnt die Eingabe mit einer Markdown-Ueberschrift (ein Auftrag wie
+  // "# Umbau-Schicht: ..."), ist die Ueberschrift der Titel -- nicht die
+  // ersten 70 Zeichen aus Ueberschrift und erstem Absatz zusammengeklebt.
+  const ersteZeile = text.trimStart().split('\n')[0] ?? ''
+  if (/^#{1,6}\s+\S/.test(ersteZeile)) text = ersteZeile
+  return text
     .replace(/\s+/g, ' ')
     .trim()
     .replace(/^(?:(?:#{1,6}|>|[-*+]|\d+[.)])(?:\s+|$))+/, '')
@@ -659,4 +665,27 @@ export async function verlaufLesen(
     auswerten(sessionId, pfad, roh, Buffer.byteLength(roh), pfad.startsWith(SPIEGEL) ? 'desktop' : 'server').kopf
   const { nachrichten, gekuerzt } = verlaufNormalisieren(roh, istNutzungslimitText, max)
   return { kopf, nachrichten, gekuerzt }
+}
+
+/**
+ * Was ueber eine Sitzung bekannt ist -- fuer den Rueckblick, der Chats,
+ * Loops und Team-Auftraege unterschiedlich zeigt. `chat` nur, wenn die
+ * Sitzung in die Chatliste gehoert (SICHTBAR_SQL) -- ein Worker-Aufruf soll
+ * im Rueckblick nicht als oeffenbarer Chat erscheinen.
+ */
+export function sitzungBeschreiben(
+  dbPfad: string, sitzung: string,
+): { titel: string; entrypoint: string | null; projekt: string | null; chat: { id: string; titel: string } | null } | null {
+  const h = handle(dbPfad)
+  const r = h.prepare(
+    `SELECT c.titel, c.entrypoint, c.projekt, ${SICHTBAR_SQL} AS sichtbar FROM chats c WHERE c.session_id = ?`,
+  ).get(sitzung) as { titel: string; entrypoint: string | null; projekt: string | null; sichtbar: number } | undefined
+  const chat = chatFuerSitzung(dbPfad, sitzung)
+  if (!r) return chat ? { titel: chat.titel, entrypoint: null, projekt: null, chat } : null
+  return {
+    titel: String(r.titel),
+    entrypoint: r.entrypoint,
+    projekt: r.projekt,
+    chat: r.sichtbar ? chat : null,
+  }
 }

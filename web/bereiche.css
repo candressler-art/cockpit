@@ -125,6 +125,8 @@ a.knopf { text-decoration: none; color: var(--text); }
 a.tag-eintrag:hover { background: var(--surface0); }
 .tag-titel { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tag-meta { font-size: 12px; color: var(--overlay); }
+/* Loops und Sonstiges sind Hintergrundarbeit, keine eigenen Gespraeche -- etwas zuruecknehmen. */
+.tag-eintrag.loop .tag-titel, .tag-eintrag.sonst .tag-titel { color: var(--subtext); }
 
 .konten-modus { display: flex; align-items: flex-start; gap: 8px; font-size: 13.5px; color: var(--subtext); margin-bottom: 10px; flex-wrap: wrap; }
 .konten-modus .sym { margin-top: 3px; flex: 0 0 auto; }
@@ -157,6 +159,11 @@ a.tag-eintrag:hover { background: var(--surface0); }
 .guthaben { display: flex; align-items: flex-start; gap: 6px; font-size: 12.5px; color: var(--subtext); border-top: 1px solid var(--surface0); padding-top: 6px; margin-top: 2px; }
 .guthaben .sym { margin-top: 3px; flex: 0 0 auto; }
 .guthaben.an { color: var(--gruen); }
+/* Summe ueber alle Konten, ueber den Kontokarten. */
+.guthaben-gesamt { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; color: var(--subtext); background: var(--mantle); border: 1px solid var(--surface0); border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; }
+.guthaben-gesamt .sym { margin-top: 2px; flex: 0 0 auto; color: var(--overlay); }
+.guthaben-gesamt.an { color: var(--text); }
+.guthaben-gesamt.an .sym { color: var(--gruen); }
 .klein { font-size: 12.5px; }
 .klein code { font: 11.5px var(--mono); word-break: break-all; }
 
