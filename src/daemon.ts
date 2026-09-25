@@ -32,6 +32,8 @@ import { nachliefern, senden as klientSenden, type Klient } from './nachlieferun
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { EinstellungsSpeicher, auswahlListen } from './einstellungen.js'
+import { nutzungIndizieren, nutzungLesen, kennzahlenBerechnen, tagVerschieben, tagVon } from './nutzung.js'
+import { kontenLesen } from './konten.js'
 
 const PORT = Number(process.env.COCKPIT_PORT ?? 8765)
 const HOST = process.env.COCKPIT_HOST ?? '127.0.0.1'
@@ -354,6 +356,25 @@ setInterval(
   () => void chatsIndizieren(DB_PFAD).catch(() => {}),
   10 * 60_000,
 ).unref()
+
+/**
+ * Wo Sitzungsdateien liegen: der Spiegel des Desktops, projects/ dieses
+ * Hosts und das jedes Zusatzkontos. Doppelte (Links) entdoppelt
+ * nutzungIndizieren ueber den echten Pfad. Bei jedem Lauf neu, damit ein
+ * spaeter angelegtes Konto mitgezaehlt wird.
+ */
+function nutzungsWurzeln(): string[] {
+  const w = new Set<string>([
+    process.env.COCKPIT_SESSIONS ?? '/var/lib/cockpit/sessions-desktop',
+    join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude'), 'projects'),
+  ])
+  for (const k of kontenLesen()) w.add(join(k.configDir, 'projects'))
+  return [...w]
+}
+const nutzungPuls = (): Promise<unknown> =>
+  nutzungIndizieren(DB_PFAD, nutzungsWurzeln()).catch((e) => console.warn('[nutzung] Index fehlgeschlagen:', String(e)))
+void nutzungPuls()
+setInterval(() => void nutzungPuls(), 10 * 60_000).unref()
 
 // --- HTTP --------------------------------------------------------------------
 
@@ -841,6 +862,19 @@ const server = createServer(async (req, res) => {
       // 400 nur, wenn gar nichts uebernommen werden konnte -- ein gueltiges
       // Feld neben einem ungueltigen ist trotzdem gespeichert.
       return json(fehler.length > 0 && !geaendert ? 400 : 200, { werte, fehler })
+    }
+
+    if (pfad === '/api/nutzung' && req.method === 'GET') {
+      // Vor dem Lesen nachziehen: der Index ist inkrementell (wenige ms, wenn
+      // nichts Neues da ist), und so zeigt "heute" auch die letzte Antwort.
+      const t = zahlLesen(url.searchParams.get('tage'), 'tage', { min: 1, ganzzahlig: true })
+      if (t.fehler) return json(400, { fehler: t.fehler })
+      // 53 Wochen fuer das Raster; mehr als gut zwei Jahre braucht keine Ansicht.
+      const tage = Math.min(t.zahl ?? 371, 800)
+      await nutzungPuls()
+      const heute = tagVon(Date.now())
+      const bericht = nutzungLesen(DB_PFAD, tagVerschieben(heute, -(tage - 1)))
+      return json(200, { ...bericht, kennzahlen: kennzahlenBerechnen(bericht.tage, bericht.heute) })
     }
 
     if (pfad === '/api/rollen' && req.method === 'GET') {

@@ -24,6 +24,7 @@
 import { DatabaseSync } from 'node:sqlite'
 import { open, readdir, realpath, stat } from 'node:fs/promises'
 import { join } from 'node:path'
+import { DB_WARTEN_MS } from './db.js'
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS nutzung_dateien (
@@ -132,7 +133,8 @@ let dbPfadOffen: string | null = null
 
 function handle(pfad: string): DatabaseSync {
   if (!db || dbPfadOffen !== pfad) {
-    db = new DatabaseSync(pfad)
+    // Gleiche Datei wie CockpitDb -- gleiches Warten auf fremde Sperren.
+    db = new DatabaseSync(pfad, { timeout: DB_WARTEN_MS })
     dbPfadOffen = pfad
     db.exec('PRAGMA journal_mode = WAL')
     db.exec(SCHEMA)
@@ -181,7 +183,18 @@ async function neueZeilenLesen(pfad: string, versatz: number, groesse: number): 
  * dieselben Dateien zeigen (das projects/ eines Zusatzkontos ist ein Link auf
  * das des Hauptkontos) -- entdoppelt wird ueber den echten Pfad.
  */
-export async function nutzungIndizieren(dbPfad: string, wurzeln: string[]): Promise<{ dateien: number; neu: number }> {
+export function nutzungIndizieren(dbPfad: string, wurzeln: string[]): Promise<{ dateien: number; neu: number }> {
+  // Laeuft schon ein Durchgang (Start und Zeitgeber ueberlappen beim ersten
+  // Mal, der erste liest Hunderte MB), denselben abwarten: ein zweites BEGIN
+  // auf derselben Verbindung wuerde werfen.
+  if (laufend) return laufend
+  laufend = indizieren(dbPfad, wurzeln).finally(() => { laufend = null })
+  return laufend
+}
+
+let laufend: Promise<{ dateien: number; neu: number }> | null = null
+
+async function indizieren(dbPfad: string, wurzeln: string[]): Promise<{ dateien: number; neu: number }> {
   const h = handle(dbPfad)
   const bekannt = new Map<string, { versatz: number; mtime: number }>()
   for (const r of h.prepare('SELECT pfad, versatz, mtime FROM nutzung_dateien').all() as
@@ -206,7 +219,12 @@ export async function nutzungIndizieren(dbPfad: string, wurzeln: string[]): Prom
      ON CONFLICT (schluessel) DO UPDATE SET
        aus = MAX(aus, excluded.aus), ein = MAX(ein, excluded.ein),
        cache_schreiben = MAX(cache_schreiben, excluded.cache_schreiben),
-       cache_lesen = MAX(cache_lesen, excluded.cache_lesen)`,
+       cache_lesen = MAX(cache_lesen, excluded.cache_lesen)
+     -- Nur wenn wirklich mehr drinsteht: sonst zaehlte jede schon bekannte
+     -- Zeile (kopierte Sitzungsdatei) als Aenderung und damit als "neu".
+     WHERE excluded.aus > nutzung.aus OR excluded.ein > nutzung.ein
+        OR excluded.cache_schreiben > nutzung.cache_schreiben
+        OR excluded.cache_lesen > nutzung.cache_lesen`,
   )
   const dateiMerken = h.prepare(
     `INSERT INTO nutzung_dateien (pfad, versatz, mtime) VALUES (?,?,?)
@@ -325,4 +343,68 @@ export function nutzungLesen(dbPfad: string, abTag: string, jetzt = Date.now()):
   }
 
   return { zeitzone: ZEITZONE, heute: tagVon(jetzt), tage, modelle, projekte, stunden }
+}
+
+export interface Kennzahlen {
+  heute: number
+  sieben: number
+  dreissig: number
+  /** Aktive Tage in Folge bis heute (oder bis gestern, wenn heute noch nichts war). */
+  serie: number
+  laengsteSerie: number
+  aktiveTage: number
+  aktivsterTag: { tag: string; tokens: number } | null
+  /** Durchschnitt je aktivem Tag der letzten 30 Tage. */
+  schnittAktiv30: number
+}
+
+/** Tag (YYYY-MM-DD) um n Kalendertage verschieben -- ueber UTC-Mittag, damit Sommerzeit nicht stoert. */
+export function tagVerschieben(tag: string, n: number): string {
+  const d = new Date(`${tag}T12:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + n)
+  return d.toISOString().slice(0, 10)
+}
+
+/**
+ * Kennzahlen aus den Tageswerten. Reine Funktion ueber `tage` (aufsteigend,
+ * luecken erlaubt), damit sie ohne Datenbank testbar ist.
+ */
+export function kennzahlenBerechnen(tage: TagesNutzung[], heute: string): Kennzahlen {
+  const nachTag = new Map(tage.filter((t) => t.tokens > 0).map((t) => [t.tag, t.tokens]))
+  const summeAb = (ab: string): number => {
+    let s = 0
+    for (const [tag, tok] of nachTag) if (tag >= ab && tag <= heute) s += tok
+    return s
+  }
+  // Serie: heute zaehlt mit, wenn aktiv; ist heute (noch) nichts gelaufen,
+  // bricht die Serie nicht schon morgens um sieben ab.
+  let serie = 0
+  let tag = nachTag.has(heute) ? heute : tagVerschieben(heute, -1)
+  while (nachTag.has(tag)) {
+    serie++
+    tag = tagVerschieben(tag, -1)
+  }
+  let laengste = 0
+  let lauf = 0
+  let vorher: string | null = null
+  for (const t of [...nachTag.keys()].sort()) {
+    lauf = vorher !== null && tagVerschieben(vorher, 1) === t ? lauf + 1 : 1
+    if (lauf > laengste) laengste = lauf
+    vorher = t
+  }
+  let aktivster: { tag: string; tokens: number } | null = null
+  for (const [t, tok] of nachTag) if (!aktivster || tok > aktivster.tokens) aktivster = { tag: t, tokens: tok }
+  const ab30 = tagVerschieben(heute, -29)
+  const aktiv30 = [...nachTag.keys()].filter((t) => t >= ab30 && t <= heute).length
+  const dreissig = summeAb(ab30)
+  return {
+    heute: nachTag.get(heute) ?? 0,
+    sieben: summeAb(tagVerschieben(heute, -6)),
+    dreissig,
+    serie,
+    laengsteSerie: laengste,
+    aktiveTage: nachTag.size,
+    aktivsterTag: aktivster,
+    schnittAktiv30: aktiv30 > 0 ? Math.round(dreissig / aktiv30) : 0,
+  }
 }
