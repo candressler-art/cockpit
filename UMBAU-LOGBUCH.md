@@ -2,8 +2,9 @@
 
 ## Zusammenfassung fuer Can
 
-- **Stand:** Schritt 1 (Merge) und Schritt 2 (Backend) erledigt. Als
-  Naechstes Schritt 3 (Oberflaeche).
+- **Stand:** Schritte 1 und 2 erledigt. Schritt 3 (Oberflaeche) laeuft:
+  Geruest und **Chat fertig**; Aufgaben, Nutzung, Server, Notizen, Terminal,
+  Einstellungen sind noch Platzhalter.
 - **Fertig (Backend):** Einstellungen in der DB + API; Nutzungsindex +
   `/api/nutzung`; Rollen (`inherit`, Planer-Regel); `/api/verzeichnisse`;
   **Chat-API** (neuer Chat, Weiterschreiben mit Modell/Aufwand/Modus,
@@ -11,7 +12,11 @@
   mit "immer erlauben", Antworten auf Rueckfragen, Plan annehmen);
   **`/api/aufgaben`** (To-do-Listen und Spezialisten aller Agenten);
   **Nutzungsguthaben** in `/api/konten` (nur Anzeige).
-- **Du musst pruefen:** noch nichts (keine Oberflaeche geaendert).
+- **Du musst pruefen:** noch nichts (nicht ausgerollt).
+- **Fehler gefunden und behoben (betraf live):** scheiterte bei einem NEUEN
+  Chat das erste Konto vor der ersten Zeile (z.B. Anmeldefehler), endete der
+  Kontowechsel mit "No conversation found". Jetzt startet das naechste Konto
+  frisch mit derselben Session-Id (Commit c26f983).
 - **Entscheidungen, die ich getroffen habe:**
   - *Kein eigener To-do-Agent*: jeder Agent fuehrt seine Liste selbst mit
     TodoWrite (Chat-Systemprompt verlangt das), der Aufgaben-Bereich sammelt
@@ -46,12 +51,30 @@
 - `GET /api/konten` hat jetzt `guthaben: {konto: {aktiv, stand, ...}}`.
 - Gebaut in `src/chatOptionen.ts`, `src/freigaben.ts`, `src/aufgaben.ts`.
 
+## Neue Oberflaeche (Aufbau)
+
+- `web/index.html` + `web/stil.css` + `web/app.js` (Router `#/chat/<id>`,
+  `#/<bereich>`, Seitenleiste/Schublade, Fuss mit Verbindung + Limit).
+- `web/ui/`: `dom.js` (h(), Symbole, api(), Formate), `markdown.js`,
+  `chat.js`, `eingabe.js` (Ordner/Modell/Denken/Modus, Diktieren),
+  `werkzeuge.js` (Werkzeug-Zeilen, Diff, To-do, Spezialisten-Karte),
+  `diff.js`, `chatliste.js`. Bereiche: in `app.js` `BEREICHE` eintragen,
+  `bauen()` -> `{el, zeigen(param), verbergen()}`.
+- Vendor-Dateien: `node scripts/vendor.mjs` (kein Build-Schritt).
+- Browserpruefung: `node scripts/oberflaeche-pruefen.mjs [url] [ansichten]`
+  (1280/375, Konsolenfehler, Ueberbreite, Bilder nach nachtschicht-bilder/).
+- Alte Oberflaeche (`web/tabs/*`, `kern.js`, `graph.js`, `zeitachse.js`,
+  `hud.css`, `tabs.js`, `sprachpegel.js`?) ist nicht mehr eingebunden ->
+  Schritt 4 loeschen. `chatLesen` in chats.ts ist tot (nur noch Tests).
+
 ## Naechste Schritte
 
-1. Schritt 3: Grundgeruest (Seitenleiste, Router), dann Chat (Markdown mit
-   marked+DOMPurify+highlight.js nach web/vendor), Einstellungen, Nutzung,
-   Aufgaben, Server, Notizen, Terminal -- je Playwright 1280/375 px.
-2. Schritt 4 Aufraeumen, README; Schritt 5 Ende-zu-Ende mit Haiku.
+1. Bereiche bauen: Einstellungen (inkl. Stimme, Spezialisten, Konten-Vorzug),
+   Nutzung (Heatmap, Kennzahlen, Konten, Guthaben), Aufgaben (+ Team-Auftrag-
+   Formular), Server, Notizen (Suche/Lesen statt 3D), Terminal (Konsole).
+2. Chat-Karten fuer Freigabe/Rueckfrage/Plan/Spezialist sind nur ohne echte
+   Daten geprueft -> in Schritt 5 mit Haiku echt ansehen.
+3. Schritt 4 Aufraeumen, README; Schritt 5 Ende-zu-Ende mit Haiku.
 
 ## Durchgaenge
 
@@ -70,3 +93,9 @@
   meiner Shell erbt -- live (systemd) nicht der Fall.
   Die Kopie der Live-DB fuer einen Probelauf war per Regel gesperrt --
   ausgelassen.
+- **D5** (25.9. 02:36): nacht-optimierung ohne neue Commits. Ereignisse
+  tragen normalisierte `nachricht`, GET /api/chats/:id im vollen Format.
+  Neues Geruest + Chat-Ansicht, Playwright 1280/375 ohne Befund. Senden mit
+  Attrappen-Konten geprueft (Anmeldefehler, Kontowechsel) -> Kontowechsel-
+  Fehler gefunden und behoben. Testkonten heissen jetzt `zweit`/`dritt`
+  (`haupt` ist CLAUDE_CONFIG_DIR, Namensgleichheit verwirrte die Liste).
