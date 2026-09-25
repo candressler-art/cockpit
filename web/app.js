@@ -23,6 +23,7 @@ import { nutzungBauen } from './ui/nutzung.js'
 import { aufgabenBauen } from './ui/aufgaben.js'
 import { serverBauen } from './ui/server.js'
 import { notizenBauen } from './ui/notizen.js'
+import { terminalBauen } from './ui/terminal.js'
 
 await bus.basisErmitteln()
 // Die Stimmstufe ist je Geraet (localStorage) -- vor der ersten Meldung lesen.
@@ -32,18 +33,12 @@ stimme.stufeLaden()
 // bauen() erst beim ersten Anzeigen: ein Bereich, den niemand oeffnet, kostet
 // nichts. zeigen(param)/verbergen() bei jedem Wechsel -- wer pollt, muss im
 // Hintergrund anhalten (Akku am Handy).
-const platzhalter = (titel, text) => () => {
-  const el = h('section.bereich', {}, h('header.bereich-kopf', {}, h('h1', {}, titel)),
-    h('div.bereich-inhalt', {}, h('div.leer-zustand', {}, text)))
-  return { el }
-}
-
 const BEREICHE = [
   { id: 'aufgaben', titel: 'Aufgaben', symbol: 'aufgaben', bauen: aufgabenBauen },
   { id: 'nutzung', titel: 'Nutzung', symbol: 'nutzung', bauen: nutzungBauen },
   { id: 'server', titel: 'Server', symbol: 'server', bauen: serverBauen },
   { id: 'notizen', titel: 'Notizen', symbol: 'notizen', bauen: notizenBauen },
-  { id: 'terminal', titel: 'Terminal', symbol: 'terminal', bauen: platzhalter('Terminal', 'Befehle mit Freigabe.') },
+  { id: 'terminal', titel: 'Terminal', symbol: 'terminal', bauen: terminalBauen },
   { id: 'einstellungen', titel: 'Einstellungen', symbol: 'einstellungen', bauen: einstellungenBauen },
 ]
 const bereichNach = new Map(BEREICHE.map((b) => [b.id, b]))

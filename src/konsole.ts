@@ -105,3 +105,37 @@ export function konsoleBefehl(
 
   return { id, ergebnis }
 }
+
+// --- Verlauf -----------------------------------------------------------------
+
+/** So viele Befehle merkt sich der Daemon fuer den Terminal-Bereich. */
+export const VERLAUF_MAX = 30
+/** Je Strom im Verlauf -- die volle Ausgabe ging bereits live an die Oberflaeche. */
+const VERLAUF_AUSGABE = 32 * 1024
+
+export type KonsoleEintrag = Partial<KonsoleErgebnis> & { id: string; phase: string; zeit: number }
+
+/**
+ * Juengste Befehle mit ihrem letzten Stand, nur im Speicher. Ohne ihn waere
+ * nach einem Neuladen der Seite eine wartende Freigabe unsichtbar -- der
+ * Befehl hinge dann bis zum Neustart des Daemons.
+ */
+export function verlaufAufnehmen(
+  verlauf: KonsoleEintrag[],
+  e: Record<string, unknown>,
+  jetzt = Date.now(),
+  max = VERLAUF_MAX,
+): KonsoleEintrag[] {
+  const id = typeof e.id === 'string' ? e.id : null
+  if (!id) return verlauf
+  const gekuerzt: Record<string, unknown> = { ...e }
+  for (const k of ['stdout', 'stderr'] as const) {
+    const t = gekuerzt[k]
+    if (typeof t === 'string' && t.length > VERLAUF_AUSGABE) gekuerzt[k] = t.slice(0, VERLAUF_AUSGABE) + '\n[… im Verlauf gekürzt]'
+  }
+  const alt = verlauf.find((x) => x.id === id)
+  if (alt) Object.assign(alt, gekuerzt)
+  else verlauf.push({ zeit: jetzt, ...gekuerzt, id, phase: String(e.phase ?? 'freigabe') } as KonsoleEintrag)
+  if (verlauf.length > max) verlauf.splice(0, verlauf.length - max)
+  return verlauf
+}

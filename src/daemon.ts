@@ -28,7 +28,7 @@ import { AufgabenSammler, AUFGABEN_FENSTER_MS, agentAusZeile } from './aufgaben.
 import { vaultIndizieren, vaultGraphLesen, vaultBeobachten, vaultDa, VAULT } from './vault.js'
 import { notizenLaden, notizenSuchen, notizLesen } from './notizen.js'
 import { vaultZugriffErlaubt } from './vaultZugriff.js'
-import { konsoleBefehl } from './konsole.js'
+import { konsoleBefehl, verlaufAufnehmen, type KonsoleEintrag } from './konsole.js'
 import { cwdPruefen, folgenLesen, zahlLesen } from './eingaben.js'
 import { nutzungAbfragen, guthabenAbfragen, type Guthaben } from './kontenNutzung.js'
 import { AnfrageFehler, fehlerStatus, koerperAuswerten, textFeld } from './httpFehler.js'
@@ -381,6 +381,8 @@ supervisor.on('limit', (l: unknown) => verteilen('limit', l))
 // jede Minute, haeufiger zu fragen brachte nur Last ohne neue Zahlen.
 let letzterSystemStand: SystemStand | null = null
 const systemVerlauf: Record<string, VerlaufPunkt[]> = {}
+/** Juengste Terminal-Befehle, fuer GET /api/konsole (nach Neuladen der Seite). */
+const konsoleVerlauf: KonsoleEintrag[] = []
 
 async function systemPuls(): Promise<void> {
   try {
@@ -816,9 +818,14 @@ const server = createServer(async (req, res) => {
       // Antwortet sofort mit der Freigabe-Id. Das Ergebnis kommt ueber den
       // Live-Strom nach -- ein Befehl kann zwei Minuten laufen, und so lange
       // eine HTTP-Verbindung offenzuhalten waere die schlechtere Wahl.
-      const { id } = konsoleBefehl(supervisor, befehl, cwd, (e) => verteilen('konsole', e))
-      verteilen('konsole', { id, phase: 'freigabe', befehl, cwd })
+      const melden = (e: Record<string, unknown>) => { verlaufAufnehmen(konsoleVerlauf, e); verteilen('konsole', e) }
+      const { id } = konsoleBefehl(supervisor, befehl, cwd, melden)
+      melden({ id, phase: 'freigabe', befehl, cwd })
       return json(202, { id })
+    }
+
+    if (pfad === '/api/konsole' && req.method === 'GET') {
+      return json(200, { eintraege: konsoleVerlauf })
     }
 
     if (pfad === '/api/notizen' && req.method === 'GET') {

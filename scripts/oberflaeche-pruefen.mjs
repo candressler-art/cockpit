@@ -34,6 +34,20 @@ function systemVoll() {
   }
 }
 
+// Jede Phase eines Terminal-Befehls einmal, dazu lange und Fehler-Ausgabe.
+function konsoleVoll() {
+  const t = Date.now() - 600000
+  return { eintraege: [
+    { id: 'k1', zeit: t, phase: 'fertig', befehl: 'df -h / /mnt/daten', cwd: '/opt/cockpit', code: 0, dauerMs: 41, stdout: Array.from({ length: 60 }, (_, i) => `/dev/sda${i}  221G  28G  182G  14% /mnt/eine/sehr/lange/einhaengestelle/die/am/handy/umbrechen/muss/${i}`).join('\n'), stderr: '' },
+    { id: 'k2', zeit: t + 1000, phase: 'fertig', befehl: 'systemctl status gibtsnicht', cwd: '/opt/cockpit', code: 4, dauerMs: 1800, stdout: '', stderr: 'Unit gibtsnicht.service could not be found.' },
+    { id: 'k3', zeit: t + 2000, phase: 'abgelehnt', befehl: 'rm -rf /tmp/umbau/alt', cwd: '/tmp', grund: 'abgelehnt' },
+    { id: 'k4', zeit: t + 3000, phase: 'fehler', befehl: 'sleep 999', cwd: '/opt/cockpit', grund: 'abgebrochen nach 120 s' },
+    { id: 'k5', zeit: t + 4000, phase: 'fertig', befehl: 'true', cwd: '/opt/cockpit', code: 0, dauerMs: 3, stdout: '', stderr: '' },
+    { id: 'k6', zeit: t + 5000, phase: 'laeuft', befehl: 'npm test', cwd: '/home/claude/cockpit-umbau' },
+    { id: 'k7', zeit: t + 6000, phase: 'freigabe', befehl: 'journalctl -u cockpit --since "10 min ago" | grep -i fehler | tail -n 50', cwd: '/opt/cockpit' },
+  ] }
+}
+
 // [name, hash, optional: Aktion nach dem Laden, optional: Vorbereitung vor dem Laden]
 const ANSICHTEN = [
   ['neu', '#/chat'],
@@ -78,6 +92,19 @@ const ANSICHTEN = [
   ['notizen-fehler', '#/notizen/Index', null, (s) => Promise.all([s.route('**/api/notizen', (r) => r.fulfill({ status: 500, json: { fehler: 'Vault nicht lesbar' } })), s.route('**/api/notizen/lesen*', (r) => r.fulfill({ status: 500, json: { fehler: 'Vault nicht lesbar' } }))])],
   ['notizen-weg', '#/notizen/Gibt/es/nicht'],
   ['terminal', '#/terminal'],
+  ['terminal-voll', '#/terminal', null, (s) => s.route('**/api/konsole', (r) => r.fulfill({ json: konsoleVoll() }))],
+  ['terminal-fehler', '#/terminal', null, (s) => s.route('**/api/konsole', (r) => r.fulfill({ status: 500, json: { fehler: 'Daemon ueberlastet' } }))],
+  ['terminal-ablauf', '#/terminal', async (s) => {
+    const zahl = await s.locator('.t-eintrag').count()
+    await s.fill('.t-befehl', 'echo hallo-aus-dem-test && pwd')
+    await s.press('.t-befehl', 'Enter')
+    await s.locator('.t-eintrag.p-freigabe button.knopf.primaer').last().click()
+    await s.locator('.t-eintrag.p-fertig').nth(zahl).waitFor({ timeout: 10000 })
+    await s.reload({ waitUntil: 'networkidle' })
+    await s.waitForTimeout(500)
+    const text = await s.locator('.t-eintrag').last().innerText()
+    if (!/hallo-aus-dem-test/.test(text) || !/Code 0/.test(text)) throw new Error('Ergebnis fehlt nach Neuladen: ' + text.slice(0, 120))
+  }],
   ['einstellungen', '#/einstellungen'],
 ]
 
