@@ -134,33 +134,17 @@ Alle Endpunkte und WebSocket-Nachrichten stehen jetzt in README.md
 - Guthaben echt: `{aktiv:false, umschaltbar:false, vomNutzerAus:false,
   jemalsAktiv:false, stand:null, verbraucht:0, waehrung:'USD'}` -> Anzeige
   "Guthaben aus" stimmt. Schalter bleibt weggelassen (siehe oben).
-- Gefunden und behoben: Frage nach Kontowechsel doppelt; Modus blieb nach
-  "Plan umsetzen" auf "Nur planen"; **TodoWrite gibt es in der CLI nicht
-  mehr** (TaskCreate/TaskUpdate) -> Chat und Aufgaben zeigten keine Liste;
-  Anhalten blieb auf "arbeitet" haengen und hiess "Fehler"; angehaltene
-  Fragen ohne Kennzeichen; Handy-Eingabeleiste brach bei langem Pfad um;
-  "Wartet auf deine Freigabe" bei einer Rueckfrage.
+- 7 Funde dabei behoben (Details in den Commits von D10).
 - Nicht erzwungen: ein Kontowechsel mitten im Zug (kam echt am Zuganfang).
 - Hinweis: Plan-Modus legt Plaene im Konto-Verzeichnis ab
   (`<config>/plans/`), normales CLI-Verhalten.
 
 ## Durchgaenge
 
-- **D1-D8** (24./25.9.): Merge, Backend (Einstellungen, Nutzung, Rollen,
-  Chat-API, Freigaben, Aufgaben, Guthaben), Geruest, Chat, Einstellungen,
-  Nutzung, Aufgaben, Server begonnen. Testkonten `zweit`/`dritt` mit
-  kuenstlichen Messwerten in /tmp/umbau/cockpit.db; entrypoint neuer Chats
-  der Testinstanz steht als `sdk-cli` (erbt meine Shell), live nicht.
-- **D9** (25.9. 07:21): nacht-optimierung ohne neue Commits. Server aus D8
-  fertig (Kurve erst ab 3 Min. Verlauf, Ausrichtung), **Notizen** und
-  **Terminal** gebaut, jeweils mit Tests; Playwright alle 52 Ansichten
-  1280/375 ohne Befund (inkl. echtem Terminal-Ablauf mit Neuladen).
-- **D10** (25.9. 07:35): Schritt 4: alte Oberflaeche, three.js,
-  `/api/gespraech`, `/api/vault/graph` (+Index), `POST /api/lauf`,
-  `chatLesen` entfernt (`/api/laeufe` bleibt: ausrollen.sh nutzt es); README
-  neu. Playwright 52 Ansichten ohne Befund.
-  Danach Schritt 5 (Ende-zu-Ende, 13 Zuege, 7 Funde behoben, siehe oben);
-  Playwright 52 Ansichten ohne Befund; Ausrollen angefordert (1. von 3).
+- **D1-D10** (24./25.9.): Merge, Backend, alle Bereiche, Aufraeumen
+  (Schritt 4), Ende-zu-Ende (Schritt 5), 1. Ausrollen angefordert.
+  Testkonten `zweit`/`dritt` mit kuenstlichen Messwerten in
+  /tmp/umbau/cockpit.db.
 - **D11** (25.9. 08:06): Ausrollen erfolgreich, live angesehen (s.o.).
   Chat-Titel ohne Markdown-Zeichen (Index-Version 3 baut einmal neu),
   Benachrichtigungen (`web/benachrichtigen.js`, Logik `web/ui/meldungen.js`
