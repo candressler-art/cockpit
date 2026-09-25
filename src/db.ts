@@ -279,8 +279,11 @@ export class CockpitDb {
   agentenSeit(ts: number, limit = 300): Record<string, unknown>[] {
     return this.db
       .prepare(
-        `SELECT * FROM agents WHERE started_at >= ? OR ended_at >= ? OR ended_at IS NULL
-          ORDER BY started_at DESC LIMIT ?`,
+        // Mit dem Titel des Laufs: in Runde 1 eines Team-Auftrags gibt es
+        // noch keinen Orchestrator-Agenten, dessen Label ihn tragen koennte.
+        `SELECT a.*, r.label AS lauf_label FROM agents a LEFT JOIN runs r ON r.run_id = a.run_id
+          WHERE a.started_at >= ? OR a.ended_at >= ? OR a.ended_at IS NULL
+          ORDER BY a.started_at DESC LIMIT ?`,
       )
       .all(ts, ts, limit) as Record<string, unknown>[]
   }

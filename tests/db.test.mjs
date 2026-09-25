@@ -178,6 +178,10 @@ const dbPfad = join(verzeichnis, 'test.db')
   agent('offen', 'a', 100, null)
   const ids = db.agentenSeit(5000).map((r) => r.run_id).sort().join()
   pruefe('agentenSeit: neu begonnen, spaet geendet, noch offen -- nicht alt', ids === 'lang,neu,offen')
+  db.runAnlegen('offen', 'Team: Suche bauen', '/tmp')
+  const zeilen = db.agentenSeit(5000)
+  pruefe('agentenSeit: Titel des Laufs dabei (sonst null)',
+    zeilen.find((r) => r.run_id === 'offen')?.lauf_label === 'Team: Suche bauen' && zeilen.find((r) => r.run_id === 'neu')?.lauf_label === null)
   const ev = (seq, ts, kind) => db.ereignisSpeichern({
     seq, ts, runId: 'neu', agentId: 'a', sessionId: null, kind, parentToolUseId: null, summary: kind, payload: { n: seq },
   })

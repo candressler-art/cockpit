@@ -48,6 +48,8 @@ export interface AgentKurz {
   model: string | null
   startedAt: number
   endedAt: number | null
+  /** Titel des Laufs (runs.label) -- fuer Team-Auftraege der Auftrag selbst. */
+  laufLabel?: string | null
 }
 
 export interface AgentAufgaben extends AgentKurz {
@@ -64,6 +66,24 @@ export interface LaufAufgaben {
   laeuft: boolean
   letzteAktivitaet: number
   agenten: AgentAufgaben[]
+  /** Nur bei Team-Auftraegen: Stand des Orchestrators. */
+  team: TeamStand | null
+}
+
+export interface TeamStand {
+  runde: number
+  /** Letzte Zusammenfassung des Orchestrators ("Index gebaut, Tests fehlen"). */
+  stand: string | null
+  /** Offene Entscheidungsfrage an Can -- der Lauf wartet, bis sie beantwortet ist. */
+  frage: string | null
+}
+
+/** Protokollschritt des Orchestrators (Orchestrator.melden). */
+export interface OrchestratorMeldung {
+  runId: string
+  art?: string
+  daten?: unknown
+  ts?: number
 }
 
 /** Werkzeugnamen, unter denen die CLI Subagenten startet (neu 'Agent', frueher 'Task'). */
@@ -106,6 +126,37 @@ function bloecke(payload: unknown): Record<string, unknown>[] {
 
 export class AufgabenSammler {
   private eintraege = new Map<string, Eintrag>()
+  private teams = new Map<string, TeamStand & { zuletzt: number }>()
+
+  /**
+   * Einen Protokollschritt des Orchestrators verbuchen. true, wenn sich Runde,
+   * Stand oder Frage geaendert haben.
+   */
+  orchestrator(m: OrchestratorMeldung): boolean {
+    const d = (m.daten ?? {}) as Record<string, unknown>
+    let t = this.teams.get(m.runId)
+    if (!t) {
+      t = { runde: 0, stand: null, frage: null, zuletzt: 0 }
+      this.teams.set(m.runId, t)
+    }
+    t.zuletzt = Math.max(t.zuletzt, m.ts ?? Date.now())
+    switch (m.art) {
+      case 'runde_start':
+        t.runde = Number(d.runde) || t.runde
+        return true
+      case 'fall':
+        t.stand = typeof d.statusKurz === 'string' && d.statusKurz ? d.statusKurz : t.stand
+        return true
+      case 'frage':
+        t.frage = String(d.frage ?? '') || 'Der Orchestrator braucht eine Entscheidung.'
+        return true
+      case 'antwort':
+        t.frage = null
+        return true
+      default:
+        return false
+    }
+  }
 
   private eintrag(runId: string, agentId: string): Eintrag {
     const k = `${runId}::${agentId}`
@@ -182,7 +233,7 @@ export class AufgabenSammler {
    * Aufzeichnung erscheint trotzdem -- "arbeitet, noch keine Liste" ist auch
    * eine Auskunft.
    */
-  liste(agenten: AgentKurz[], jetzt = Date.now()): LaufAufgaben[] {
+  liste(agenten: AgentKurz[], jetzt = Date.now(), teamAktiv: ReadonlySet<string> = new Set()): LaufAufgaben[] {
     this.aufraeumen(jetzt)
     const laeufe = new Map<string, LaufAufgaben>()
     for (const a of agenten) {
@@ -208,14 +259,33 @@ export class AufgabenSammler {
           laeuft: false,
           letzteAktivitaet: 0,
           agenten: [],
+          team: null,
         }
         laeufe.set(a.runId, lauf)
       }
-      // Der Orchestrator gibt dem Lauf den Namen, nicht der zuletzt gestartete Worker.
-      if (a.role === 'orchestrator') lauf.titel = a.label
+      // Ein Team-Auftrag heisst wie der Auftrag (runs.label), nicht wie der
+      // zuletzt gestartete Worker; ohne ihn benennt ihn der Orchestrator.
+      // Chats behalten ihren Titel aus dem Agenten ("Chat: ...").
+      if (!lauf.chatId && a.laufLabel) lauf.titel = a.laufLabel
+      else if (a.role === 'orchestrator' && !lauf.chatId) lauf.titel = a.label
       lauf.laeuft ||= aktiv
       lauf.letzteAktivitaet = Math.max(lauf.letzteAktivitaet, e?.zuletzt ?? 0, a.endedAt ?? a.startedAt)
       lauf.agenten.push(eintrag)
+    }
+    for (const lauf of laeufe.values()) {
+      const t = this.teams.get(lauf.runId)
+      // Ein Orchestrator, der auf eine Antwort wartet, hat keinen laufenden
+      // Agenten -- der Lauf ist trotzdem nicht fertig.
+      const lebt = teamAktiv.has(lauf.runId)
+      lauf.laeuft ||= lebt
+      if (t) {
+        // Ohne lebenden Orchestrator (Ende, Neustart) kann niemand mehr antworten.
+        lauf.team = { runde: t.runde, stand: t.stand, frage: lebt ? t.frage : null }
+        lauf.letzteAktivitaet = Math.max(lauf.letzteAktivitaet, t.zuletzt)
+      } else if (lebt || lauf.agenten.some((a) => a.role === 'orchestrator' || a.role === 'worker')) {
+        // Nach einem Neustart fehlt der Stand -- ein Team-Auftrag bleibt es trotzdem.
+        lauf.team = { runde: 0, stand: null, frage: null }
+      }
     }
     return [...laeufe.values()].sort(
       (x, y) => Number(y.laeuft) - Number(x.laeuft) || y.letzteAktivitaet - x.letzteAktivitaet,
@@ -226,6 +296,9 @@ export class AufgabenSammler {
   private aufraeumen(jetzt: number): void {
     for (const [k, e] of this.eintraege) {
       if (jetzt - e.zuletzt > AUFGABEN_FENSTER_MS) this.eintraege.delete(k)
+    }
+    for (const [k, t] of this.teams) {
+      if (jetzt - t.zuletzt > AUFGABEN_FENSTER_MS) this.teams.delete(k)
     }
   }
 }
@@ -242,5 +315,6 @@ export function agentAusZeile(r: Record<string, unknown>): AgentKurz {
     model: (r.model as string | null) ?? null,
     startedAt: Number(r.started_at),
     endedAt: r.ended_at == null ? null : Number(r.ended_at),
+    laufLabel: typeof r.lauf_label === 'string' ? r.lauf_label : null,
   }
 }

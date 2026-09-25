@@ -1,7 +1,7 @@
 // Einstellungen: Pruefung (reine Funktion), Laden mit Vorgaben, Speicher
 // ueber CockpitDb (ueberlebt einen Neustart). Gegen dist/.
 import {
-  einstellungenPruefen, einstellungenLaden, vorgaben, EinstellungsSpeicher, auswahlListen,
+  einstellungenPruefen, einstellungenLaden, vorgaben, EinstellungsSpeicher, auswahlListen, teamAuftragWerte, auftragTitel,
 } from '../dist/einstellungen.js'
 import { CockpitDb } from '../dist/db.js'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -98,5 +98,19 @@ const dbPfad = join(verzeichnis, 'test.db')
 }
 
 rmSync(verzeichnis, { recursive: true, force: true })
+// --- Team-Auftrag: Vorgaben aus den Einstellungen fuellen Luecken ---
+{
+  const team = { maxRunden: 8, parallel: 2, orchestratorModell: 'claude-opus-5-5', workerModell: 'claude-sonnet-5' }
+  const leer = teamAuftragWerte({}, team)
+  pruefe('Team: ohne Angaben gelten die Vorgaben', leer.maxRunden === 8 && leer.parallelitaet === 2 &&
+    leer.orchestratorModell === 'claude-opus-5-5' && leer.workerModell === 'claude-sonnet-5')
+  const eigen = teamAuftragWerte({ maxRunden: 3, parallelitaet: 1, workerModell: 'claude-haiku-4-5-20251001' }, team)
+  pruefe('Team: Angaben der Anfrage gehen vor', eigen.maxRunden === 3 && eigen.parallelitaet === 1 &&
+    eigen.workerModell === 'claude-haiku-4-5-20251001' && eigen.orchestratorModell === 'claude-opus-5-5')
+  pruefe('Titel: erste Zeile, gekuerzt', auftragTitel('  Baue X\nDetails') === 'Baue X' &&
+    auftragTitel('a'.repeat(100)).length <= 60 && auftragTitel('a'.repeat(100)).endsWith('…'))
+  pruefe('Titel: Leerzeilen am Anfang zaehlen nicht', auftragTitel('\n\n  Zweite Zeile') === 'Zweite Zeile')
+}
+
 console.log(`\n${ok}/${gesamt} bestanden`)
 if (ok !== gesamt) process.exit(1)

@@ -37,7 +37,7 @@ import { ereignisAufbereiten } from './nachrichten.js'
 import { auftraegeTrennen } from './protokoll.js'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { EinstellungsSpeicher, auswahlListen } from './einstellungen.js'
+import { EinstellungsSpeicher, auswahlListen, teamAuftragWerte, auftragTitel } from './einstellungen.js'
 import { ordnerAuflisten, OrdnerFehler } from './verzeichnisse.js'
 import { nutzungIndizieren, nutzungLesen, kennzahlenBerechnen, tagVerschieben, tagVon, tagSitzungen } from './nutzung.js'
 import { kontenLesen } from './konten.js'
@@ -103,6 +103,7 @@ function orchestratorLaufStarten(o: {
   letzterLauf = { runId, cwd: o.cwd }
   orch.on('orchestrator', (e: { runId: string; art?: string; daten?: Record<string, unknown> }) => {
     verteilen('orchestrator', e)
+    if (aufgaben.orchestrator(e)) verteilen('aufgaben', { runId })
     if (e.art === 'frage' && e.daten?.frage) {
       void discord?.frageStellen(runId, String(e.daten.frage))
     }
@@ -734,20 +735,37 @@ const server = createServer(async (req, res) => {
       const zahlFehler = maxRunden.fehler ?? parallelitaet.fehler ?? maxBudgetUsd.fehler ?? tokenBudget.fehler
       if (zahlFehler) return json(400, { fehler: zahlFehler })
 
-      const runId = orchestratorLaufStarten({
-        label: textFeld(k, 'label') ?? 'Orchestrator-Lauf',
-        cwd,
-        anfangsPrompt,
-        projektBlock: textFeld(k, 'projektBlock') ?? '(kein Projektblock angegeben)',
+      // Fehlende Angaben kommen aus den Team-Vorgaben der Einstellungen.
+      const werte = teamAuftragWerte({
         maxRunden: maxRunden.zahl,
         parallelitaet: parallelitaet.zahl,
         orchestratorModell: textFeld(k, 'orchestratorModell') || undefined,
         workerModell: textFeld(k, 'workerModell') || undefined,
+      }, einstellungen.lesen().team)
+      const runId = orchestratorLaufStarten({
+        label: textFeld(k, 'label') || auftragTitel(anfangsPrompt) || 'Team-Auftrag',
+        cwd,
+        anfangsPrompt,
+        projektBlock: textFeld(k, 'projektBlock') ?? '(kein Projektblock angegeben)',
+        ...werte,
         // Wie bisher: 0 bedeutet "kein Dollar-Limit", nicht "sofort aufhoeren".
         maxBudgetUsd: maxBudgetUsd.zahl || undefined,
         tokenBudget: tokenBudget.zahl,
       })
       return json(202, { runId })
+    }
+
+    // Antwort auf die Entscheidungsfrage eines Team-Auftrags (Fall B). Ging
+    // bisher nur ueber Discord -- ohne Discord wartete der Lauf bis zum Timeout.
+    if (pfad === '/api/orchestrator/antwort' && req.method === 'POST') {
+      const k = (await koerperLesen(req)) as Record<string, unknown> | null
+      const runId = textFeld(k, 'runId') ?? ''
+      const text = (textFeld(k, 'text') ?? '').trim()
+      if (!text) return json(400, { fehler: 'text fehlt' })
+      const orch = orchestratoren.get(runId)
+      if (!orch) return json(404, { fehler: 'Auftrag laeuft nicht (mehr)' })
+      if (!orch.antwortGeben(text)) return json(409, { fehler: 'Der Auftrag wartet gerade auf keine Antwort' })
+      return json(200, { ok: true })
     }
 
     if (pfad === '/api/freigabe' && req.method === 'POST') {
@@ -1005,7 +1023,10 @@ const server = createServer(async (req, res) => {
 
     if (pfad === '/api/aufgaben' && req.method === 'GET') {
       const agenten = db.agentenSeit(Date.now() - AUFGABEN_FENSTER_MS).map(agentAusZeile)
-      return json(200, { laeufe: aufgaben.liste(agenten) })
+      const laeufe = aufgaben.liste(agenten, Date.now(), new Set(orchestratoren.keys()))
+      // Offene Freigaben mitliefern: Worker eines Team-Auftrags haben keinen
+      // Chat, in dem man sie erteilen koennte -- das geht nur hier.
+      return json(200, { laeufe: laeufe.map((l) => ({ ...l, freigaben: l.laeuft ? supervisor.offeneFreigabenListe(l.runId) : [] })) })
     }
 
     if (pfad === '/api/nutzung' && req.method === 'GET') {

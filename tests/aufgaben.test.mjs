@@ -85,5 +85,32 @@ pruefe('kaputte Payloads werfen nicht', !wirft)
 const z = agentAusZeile({ run_id: 'r', agent_id: 'a', role: 'chat', fachrolle: null, label: 'L', status: 'done', model: null, started_at: 5, ended_at: null })
 pruefe('DB-Zeile -> Kurzform', z.runId === 'r' && z.startedAt === 5 && z.endedAt === null)
 
+// --- Team-Auftraege: Stand und offene Frage des Orchestrators ---
+{
+  const t = new AufgabenSammler()
+  const orch = (art, daten, ts = 2000) => t.orchestrator({ runId: 'team1', art, daten, ts })
+  const agenten = [
+    agent('team1', 'orchestrator', 'done', { role: 'orchestrator', label: 'Baue die Suche' }),
+    agent('team1', 'w1', 'done', { role: 'worker', fachrolle: 'coder', label: 'coder: Suche' }),
+  ]
+  pruefe('Runde weckt', orch('runde_start', { runde: 2, auftraege: 1 }))
+  pruefe('Blocker allein weckt nicht', !orch('blocker', []))
+  orch('fall', { runde: 2, fall: 'entscheidung', statusKurz: 'Index gebaut, Frage offen' })
+  pruefe('Frage weckt', orch('frage', { runde: 2, frage: 'SQLite oder Postgres?' }))
+  let tl = t.liste(agenten, J, new Set(['team1']))
+  pruefe('Team: Titel vom Orchestrator, Runde und Stand', tl[0].titel === 'Baue die Suche' && tl[0].team?.runde === 2 &&
+    tl[0].team?.stand === 'Index gebaut, Frage offen')
+  pruefe('Team: wartet auf Antwort zaehlt als laufend', tl[0].laeuft === true && tl[0].team?.frage === 'SQLite oder Postgres?')
+  tl = t.liste(agenten, J, new Set())
+  pruefe('Team: ohne lebenden Orchestrator keine offene Frage', tl[0].laeuft === false && tl[0].team?.frage === null)
+  orch('antwort', { runde: 2, text: 'SQLite' })
+  tl = t.liste(agenten, J, new Set(['team1']))
+  pruefe('Team: Antwort schliesst die Frage', tl[0].team?.frage === null)
+  const r1 = t.liste([agent('team2', 'w1', 'running', { role: 'worker', fachrolle: 'coder', label: 'Entwickler R1', laufLabel: 'Suche bauen' })], J)
+  pruefe('Team: Titel aus dem Lauf, nicht vom Worker (Runde 1 ohne Orchestrator)', r1[0].titel === 'Suche bauen')
+  pruefe('Team: ohne Stand (Neustart) an Workern erkannt', r1[0].team !== null && r1[0].team.runde === 0)
+  pruefe('Chat hat keinen Team-Stand', s.liste([agent('chat-x', 'chat', 'running')], J)[0].team === null)
+}
+
 console.log(`\n${ok}/${gesamt} Pruefungen bestanden`)
 if (ok !== gesamt) process.exit(1)

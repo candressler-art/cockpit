@@ -270,3 +270,33 @@ export class EinstellungsSpeicher {
 export function auswahlListen(): { modelle: Auswahl<string>[]; aufwaende: Auswahl<Aufwand>[]; berechtigungen: Auswahl<Berechtigung>[] } {
   return { modelle: MODELLE, aufwaende: AUFWAENDE, berechtigungen: BERECHTIGUNGEN }
 }
+
+export interface TeamAuftragWerte {
+  maxRunden: number
+  parallelitaet: number
+  orchestratorModell: string
+  workerModell: string
+}
+
+/**
+ * Werte eines Team-Auftrags: was die Anfrage angibt, sonst die Vorgaben aus
+ * den Einstellungen. Frueher galten fest eingebaute Zahlen (10 Runden, 1
+ * parallel) -- die Team-Vorgaben in den Einstellungen waeren wirkungslos.
+ */
+export function teamAuftragWerte(
+  anfrage: Partial<TeamAuftragWerte>,
+  team: TeamEinstellungen,
+): TeamAuftragWerte {
+  return {
+    maxRunden: anfrage.maxRunden ?? team.maxRunden,
+    parallelitaet: anfrage.parallelitaet ?? team.parallel,
+    orchestratorModell: anfrage.orchestratorModell || team.orchestratorModell,
+    workerModell: anfrage.workerModell || team.workerModell,
+  }
+}
+
+/** Titel fuer einen Auftrag: seine erste nichtleere Zeile, hoechstens 60 Zeichen. */
+export function auftragTitel(text: string): string {
+  const zeile = text.split('\n').map((z) => z.trim()).find(Boolean) ?? ''
+  return zeile.length > 60 ? `${zeile.slice(0, 59).trimEnd()}…` : zeile
+}
