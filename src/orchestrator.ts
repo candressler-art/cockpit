@@ -19,7 +19,7 @@ import {
   FormatFehler,
   type OrchestratorAntwort,
 } from './protokoll.js'
-import { rolleLesen, workerRollen, VORGABE_ROLLE } from './rollen.js'
+import { rolleLesen, workerRollen, modellAufloesen, VORGABE_ROLLE, type Fachrolle } from './rollen.js'
 import { mcpAufloesen } from './mcp.js'
 
 export interface OrchestratorKonfig {
@@ -258,17 +258,7 @@ export class Orchestrator extends EventEmitter {
     const erlaubt = k.rollen?.length
       ? workerRollen().filter((r) => k.rollen?.includes(r.id))
       : workerRollen()
-    if (erlaubt.length === 0) return ''
-    const liste = erlaubt.map((r) => `- ${r.id}: ${r.beschreibung}`).join('\n')
-    return (
-      `\n\n# Fachrollen\n\n` +
-      `Jedem Auftrag im NAECHSTER-PROMPT darfst du als ERSTE Zeile voranstellen:\n\n` +
-      `    AN-ROLLE: <id>\n\n` +
-      `Verfuegbar sind:\n\n${liste}\n\n` +
-      `Ohne die Zeile gilt '${VORGABE_ROLLE}'. Die Rolle bestimmt Werkzeuge und ` +
-      `Modell des Workers -- ein Rechercheur kann nichts schreiben, ein Coder schon. ` +
-      `Waehle danach, was der Auftrag wirklich braucht.`
-    )
+    return rollenAnweisung(erlaubt)
   }
 
   /** Verlaufsdigest fuer den Orchestrator -- nur die Statuszeilen, nicht die vollen Reports. */
@@ -355,7 +345,7 @@ export class Orchestrator extends EventEmitter {
             cwd: k.cwd,
             // Modell der Rolle schlaegt die Laufvorgabe: ein Rechercheur auf
             // Opus waere Verschwendung, ein Coder auf Haiku ein Rueckschritt.
-            model: fach?.modell ?? k.workerModell,
+            model: modellAufloesen(fach?.modell, k.workerModell),
             // Drei Faelle, und der Unterschied ist wichtig:
             //   Rolle mit Werkzeugliste  -> genau diese Werkzeuge
             //   Rolle mit leerem Feld    -> keine Einschraenkung (der Coder)
@@ -655,4 +645,29 @@ export function leseZeileAusfuehren(zeile: string, cwd: string): string {
   }
 
   return 'unverstanden -- erwartet wird "DATEI <pfad> <von>-<bis>" oder "GREP <muster> <pfad>"'
+}
+
+/**
+ * Der Fachrollen-Block im Orchestrator-Prompt. Beschrieben wird jede Rolle
+ * mit `einsatz` (wann nutzen, wann nicht) -- dieselbe Beschreibung, nach der
+ * Claude im Chat Subagenten waehlt; so entscheiden beide Wege gleich.
+ */
+export function rollenAnweisung(erlaubt: Omit<Fachrolle, 'systemPrompt'>[]): string {
+  if (erlaubt.length === 0) return ''
+  const liste = erlaubt.map((r) => `- ${r.id}: ${r.einsatz || r.beschreibung}`).join('\n')
+  const planer = erlaubt.some((r) => r.id === 'planer')
+    ? `Bei komplexen Auftraegen (mehrere Dateien, unklarer Weg, Architektur) ` +
+      `schicke in der ersten Runde zuerst 'AN-ROLLE: planer' und verteile die ` +
+      `Umsetzung erst nach seinem Plan. Einfache Auftraege brauchen keinen Planer.\n\n`
+    : ''
+  return (
+    `\n\n# Fachrollen\n\n` +
+    `Jedem Auftrag im NAECHSTER-PROMPT darfst du als ERSTE Zeile voranstellen:\n\n` +
+    `    AN-ROLLE: <id>\n\n` +
+    `Verfuegbar sind:\n\n${liste}\n\n` +
+    planer +
+    `Ohne die Zeile gilt '${VORGABE_ROLLE}'. Die Rolle bestimmt Werkzeuge und ` +
+    `Modell des Workers -- ein Rechercheur kann nichts schreiben, ein Coder schon. ` +
+    `Waehle danach, was der Auftrag wirklich braucht.`
+  )
 }

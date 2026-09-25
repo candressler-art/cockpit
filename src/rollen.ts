@@ -150,6 +150,16 @@ export function werkzeugNamen(regeln: string[] | null): string[] | undefined {
 }
 
 /**
+ * Modell fuer einen Worker mit dieser Rolle. 'inherit' ist ein Begriff der
+ * Subagenten (Modell des Aufrufers) -- an agentStarten durchgereicht, ginge
+ * er als Modellname an die SDK und der Worker liefe nicht. Ausserhalb der
+ * Subagenten heisst er daher: die Vorgabe des Laufs.
+ */
+export function modellAufloesen(modell: string | null | undefined, vorgabe: string | undefined): string | undefined {
+  return !modell || modell === 'inherit' ? vorgabe : modell
+}
+
+/**
  * Die Fachrollen als Claude-Code-Subagenten fuer einen Chat.
  *
  * Das ist der Weg, auf dem Spezialisten "nur genutzt werden, wenn sie
