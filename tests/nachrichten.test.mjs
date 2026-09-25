@@ -1,6 +1,6 @@
 // Nachrichten-Normalisierer (src/nachrichten.ts): Sitzungsdatei-Zeilen und
 // Live-SDK-Nachrichten muessen dieselbe Form ergeben. Gegen dist/.
-import { normalisieren, verlaufNormalisieren, kuerzen, WERKZEUG_TEXT_MAX, TEXT_MAX } from '../dist/nachrichten.js'
+import { normalisieren, verlaufNormalisieren, kuerzen, WERKZEUG_TEXT_MAX, TEXT_MAX, ereignisAufbereiten } from '../dist/nachrichten.js'
 
 let ok = 0, gesamt = 0
 const pruefe = (name, bedingung) => {
@@ -106,6 +106,20 @@ pruefe('Ergebnis als Zeichenkette', normalisieren({ type: 'user', message: { con
   const viele = Array.from({ length: 10 }, (_, i) => JSON.stringify({ type: 'user', uuid: String(i), message: { content: `n${i}` } })).join('\n')
   const r = verlaufNormalisieren(viele, () => false, 4)
   pruefe('Verlauf: die letzten max behalten', r.gekuerzt && r.nachrichten.length === 4 && r.nachrichten[0].id === '6')
+}
+
+// --- Live-Ereignisse ----------------------------------------------------------
+{
+  const e = { seq: 3, runId: 'chat-x', agentId: 'chat', kind: 'tool_use', parentToolUseId: 'toolu_p',
+    payload: { type: 'assistant', uuid: 'a9', parent_tool_use_id: 'toolu_p', message: { model: 'claude-haiku-4-5', content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }] } } }
+  const r = ereignisAufbereiten(e)
+  pruefe('Ereignis: Nachricht angehaengt', r.nachricht?.bloecke[0].typ === 'werkzeug' && r.nachricht.eltern === 'toolu_p')
+  pruefe('Ereignis: Rest unveraendert', r.seq === 3 && r.payload === e.payload && e.nachricht === undefined)
+  const sys = { seq: 1, kind: 'system', payload: { type: 'system', subtype: 'init' } }
+  pruefe('Ereignis ohne Nachricht bleibt, wie es ist', ereignisAufbereiten(sys) === sys)
+  const seite = { seq: 2, kind: 'text', payload: { type: 'assistant', isSidechain: true, message: { content: [{ type: 'text', text: 'Sub' }] } } }
+  pruefe('Ereignis: Nebenzweig (Subagent) wird mitgenommen', ereignisAufbereiten(seite).nachricht?.bloecke[0].text === 'Sub')
+  pruefe('Ereignis: Muell ueberlebt', ereignisAufbereiten(null) === null && ereignisAufbereiten({ seq: 1 }).seq === 1)
 }
 
 console.log(`\n${ok}/${gesamt} bestanden`)

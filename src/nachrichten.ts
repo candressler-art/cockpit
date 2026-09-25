@@ -236,3 +236,18 @@ export function verlaufNormalisieren(
   const gekuerzt = alle.length > max
   return { nachrichten: gekuerzt ? alle.slice(-max) : alle, gekuerzt }
 }
+
+/**
+ * Ein Ereignis des Supervisors (payload = rohe SDK-Nachricht) fuer die
+ * Oberflaeche aufbereiten: die normalisierte Nachricht haengt als
+ * `nachricht` daneben. So zeichnet die Chat-Ansicht einen laufenden Zug mit
+ * demselben Code wie den gespeicherten Verlauf und muss die SDK-Form nicht
+ * selbst kennen. Nebenzweige zaehlen mit -- live sind das die Subagenten,
+ * und die will die Ansicht in ihrer Karte zeigen.
+ * Unveraendert zurueck, wenn es nichts zu zeigen gibt (kein neues Objekt).
+ */
+export function ereignisAufbereiten<T>(e: T): T | (T & { nachricht: Nachricht }) {
+  if (!e || typeof e !== 'object') return e
+  const n = normalisieren((e as { payload?: unknown }).payload, true)
+  return n ? { ...e, nachricht: n } : e
+}

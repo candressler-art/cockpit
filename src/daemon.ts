@@ -18,7 +18,7 @@ import { sprechenGecacht } from './stimme.js'
 import { erkennen } from './hoeren.js'
 import { GespraechBelegt, gespraechAntworten } from './gespraech.js'
 import {
-  chatsIndizieren, chatsSuchen, chatLesen, chatKopfLesen, zuletztBenutzteOrdner,
+  chatsIndizieren, chatsSuchen, verlaufLesen, chatKopfLesen, zuletztBenutzteOrdner,
   fortsetzungLesen, fortsetzungVorbereiten, fortsetzungAktualisieren, chatRegistrieren, sitzungVorhanden,
   type Fortsetzung,
 } from './chats.js'
@@ -33,6 +33,7 @@ import { nutzungAbfragen, guthabenAbfragen, type Guthaben } from './kontenNutzun
 import { AnfrageFehler, fehlerStatus, koerperAuswerten, textFeld } from './httpFehler.js'
 import { ChatZuege } from './chatZuege.js'
 import { nachliefern, senden as klientSenden, type Klient } from './nachlieferung.js'
+import { ereignisAufbereiten } from './nachrichten.js'
 import { auftraegeTrennen } from './protokoll.js'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -273,7 +274,7 @@ function verteilen(typ: string, daten: unknown): void {
   for (const k of [...klienten]) senden(k, typ, daten)
 }
 
-supervisor.on('ereignis', (e: CockpitEvent) => verteilen('ereignis', e))
+supervisor.on('ereignis', (e: CockpitEvent) => verteilen('ereignis', ereignisAufbereiten(e)))
 
 // Aufgaben-Bereich (aufgaben.ts): To-do-Listen und Spezialisten aus den
 // Ereignissen. Beim Start einmal aus der DB nachladen, damit Listen einen
@@ -704,7 +705,7 @@ const server = createServer(async (req, res) => {
       return json(200, {
         runId,
         agenten: db.agentenLesen(runId),
-        ereignisse: db.ereignisseSeit(runId, seit.zahl ?? 0),
+        ereignisse: db.ereignisseSeit(runId, seit.zahl ?? 0).map(ereignisAufbereiten),
         // "Immer erlauben" kennt nur der Speicher (die SDK-Vorschlaege
         // stehen nicht in der DB) -- nach einem Neustart ist die Anfrage
         // ohnehin nicht mehr beantwortbar.
@@ -883,7 +884,7 @@ const server = createServer(async (req, res) => {
 
     if (pfad.startsWith('/api/chats/') && req.method === 'GET') {
       const id = decodeURIComponent(pfad.slice('/api/chats/'.length))
-      const d = await chatLesen(DB_PFAD, id)
+      const d = await verlaufLesen(DB_PFAD, id)
       if (!d) return json(404, { fehler: 'Sitzung unbekannt' })
       const hierVorhanden = Boolean(d.kopf.cwd && existsSync(d.kopf.cwd))
       const bestehend = fortsetzungLesen(DB_PFAD, id)

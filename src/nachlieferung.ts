@@ -23,6 +23,7 @@
 // Nachlieferung hinweg, und der Lauf-Tab verwuerfe ihn als "schon gezeigt".
 
 import type { CockpitEvent } from './typen.js'
+import { ereignisAufbereiten } from './nachrichten.js'
 
 export interface KlientSocket {
   readyState: number
@@ -140,7 +141,7 @@ export async function nachliefern(
       for (;;) {
         const seite = quelle.seite(runId, ab, o.seitenGroesse)
         for (const e of seite) {
-          direktSenden(k, 'ereignis', e, entfernen)
+          direktSenden(k, 'ereignis', ereignisAufbereiten(e), entfernen)
           if (k.sock.bufferedAmount > NACHLIEFER_SCHWELLE) {
             if (!(await abfliessen(k, o))) return trennen(k, 'Nachlieferung', entfernen)
             if (ueberholt()) return
