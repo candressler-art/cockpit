@@ -516,3 +516,39 @@ export function rueckblickGruppieren(
   }
   return [...gruppen.values()].sort((a, b) => a.von - b.von)
 }
+
+export interface NutzungGesamt {
+  /** Alle Tokens seit Beginn der Aufzeichnung (ohne Cache-Lesen, wie ueberall). */
+  tokens: number
+  ein: number
+  aus: number
+  cacheSchreiben: number
+  cacheLesen: number
+  antworten: number
+  sitzungen: number
+  /** Erster Tag mit Nutzung, null ohne Daten. */
+  seit: string | null
+}
+
+/**
+ * Summe ueber ALLES, was der Index kennt -- nicht nur das Jahr im Raster.
+ * "Seit" ist der erste Tag, den die Sitzungsdateien hergeben: aeltere
+ * Nutzung, deren Dateien die CLI schon aufgeraeumt hat, ist nicht dabei.
+ */
+export function nutzungGesamt(dbPfad: string): NutzungGesamt {
+  const r = handle(dbPfad).prepare(
+    `SELECT ${TOKENS_SQL} AS tokens, SUM(ein) AS ein, SUM(aus) AS aus, SUM(cache_schreiben) AS cs,
+            SUM(cache_lesen) AS cl, COUNT(*) AS antworten, COUNT(DISTINCT sitzung) AS sitzungen, MIN(tag) AS seit
+     FROM nutzung`,
+  ).get() as Record<string, number | string | null>
+  return {
+    tokens: Number(r.tokens ?? 0),
+    ein: Number(r.ein ?? 0),
+    aus: Number(r.aus ?? 0),
+    cacheSchreiben: Number(r.cs ?? 0),
+    cacheLesen: Number(r.cl ?? 0),
+    antworten: Number(r.antworten ?? 0),
+    sitzungen: Number(r.sitzungen ?? 0),
+    seit: r.seit === null ? null : String(r.seit),
+  }
+}

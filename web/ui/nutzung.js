@@ -111,7 +111,8 @@ export function nutzungBauen() {
         kachel('7 Tage', kurzZahl(k.sieben), 'Tokens'),
         kachel('30 Tage', kurzZahl(k.dreissig), `Ø ${kurzZahl(k.schnittAktiv30)} je aktivem Tag`),
         kachel('Serie', `${k.serie} ${k.serie === 1 ? 'Tag' : 'Tage'}`, `längste: ${k.laengsteSerie}`),
-        kachel('Aktivster Tag', k.aktivsterTag ? kurzZahl(k.aktivsterTag.tokens) : '–', k.aktivsterTag ? tagKurz(k.aktivsterTag.tag) : 'noch keiner')),
+        kachel('Aktivster Tag', k.aktivsterTag ? kurzZahl(k.aktivsterTag.tokens) : '–', k.aktivsterTag ? tagKurz(k.aktivsterTag.tag) : 'noch keiner'),
+        gesamtKachel(b.gesamt)),
       karte('Aktivität', `${k.aktiveTage} aktive Tage im letzten Jahr`, raster(b, nachTag), tagOrt),
       karte('Konten', null, kontenOrt),
       h('div.zwei-spalten', {},
@@ -371,6 +372,17 @@ export function nutzungBauen() {
     },
     verbergen() { sichtbar = false; clearInterval(uhr) },
   }
+}
+
+/** Alles seit Beginn der Aufzeichnung -- die Aufschluesselung steht im Tooltip. */
+function gesamtKachel(g) {
+  if (!g) return kachel('Insgesamt', '–', 'noch keine Daten')
+  const seit = g.seit ? alsDatum(g.seit).toLocaleDateString('de-DE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }) : null
+  const k = kachel('Insgesamt', kurzZahl(g.tokens), seit ? `seit ${seit}` : 'noch keine Daten')
+  k.title = `${zahl(g.tokens)} Tokens seit ${g.seit ?? '–'}\n` +
+    `Eingabe ${zahl(g.ein)} · Ausgabe ${zahl(g.aus)} · Cache geschrieben ${zahl(g.cacheSchreiben)}\n` +
+    `Cache gelesen (nicht mitgezählt) ${zahl(g.cacheLesen)}\n${zahl(g.antworten)} Antworten in ${zahl(g.sitzungen)} Sitzungen`
+  return k
 }
 
 function kachel(titel, wert, unter) {

@@ -3,7 +3,7 @@
 // Lesen, Auswertung und Kennzahlen. Gegen dist/.
 import {
   zeileAuswerten, tagVon, stundeVon, nutzungIndizieren, nutzungLesen, kennzahlenBerechnen, tagVerschieben, tagSitzungen,
-  rueckblickGruppieren,
+  rueckblickGruppieren, nutzungGesamt,
 } from '../dist/nutzung.js'
 import { mkdtempSync, mkdirSync, writeFileSync, appendFileSync, symlinkSync, copyFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -165,6 +165,28 @@ rmSync(wurzel, { recursive: true, force: true })
     s('a', 'cockpit-umbau', 1, 1), s('b', 'highlight.js', 2, 1), s('c', 'web', 3, 1),
   ], () => ({ art: 'loop', titel: 'Umbau-Schicht', projekt: 'cockpit-umbau' }))
   pruefe('Rueckblick: Ordnerwechsel im Loop teilt ihn nicht', wandernd.length === 1 && wandernd[0].sitzungen === 3 && wandernd[0].projekt === 'cockpit-umbau')
+}
+
+// --- Gesamtsumme ueber alles ------------------------------------------------
+{
+  const dir = mkdtempSync(join(tmpdir(), 'nutzung-gesamt-'))
+  const db = join(dir, 'n.db')
+  mkdirSync(join(dir, 'p'))
+  const zeile = (id, ts, u) => JSON.stringify({ type: 'assistant', timestamp: ts, sessionId: 's-' + id.slice(-1), cwd: '/x/proj',
+    message: { id, model: 'claude-opus-5-5', usage: u } })
+  writeFileSync(join(dir, 'p', 'a.jsonl'), [
+    zeile('m1', '2026-01-02T10:00:00Z', { input_tokens: 10, output_tokens: 5, cache_creation_input_tokens: 100, cache_read_input_tokens: 1000 }),
+    zeile('m2', '2026-03-04T10:00:00Z', { input_tokens: 1, output_tokens: 2, cache_creation_input_tokens: 3, cache_read_input_tokens: 4 }),
+  ].join('\n') + '\n')
+  const leer = nutzungGesamt(db)
+  pruefe('Gesamt: leerer Index -> 0 und seit null', leer.tokens === 0 && leer.seit === null)
+  await nutzungIndizieren(db, [dir])
+  const g = nutzungGesamt(db)
+  pruefe('Gesamt: Tokens ohne Cache-Lesen ueber alle Tage', g.tokens === 121)
+  pruefe('Gesamt: Cache-Lesen getrennt', g.cacheLesen === 1004)
+  pruefe('Gesamt: seit erstem Tag', g.seit === '2026-01-02')
+  pruefe('Gesamt: Antworten und Sitzungen', g.antworten === 2 && g.sitzungen === 2)
+  rmSync(dir, { recursive: true, force: true })
 }
 
 console.log(`\n${ok}/${gesamt} bestanden`)

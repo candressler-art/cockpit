@@ -82,7 +82,7 @@ a.knopf { text-decoration: none; color: var(--text); }
 }
 
 /* --- Nutzung -------------------------------------------------------------------- */
-.kacheln { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin: 12px 0 16px; }
+.kacheln { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin: 12px 0 16px; }
 .kachel { border: 1px solid var(--surface0); border-radius: var(--radius); background: var(--mantle); padding: 12px 14px; min-width: 0; }
 .kachel-titel { font-size: 12.5px; color: var(--overlay); }
 .kachel-wert { font-size: 22px; font-weight: 600; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -257,7 +257,6 @@ details[open] > summary .a-pfeil { transform: rotate(90deg); }
 }
 @media (max-width: 760px) {
   .kacheln { grid-template-columns: 1fr 1fr; gap: 8px; }
-  .kachel:last-child { grid-column: span 2; }
   .kachel-wert { font-size: 19px; }
   .n-karte { padding: 12px; }
   .konten { grid-template-columns: 1fr; }

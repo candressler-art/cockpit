@@ -44,7 +44,7 @@ import { EinstellungsSpeicher, auswahlListen, teamAuftragWerte, auftragTitel } f
 import { ordnerAuflisten, OrdnerFehler } from './verzeichnisse.js'
 import {
   nutzungIndizieren, nutzungLesen, kennzahlenBerechnen, tagVerschieben, tagVon, tagSitzungen,
-  rueckblickGruppieren, type SitzungsArt,
+  rueckblickGruppieren, nutzungGesamt, type SitzungsArt,
 } from './nutzung.js'
 import { kontenLesen } from './konten.js'
 
@@ -1121,7 +1121,7 @@ const server = createServer(async (req, res) => {
       await nutzungPuls()
       const heute = tagVon(Date.now())
       const bericht = nutzungLesen(DB_PFAD, tagVerschieben(heute, -(tage - 1)))
-      return json(200, { ...bericht, kennzahlen: kennzahlenBerechnen(bericht.tage, bericht.heute) })
+      return json(200, { ...bericht, kennzahlen: kennzahlenBerechnen(bericht.tage, bericht.heute), gesamt: nutzungGesamt(DB_PFAD) })
     }
 
     if (pfad === '/api/nutzung/tag' && req.method === 'GET') {
