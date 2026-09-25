@@ -2,9 +2,9 @@
 
 ## Zusammenfassung fuer Can
 
-- **Stand:** Schritte 1 und 2 erledigt. Schritt 3 (Oberflaeche) laeuft:
-  Geruest, **Chat, Einstellungen, Nutzung, Aufgaben fertig**; Server,
-  Notizen, Terminal sind noch Platzhalter.
+- **Stand:** Schritte 1-3 erledigt: alle Bereiche gebaut (Chat,
+  Aufgaben, Nutzung, Server, Notizen, Terminal, Einstellungen). Offen:
+  Schritt 4 (Aufraeumen, README) und 5 (Ende-zu-Ende mit Haiku).
 - **Fertig (Backend):** Einstellungen in der DB + API; Nutzungsindex +
   `/api/nutzung`; Rollen (`inherit`, Planer-Regel); `/api/verzeichnisse`;
   **Chat-API** (neuer Chat, Weiterschreiben mit Modell/Aufwand/Modus,
@@ -43,6 +43,16 @@
     offen: Prognose "Guthaben reicht noch X Tage" (braucht Verlauf).
   - *Freigaben von Chats* entscheidet man im Chat (Aufgaben verlinkt
     dorthin), nur Team-Worker direkt in Aufgaben -- keine Doppelung.
+  - *Notizen zeigen jetzt Notiztext* (bisher gingen bewusst nur Titel und
+    Verweise ueber die API). Dein Wunsch "durchsuchen und lesen" geht nicht
+    anders; erreichbar nur im Tailnet, und der Chat-Agent liest den Vault
+    ohnehin. Gelesen wird nur, was als Notiz gelistet ist (.md unter dem
+    Vault, keine Punktordner, keine Symlinks nach draussen).
+  - *Server-Verlauf nur im Speicher* (1 h, je 20 s): nach einem Neustart
+    beginnt die Kurve neu -- keine 180 DB-Zeilen je Stunde und Host.
+  - *Terminal bleibt ohne "immer erlauben"* und ohne interaktive Shell
+    (wie bisher, Begruendung in konsole.ts); neu ist nur ein Verlauf der
+    letzten 30 Befehle im Daemon.
   - *Haiku bekommt keinen Denkaufwand* (effort) -- kennt keine Stufen.
   - *Guthaben*: eigene stuendliche Abfrage ohne `skip_spend`, der erprobte
     10-Minuten-Nutzungspuls bleibt, wie er ist. Mit echten Konten noch
@@ -72,6 +82,12 @@
   {runId, text}` (404 laeuft nicht, 409 wartet nicht).
 - `GET /api/nutzung/tag?tag=JJJJ-MM-TT` -> Sitzungen des Tages mit `chat
   {id, titel}` (auch ueber Fortsetzungen).
+- `GET /api/system` zusaetzlich `verlauf {host: [{t, cpu, ram}]}` (1 h).
+- `GET /api/notizen?q=` -> `{da, anzahl, notizen:[{id, titel, ordner,
+  tags, geaendert, stelle}]}` (max. 50, ohne q die neuesten);
+  `GET /api/notizen/lesen?id=` -> `{..., text, verweise, rueckverweise}`
+  (404 unbekannt). Modul `src/notizen.ts`.
+- `GET /api/konsole` -> `{eintraege}` (letzte 30 Befehle, letzter Stand).
 - Gebaut in `src/chatOptionen.ts`, `src/freigaben.ts`, `src/aufgaben.ts`.
 
 ## Neue Oberflaeche (Aufbau)
@@ -82,7 +98,8 @@
   `chat.js`, `eingabe.js` (Ordner/Modell/Denken/Modus, Diktieren),
   `werkzeuge.js` (Werkzeug-Zeilen, Diff, To-do, Spezialisten-Karte),
   `diff.js`, `chatliste.js`, `einstellungen.js`, `nutzung.js`,
-  `aufgaben.js`, `freigabekarten.js` (Chat + Aufgaben);
+  `aufgaben.js`, `freigabekarten.js` (Chat + Aufgaben), `server.js`,
+  `notizen.js` (Route `#/notizen/<id>`), `terminal.js`;
   Stil der Bereiche in `web/bereiche.css`. Bereiche: in `app.js` `BEREICHE` eintragen,
   `bauen()` -> `{el, zeigen(param), verbergen()}`.
 - Vendor-Dateien: `node scripts/vendor.mjs` (kein Build-Schritt).
@@ -97,13 +114,14 @@
 
 ## Naechste Schritte
 
-1. Bereiche bauen: Server, Notizen (Suche/Lesen statt 3D), Terminal
-   (Konsole). Vorlage: `nutzung.js`/`aufgaben.js` (laden/zeichnen,
-   Fehlerbox, Pollen nur sichtbar). Alte Umsetzung: `web/tabs/*.js`.
+1. Schritt 4 Aufraeumen: `web/tabs/*`, `kern.js`, `graph.js`,
+   `zeitachse.js`, `hud.css`, `tabs.js` usw. (erst per grep pruefen, dass
+   nichts sie einbindet), verwaiste Endpunkte (`/api/vault/graph`?
+   -- vault.ts-Index nutzt sonst niemand? pruefen), `chatLesen`; README.
 2. Chat-Karten fuer Freigabe/Rueckfrage/Plan/Spezialist sind nur ohne echte
    Daten geprueft -> in Schritt 5 mit Haiku echt ansehen; ebenso Aufgaben
    mit echtem Chat (To-do, Spezialist) und einem kleinen Team-Auftrag.
-3. Schritt 4 Aufraeumen, README; Schritt 5 Ende-zu-Ende mit Haiku.
+3. Schritt 5 Ende-zu-Ende mit Haiku (hoechstens 15 Zuege!).
 
 ## Durchgaenge
 
@@ -144,3 +162,9 @@
   5-s-Nachladen, Freigabe sendet richtig, keine Konsolenfehler. Gefunden:
   CSS-Variablen in h() kamen nie an (Rollenfarben fehlten ueberall);
   Titel eines Team-Auftrags war in Runde 1 der Worker-Name.
+- **D8** (25.9. ~05:00): Bereich Server begonnen, vom Sitzungslimit
+  unterbrochen (nicht committet).
+- **D9** (25.9. 07:21): nacht-optimierung ohne neue Commits. Server aus D8
+  fertig (Kurve erst ab 3 Min. Verlauf, Ausrichtung), **Notizen** und
+  **Terminal** gebaut, jeweils mit Tests; Playwright alle 52 Ansichten
+  1280/375 ohne Befund (inkl. echtem Terminal-Ablauf mit Neuladen).
