@@ -27,6 +27,7 @@ import { AufgabenSammler, AUFGABEN_FENSTER_MS, agentAusZeile } from './aufgaben.
 import { vaultDa, VAULT } from './vault.js'
 import { notizenLaden, notizenSuchen, notizLesen } from './notizen.js'
 import { vaultZugriffErlaubt } from './vaultZugriff.js'
+import { gedaechtnisOrdnerAnlegen, gedaechtnisWurzel, gedaechtnisZugriffErlaubt } from './gedaechtnis.js'
 import { anhangSpeichern, anhaengePruefen, promptMitAnhaengen, alteAnhaengeLoeschen, MAX_ANHANG_BYTES } from './anhaenge.js'
 import { konsoleBefehl, verlaufAufnehmen, type KonsoleEintrag } from './konsole.js'
 import { cwdPruefen, folgenLesen, zahlLesen } from './eingaben.js'
@@ -351,9 +352,11 @@ function chatZugStarten(
         liveText: opt.liveText,
         ...(existsSync(VAULT) ? { zusatzVerzeichnisse: [VAULT] } : {}),
         systemPromptZusatz: opt.systemPromptZusatz,
-        // Vault und Anhaenge nur lesen -- dafuer keine Freigabe.
+        // Vault und Anhaenge nur lesen, das Gedaechtnis (eigenes und das der
+        // Spezialisten) lesen und schreiben -- dafuer keine Freigabe.
         autoErlauben: (toolName, input) =>
-          vaultZugriffErlaubt(toolName, input, VAULT) || vaultZugriffErlaubt(toolName, input, ANHAENGE),
+          vaultZugriffErlaubt(toolName, input, VAULT) || vaultZugriffErlaubt(toolName, input, ANHAENGE) ||
+          gedaechtnisZugriffErlaubt(toolName, input),
       })
       const neueSession = supervisor.agentenListe(f.laufId).find((a) => a.agentId === 'chat')?.sessionId
       if (neueSession) fortsetzungAktualisieren(DB_PFAD, id, neueSession)
@@ -376,7 +379,9 @@ function chatZugStarten(
 /** Chat-Optionen aus Einstellungen + Anfrage; die Spezialisten erst laden, wenn sie gebraucht werden. */
 function chatOptionen(k: Record<string, unknown> | null): { fehler: string } | { optionen: ChatOptionen } {
   const e = einstellungen.lesen()
-  return chatOptionenBauen(e, k, () => agentDefinitionen(e.rollenAus), existsSync(VAULT) ? VAULT : null)
+  return chatOptionenBauen(
+    e, k, () => agentDefinitionen(e.rollenAus), existsSync(VAULT) ? VAULT : null, gedaechtnisWurzel(),
+  )
 }
 
 /**
@@ -474,6 +479,7 @@ setInterval(() => void guthabenPuls(), 60 * 60_000).unref()
 // Fachrollen beim Start einlesen. Ein Fehler hier soll frueh sichtbar sein --
 // nicht erst, wenn der Orchestrator in Runde drei eine Rolle adressiert.
 await rollenLaden()
+gedaechtnisOrdnerAnlegen(rollenListe().filter((r) => r.gedaechtnis === 'user').map((r) => r.id))
 
 // Sitzungsverzeichnis im Hintergrund aufbauen. 285 Dateien mit 185 MB zu
 // lesen dauert Sekunden -- der Daemon soll deswegen nicht spaeter lauschen.

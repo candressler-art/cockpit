@@ -36,6 +36,11 @@ pruefe('Liste ohne Prompt', liste.every((r) => !('systemPrompt' in r)))
   pruefe('Coder ohne Werkzeugliste: keine Einschraenkung', coder.tools === undefined)
   const rech = d.rechercheur
   pruefe('Rechercheur hat Werkzeugliste ohne Klammern', Array.isArray(rech.tools) && rech.tools.every((t) => !t.includes('(')))
+  pruefe('jede Worker-Rolle lernt (memory: user)', Object.values(d).every((a) => a.memory === 'user'))
+  pruefe('jede Worker-Rolle weiss, was sie lernen soll', Object.values(d).every((a) => a.prompt.includes('# Aus Erfahrung lernen')))
+  pruefe('Rollen, die nichts aendern, schreiben nur ins Gedaechtnis',
+    ['planer', 'rechercheur', 'reviewer'].every((id) => d[id].prompt.includes('nur in dein Gedaechtnis')))
+  pruefe('Orchestrator hat kein Gedaechtnis', liste.find((r) => r.id === 'orchestrator')?.gedaechtnis === null)
   const ohne = agentDefinitionen(['coder', 'planer'])
   pruefe('ausgeschaltete fehlen', !('coder' in ohne) && !('planer' in ohne) && 'pruefer' in ohne)
 }

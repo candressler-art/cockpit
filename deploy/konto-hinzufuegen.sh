@@ -35,6 +35,7 @@ SSH=(ssh -i "$KEY" -o ConnectTimeout=10 "claude@$SERVER")
 KONTEN_WURZEL="${COCKPIT_KONTEN_DIR:-/home/claude/.claude-konten}"
 KONTO_DIR="$KONTEN_WURZEL/$NAME"
 HAUPT_PROJECTS="/home/claude/.claude/projects"
+HAUPT_GEDAECHTNIS="/home/claude/.claude/agent-memory"
 FEHLER=0
 
 schritt() { printf '\n\033[1m== %s ==\033[0m\n' "$1"; }
@@ -86,6 +87,22 @@ else
     ok "projects/ -> $HAUPT_PROJECTS verlinkt"
   else
     fehlt "Symlink fuer projects/ konnte nicht angelegt werden"
+  fi
+fi
+
+# Aus demselben Grund das Gedaechtnis der Spezialisten: die CLI legt es unter
+# <CLAUDE_CONFIG_DIR>/agent-memory/<rolle>/ ab. Ohne den Symlink lernte jeder
+# Spezialist pro Konto getrennt und wuesste unter diesem Konto nichts von dem,
+# was er unter 'haupt' gelernt hat (src/gedaechtnis.ts).
+if "${SSH[@]}" "test -L '$KONTO_DIR/agent-memory'" 2>/dev/null; then
+  ok "agent-memory/ ist schon verlinkt"
+elif "${SSH[@]}" "test -e '$KONTO_DIR/agent-memory'" 2>/dev/null; then
+  warn "$KONTO_DIR/agent-memory existiert schon und ist KEIN Symlink -- Inhalt von Hand nach $HAUPT_GEDAECHTNIS uebernehmen"
+else
+  if "${SSH[@]}" "mkdir -p '$HAUPT_GEDAECHTNIS' && ln -s '$HAUPT_GEDAECHTNIS' '$KONTO_DIR/agent-memory'" 2>/dev/null; then
+    ok "agent-memory/ -> $HAUPT_GEDAECHTNIS verlinkt"
+  else
+    fehlt "Symlink fuer agent-memory/ konnte nicht angelegt werden"
   fi
 fi
 

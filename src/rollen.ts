@@ -37,6 +37,12 @@ export interface Fachrolle {
   beschreibung: string
   /** Namen der MCP-Server, die diese Rolle nutzen darf, z.B. 'browser'. */
   mcp: string[] | null
+  /**
+   * Wo die Rolle festhaelt, was sie aus frueheren Auftraegen gelernt hat
+   * (SDK `memory`, siehe gedaechtnis.ts). Vorgabe 'user': jede Rolle lernt,
+   * ueber alle Projekte hinweg. `gedaechtnis: aus` schaltet es ab.
+   */
+  gedaechtnis: 'user' | 'project' | 'local' | null
   systemPrompt: string
 }
 
@@ -67,6 +73,10 @@ function zerlegen(id: string, roh: string): Fachrolle {
   const systemPrompt = (m[2] ?? '').trim()
   if (!systemPrompt) throw new Error(`rollen/${id}.md: Prompt ist leer`)
   const farbe = kopf.get('farbe') ?? ''
+  const gedaechtnis = kopf.get('gedaechtnis') || 'user'
+  if (!['user', 'project', 'local', 'aus'].includes(gedaechtnis)) {
+    throw new Error(`rollen/${id}.md: gedaechtnis muss user, project, local oder aus sein, nicht '${gedaechtnis}'`)
+  }
   return {
     id,
     name,
@@ -77,6 +87,7 @@ function zerlegen(id: string, roh: string): Fachrolle {
     werkzeuge: werkzeugeRoh ? werkzeugeRoh.split(',').map((w) => w.trim()).filter(Boolean) : null,
     beschreibung: kopf.get('beschreibung') ?? '',
     mcp: mcpRoh ? mcpRoh.split(',').map((w) => w.trim()).filter(Boolean) : null,
+    gedaechtnis: gedaechtnis === 'aus' ? null : (gedaechtnis as 'user' | 'project' | 'local'),
     systemPrompt,
   }
 }
@@ -176,6 +187,7 @@ export function agentDefinitionen(ausgeschaltet: string[] = []): Record<string, 
       description: `${r.name}: ${r.einsatz}`,
       prompt: r.systemPrompt,
       ...(r.modell ? { model: r.modell } : {}),
+      ...(r.gedaechtnis ? { memory: r.gedaechtnis } : {}),
       ...(werkzeugNamen(r.werkzeuge) ? { tools: werkzeugNamen(r.werkzeuge) } : {}),
       ...(mcp && Object.keys(mcp).length ? { mcpServers: [mcp as Record<string, never>] } : {}),
     }

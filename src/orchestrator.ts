@@ -21,6 +21,7 @@ import {
 } from './protokoll.js'
 import { rolleLesen, workerRollen, modellAufloesen, VORGABE_ROLLE, type Fachrolle } from './rollen.js'
 import { mcpAufloesen } from './mcp.js'
+import { gedaechtnisVorspann, gedaechtnisZugriffErlaubt } from './gedaechtnis.js'
 
 export interface OrchestratorKonfig {
   runId: string
@@ -332,7 +333,11 @@ export class Orchestrator extends EventEmitter {
             // adressiert, die es nicht gibt, und das gehoert in den Verlauf.
             this.melden(k.runId, 'rolle_unbekannt', { agentId, gewuenscht, statt: fach?.id ?? null })
           }
-          const rollenVorspann = fach ? `${fach.systemPrompt}\n\n---\n\n` : ''
+          // Ein Worker ist kein Subagent: sein Gedaechtnis laedt die CLI nicht
+          // von selbst. Nur 'user' -- die anderen Ablagen haengen am
+          // Projektverzeichnis, und keine Rolle nutzt sie.
+          const gedaechtnis = fach?.gedaechtnis === 'user' ? `${gedaechtnisVorspann(fach.id)}\n\n---\n\n` : ''
+          const rollenVorspann = fach ? `${fach.systemPrompt}\n\n---\n\n${gedaechtnis}` : ''
           const r = await this.supervisor.agentStarten({
             runId: k.runId,
             agentId,
@@ -360,6 +365,8 @@ export class Orchestrator extends EventEmitter {
               : { allowedTools: NOTFALL_WERKZEUGE }),
             mcpServers: mcpAufloesen(fach?.mcp),
             maxBudgetUsd: k.maxBudgetUsd,
+            // Sonst wartete ein Lauf ueber Nacht auf eine Freigabe fuer eine Notiz.
+            ...(gedaechtnis ? { autoErlauben: gedaechtnisZugriffErlaubt } : {}),
           })
           // Volltext statt `result`: bei ueberschrittener Ausgabegrenze traegt
           // `result` nur den letzten Block.

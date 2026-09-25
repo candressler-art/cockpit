@@ -41,7 +41,7 @@ export function kenntAufwand(modell: string): boolean {
  * warum die Oberflaeche ueberhaupt Checklisten und Spezialisten-Karten zeigen
  * kann -- ohne sie nutzt das Modell beides nur selten.
  */
-export function chatSystemZusatz(vault: string | null, spezialisten: boolean): string {
+export function chatSystemZusatz(vault: string | null, spezialisten: boolean, gedaechtnis: string | null = null): string {
   const teile = [
     'Du arbeitest im Cockpit, Cans Oberflaeche fuer Claude Code. Antworte auf Deutsch, ' +
       'wenn Can Deutsch schreibt.',
@@ -49,6 +49,10 @@ export function chatSystemZusatz(vault: string | null, spezialisten: boolean): s
       '(TaskCreate je Punkt, bzw. TodoWrite, falls es das gibt) und halte sie waehrend der ' +
       'Arbeit aktuell: Punkt auf in_progress, sobald du ihn beginnst, auf completed, sobald ' +
       'er fertig ist -- Can sieht sie als Checkliste.',
+    'Lerne aus jeder Aufgabe. Ist eine Aufgabe erledigt, oder hat Can etwas korrigiert, ' +
+      'verworfen, gelobt oder anders haben wollen, dann halte vor deiner Antwort fest, was ' +
+      'davon auch beim naechsten Mal gilt -- in deinem Gedaechtnis (auto memory). Nicht, was ' +
+      'nur fuer diese eine Aufgabe gilt oder ohnehin im Code steht.',
   ]
   if (spezialisten) {
     teile.push(
@@ -58,6 +62,18 @@ export function chatSystemZusatz(vault: string | null, spezialisten: boolean): s
         'Den Planer nur bei komplexen Vorhaben mit vielen Schritten -- einfache Aufgaben ' +
         'erledigst du selbst.',
     )
+    if (gedaechtnis) {
+      // Der Spezialist pflegt sein Gedaechtnis selbst, sieht aber nur seinen
+      // Auftrag -- Cans Reaktion auf sein Ergebnis kommt nur hier an.
+      teile.push(
+        `Jeder Spezialist hat ein eigenes Gedaechtnis unter ${gedaechtnis}/<name>/ ` +
+          '(MEMORY.md als Index, eine Datei je Erkenntnis) und pflegt es selbst. Cans ' +
+          'Rueckmeldung zu seinem Ergebnis sieht er aber nie. Die traegst du dort ein: ' +
+          'verwirft Can einen Entwurf des Gestalters oder macht er dem Server-Admin eine ' +
+          'Vorgabe, gehoert das in dessen Gedaechtnis, damit er es beim naechsten Auftrag ' +
+          'schon weiss. Lesen und Schreiben dort braucht keine Freigabe.',
+      )
+    }
   }
   if (vault) {
     teile.push(
@@ -74,6 +90,7 @@ export function chatOptionenBauen(
   wunsch: Record<string, unknown> | null,
   agents: () => Record<string, AgentDefinition>,
   vault: string | null,
+  gedaechtnis: string | null = null,
 ): { fehler: string } | { optionen: ChatOptionen } {
   const modell = wunsch?.modell ?? e.modell
   if (!modellGueltig(modell)) return { fehler: `Unbekanntes Modell: ${String(modell)}` }
@@ -92,7 +109,7 @@ export function chatOptionenBauen(
       settingSources: e.claudeMdLaden ? ['user', 'project', 'local'] : [],
       ...(Object.keys(definitionen).length ? { agents: definitionen } : {}),
       liveText: e.liveText,
-      systemPromptZusatz: chatSystemZusatz(vault, Object.keys(definitionen).length > 0),
+      systemPromptZusatz: chatSystemZusatz(vault, Object.keys(definitionen).length > 0, gedaechtnis),
     },
   }
 }

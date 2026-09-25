@@ -4,6 +4,7 @@ symbol: ✦
 farbe: #6fe3ff
 modell: opus
 einsatz: Leitet Team-Auftraege. Wird nie als Spezialist gerufen.
+gedaechtnis: aus
 werkzeuge:
 beschreibung: Beauftragt, prüft und entscheidet. Sieht keine Dateien, nur Reports.
 ---

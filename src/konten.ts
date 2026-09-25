@@ -110,7 +110,7 @@ function heimatverzeichnis(): string {
   return process.env.HOME ?? '.'
 }
 
-function hauptConfigDir(): string {
+export function hauptConfigDir(): string {
   return process.env.CLAUDE_CONFIG_DIR ?? join(heimatverzeichnis(), '.claude')
 }
 
