@@ -17,6 +17,7 @@ import { markdown } from './markdown.js'
 import { werkzeugZeichnen, rollenSetzen, todoListe, kopfDaten } from './werkzeuge.js'
 import { aktuelleTodos } from './taskliste.js'
 import { eingabeBauen, einstellungenHolen, NUR_ANHANG_TEXT } from './eingabe.js'
+import { cloudKartenBauen } from './cloud.js'
 import { AKZENTE, akzentLesen, akzentSetzen } from '../akzent.js'
 import { anhaengeTrennen, mitAnhaengen, istBild } from './anhangtext.js'
 import { freigabeKarteBauen, freigabeNormalisieren } from './freigabekarten.js'
@@ -54,9 +55,11 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
   const verlaufEl = h('div.verlauf', { role: 'log', 'aria-live': 'off' })
   const liveEl = h('div.live')
   const freigabenEl = h('div.freigaben')
-  const innen = h('div.verlauf-innen', {}, verlaufEl, liveEl, freigabenEl)
+  // Cloud-Auftraege dieses Chats (cloud.js) als Karten unter dem Verlauf.
+  const cloudKarten = cloudKartenBauen({ beiPruefen: (a) => senden('☁ Ergebnis des Cloud-Auftrags prüfen', { cloudPruefen: a.id }) })
+  const innen = h('div.verlauf-innen', {}, verlaufEl, cloudKarten.el, liveEl, freigabenEl)
   const scroller = h('div.verlauf-scroll', {}, innen)
-  const eingabe = eingabeBauen({ beiSenden: senden, beiStopp: anhalten })
+  const eingabe = eingabeBauen({ beiSenden: senden, beiStopp: anhalten, cloudLeerErlaubt: () => Boolean(id) })
   const vorschau = vorschauBauen({
     beiKommentar: (t) => eingabe.textAnhaengen(t),
     beiOffen: (an) => el.classList.toggle('mit-vorschau', an),
@@ -107,6 +110,7 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
     eingabe.vorschlagWeg()
     eingabe.laeuftSetzen(false)
     eingabe.ordnerFestlegen(null)
+    cloudKarten.chatSetzen(id)
     klebt = true
 
     if (!id) {
@@ -327,12 +331,14 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
   async function senden(text, optionen) {
     // So, wie der Daemon den Prompt baut -- dann erkennt ereignisVerarbeiten
     // die wiederholte Eingabe und nutzerBlase zeigt die Anhaenge gleich.
-    const prompt = mitAnhaengen(text, optionen.anhaenge ?? [])
+    // Cloud: der Daemon verpackt den Text in eine lange Anweisung -- hier erst mal kurz zeigen.
+    const prompt = optionen.cloud ? `☁ ${text || 'Bisherige Aufgabe in die Cloud geben'}` : mitAnhaengen(text, optionen.anhaenge ?? [])
     const vorlaeufig = { id: '', rolle: 'user', ts: Date.now(), bloecke: [{ typ: 'text', text: prompt }], modell: null, eltern: null, vorlaeufig: true }
     if (!id) {
       const r = await api('/api/chats', { body: { text, ...optionen } })
       ladeNr++
       id = r.id
+      cloudKarten.chatSetzen(id)
       laufId = r.laufId
       // Die Auswahl steht schon im Eingabefeld -- nicht beim ersten
       // Nachladen mit dem gemerkten Stand ueberschreiben (z.B. nach "Plan umsetzen").

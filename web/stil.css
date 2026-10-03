@@ -835,8 +835,8 @@ select.chip option { background: var(--mantle-fest); color: var(--text); }
   .chip.rund { width: 40px; }
   .senden { width: 44px; height: 44px; }
   /* Mit flex-wrap schrumpft nichts vor dem Umbrechen: die Breite so deckeln, dass
-     Ordner (72), Anhang, Mikro, Senden (124) und Luecken (25) immer daneben passen. */
-  .optionen-chip { display: inline-flex; flex: 0 1 auto; min-width: 0; max-width: calc(100% - 221px); font-size: 13px; }
+     Ordner (72), Anhang, Mikro, Wolke, Senden (164) und Luecken (30) immer daneben passen. */
+  .optionen-chip { display: inline-flex; flex: 0 1 auto; min-width: 0; max-width: calc(100% - 266px); font-size: 13px; }
   .eingabe-leiste { gap: 5px; }
   /* Ein langer Ordnerpfad soll kuerzer werden, nicht den Senden-Knopf in eine
      eigene Zeile schieben: Basis 0, waechst bis max-width, den Rest nimmt der

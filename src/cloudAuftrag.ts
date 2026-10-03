@@ -237,6 +237,11 @@ export function createErgebnisParsen(text: string): CreateErgebnis | null {
   const jtext = (v: unknown): string | null => (typeof v === 'string' && v ? v : null)
   const name = jtext(j?.name) ?? (erstes(text, /"name"\s*:\s*"((?:[^"\\]|\\.)*)"/)?.replace(/\\"/g, '"') ?? null)
   const repoRoh = erstes(text, /(https:\/\/github\.com\/[\w.-]+\/[\w.-]+)/)
+  const id = name ? erstes(name, /\[([a-z0-9]{6})\]\s*$/) : null
+  // Mit bekannter Auftrags-Id den Branch nehmen, der auf sie endet -- im
+  // Prompt steht auch der Basis-Branch, und der kann selbst cloud/... heissen.
+  const branch = (id ? erstes(text, new RegExp(`\\b(cloud\\/[a-z0-9._-]*-${id})\\b`)) : null)
+    ?? erstes(text, /\b(cloud\/[a-z0-9][a-z0-9._-]*-[a-z0-9]{6})\b/)
   return {
     triggerId,
     name,
@@ -244,8 +249,8 @@ export function createErgebnisParsen(text: string): CreateErgebnis | null {
     environmentId: erstes(text, /"environment_id"\s*:\s*"(env_[A-Za-z0-9]+)"/) ?? erstes(text, /\b(env_[A-Za-z0-9]{8,})/),
     link: erstes(text, /(https:\/\/claude\.ai\/[^\s)"'<>\]]+)/),
     repo: repoRoh ? githubUrl(repoRoh) : null,
-    branch: erstes(text, /\b(cloud\/[a-z0-9][a-z0-9._-]*-[a-z0-9]{6})\b/),
-    auftragsId: name ? erstes(name, /\[([a-z0-9]{6})\]\s*$/) : null,
+    branch,
+    auftragsId: id,
   }
 }
 

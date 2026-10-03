@@ -30,6 +30,7 @@ bus.abonnieren('einstellungen', (werte) => { if (vorgaben) vorgaben.werte = wert
 /**
  * @param opt.beiSenden(text, optionen)  -> Promise; bei Fehler bleibt der Text stehen
  * @param opt.beiStopp()
+ * @param opt.cloudLeerErlaubt() -> true, wenn "In der Cloud" auch mit leerem Feld geht (bestehender Chat)
  */
 export function eingabeBauen(opt) {
   // Auswahl dieser Ansicht. null heisst "Vorgabe aus den Einstellungen".
@@ -56,6 +57,8 @@ export function eingabeBauen(opt) {
   const dateiWahl = h('input', { type: 'file', multiple: true, hidden: true, tabindex: '-1' })
   const anhangListe = h('div.eingabe-anhaenge', { hidden: true })
   const mikroKnopf = h('button.chip.rund', { type: 'button', title: 'Diktieren', 'aria-label': 'Diktieren', 'aria-pressed': 'false' }, symbol('mikro', 15))
+  // Cloud-Auftrag (src/cloudAuftrag.ts): derselbe Weg wie Senden, mit cloud:true.
+  const wolkeKnopf = h('button.chip.rund.wolke-knopf', { type: 'button' }, symbol('wolke', 16))
 
   // Am Handy passen vier Auswahlfelder nicht in eine Zeile. Dort stehen
   // Modell, Denken und Modus hinter einem Chip, der ihre Kurzform zeigt und
@@ -71,7 +74,7 @@ export function eingabeBauen(opt) {
       h('div.feld-huelle', {}, spiegel, feld),
       h('div.eingabe-leiste', {},
         ordnerKnopf, optionenKnopf, optionen,
-        h('span.spacer'), klammerKnopf, dateiWahl, mikroKnopf, sendeKnopf),
+        h('span.spacer'), klammerKnopf, dateiWahl, mikroKnopf, wolkeKnopf, sendeKnopf),
       diktat.el),
     diktat.ansage)
   optionenKnopf.addEventListener('click', () => {
@@ -147,6 +150,10 @@ export function eingabeBauen(opt) {
     sendeKnopf.setAttribute('aria-label', sendeKnopf.title)
     sendeKnopf.classList.toggle('stopp', laeuft && leer)
     sendeKnopf.disabled = (!laeuft && leer) || (!leer && laedt)
+    const nurAufgabe = !feld.value.trim() && opt.cloudLeerErlaubt?.()
+    wolkeKnopf.title = nurAufgabe ? 'Bisherige Aufgabe dieses Chats in die Cloud geben' : 'In der Cloud erledigen lassen (mit dem Kontext dieses Chats)'
+    wolkeKnopf.setAttribute('aria-label', wolkeKnopf.title)
+    wolkeKnopf.disabled = laedt || (!feld.value.trim() && !nurAufgabe)
   }
 
   // --- Anhaenge -------------------------------------------------------------
@@ -220,9 +227,11 @@ export function eingabeBauen(opt) {
     dateienHinzufuegen([...ev.dataTransfer.files])
   })
 
-  async function senden() {
+  async function senden(cloud = false) {
     const text = feld.value.trim() || (anhaenge.length ? NUR_ANHANG_TEXT : '')
-    if (!text) {
+    // Leer in die Cloud heisst: die bisherige Aufgabe dieses Chats (der Daemon verpackt das).
+    if (cloud && !text && !opt.cloudLeerErlaubt?.()) return
+    if (!text && !cloud) {
       if (laeuft) opt.beiStopp?.()
       return
     }
@@ -240,8 +249,10 @@ export function eingabeBauen(opt) {
       aufwand: aufwandWahl.disabled ? undefined : (aufwandWahl.value || undefined),
       berechtigung: modusWahl.value || undefined,
       ...(anhaenge.length ? { anhaenge: anhaenge.map((a) => a.pfad) } : {}),
+      ...(cloud ? { cloud: true } : {}),
     }
     sendeKnopf.disabled = true
+    wolkeKnopf.disabled = true
     // Waehrend des Sendens kein Diktat beginnen: das Feld wird danach geleert,
     // und ein Diktat, das den alten Text kennt, schriebe ihn zurueck.
     mikroKnopf.disabled = true
@@ -258,7 +269,8 @@ export function eingabeBauen(opt) {
       knopfZustand()
     }
   }
-  sendeKnopf.addEventListener('click', senden)
+  sendeKnopf.addEventListener('click', () => senden())
+  wolkeKnopf.addEventListener('click', () => senden(true))
 
   // --- Auswahllisten --------------------------------------------------------
   function listenFuellen() {
@@ -571,7 +583,7 @@ export function eingabeBauen(opt) {
       knopfZustand()
     },
     /** Fuer bestehende Chats steht der Ordner fest (null = frei waehlbar). */
-    ordnerFestlegen(p) { ordnerFest = p; ordnerZeigen() },
+    ordnerFestlegen(p) { ordnerFest = p; ordnerZeigen(); knopfZustand() },
     /** Vorschlag als Schatten ins leere Feld -- nie über etwas, das Can schon diktiert oder anhängt. */
     vorschlagSetzen(t) {
       if (!t || laeuft || diktatZustand !== 'aus' || anhaenge.length) return

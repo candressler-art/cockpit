@@ -142,6 +142,12 @@ const ergebnis = `HTTP 200\n${JSON.stringify(routine, null, 2)}\nRoutine created
   const p = createErgebnisParsen('HTTP 200\n{"id": "trig_02Zz", "name": "☁ X [qwe234]", "environment_id": "env_ABCDEFGH12"')
   pruefe('create ohne gueltiges JSON: per Regex', p?.triggerId === 'trig_02Zz' && p.auftragsId === 'qwe234' && p.environmentId === 'env_ABCDEFGH12')
 }
+{
+  // Basis-Branch heisst selbst cloud/...-xxxxxx und steht vorn im Prompt: der mit der Auftrags-Id gewinnt.
+  const r2 = { ...routine, job_config: { ccr: { ...routine.job_config.ccr, events: [{ data: { message: { content: 'Basis cloud/alt-abcdef, arbeite auf cloud/nutzung-zaehlen-abc234' } } }] } } }
+  const p = createErgebnisParsen(`HTTP 200\n${JSON.stringify(r2)}`)
+  pruefe('create: Branch mit passender Auftrags-Id statt Basis', p?.branch === 'cloud/nutzung-zaehlen-abc234')
+}
 pruefe('HTTP 400 -> null', createErgebnisParsen('HTTP 400\n{"error": "bad", "id": "trig_x1"}') === null)
 pruefe('ohne trig_ -> null', createErgebnisParsen('HTTP 200\n{"ok": true}') === null)
 pruefe('leer -> null', createErgebnisParsen('') === null)
