@@ -48,7 +48,7 @@ frage()   { local a; read -r -p "   $1 [j/N] " a; [ "$a" = j ] || [ "$a" = J ]; 
 
 # --- 1. Server und Netz ----------------------------------------------------------
 schritt "1/6  Server und Netzwerk dieses PCs"
-if "${SSH[@]}" 'id roblox >/dev/null 2>&1 && test -f /home/roblox/.ssh/pc_aus.pub' 2>/dev/null; then
+if "${SSH[@]}" 'id roblox >/dev/null 2>&1 && sudo test -f /home/roblox/.ssh/pc_aus.pub' 2>/dev/null; then
   ok "Server ist eingerichtet"
 else
   fehlt "Server nicht bereit -- erst ./deploy/roblox/einrichten.sh"; exit 1
