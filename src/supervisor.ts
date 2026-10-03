@@ -13,7 +13,7 @@ import {
 } from '@anthropic-ai/claude-agent-sdk'
 import { kenntAufwand } from './chatOptionen.js'
 import { modellName } from './einstellungen.js'
-import { AUTO_ERSATZ, MODELL_AUTO, MODELL_JE_STUFE, modellWaehlen, type Auftrag } from './modellwahl.js'
+import { AUTO_ERSATZ, MODELL_AUTO, MODELL_JE_STUFE, aufwandFuer, modellWaehlen, type Auftrag } from './modellwahl.js'
 import { type Entscheidung, freigabeErgebnis } from './freigaben.js'
 import type { CockpitDb } from './db.js'
 import { einordnen } from './normalisieren.js'
@@ -438,7 +438,7 @@ export class Supervisor extends EventEmitter {
     const wahl = await modellWaehlen({ text: o.prompt, ...o.modellKontext }, kontoUmgebung(konto), signal)
     if (signal.aborted) return o
     const model = wahl ? MODELL_JE_STUFE[wahl.stufe] : AUTO_ERSATZ
-    const effort = !kenntAufwand(model) ? undefined : wahl ? wahl.aufwand : o.effort
+    const effort = !kenntAufwand(model) ? undefined : wahl ? aufwandFuer(wahl.aufwand, o.effort) as AgentStartOptionen['effort'] : o.effort
     this.agentAendern(o.runId, o.agentId, { model })
     const name = modellName(model)
     this.melden(o.runId, o.agentId, 'protocol',

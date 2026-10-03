@@ -72,6 +72,15 @@ export function wahlPrompt(a: Auftrag): string {
   return teile.join('\n')
 }
 
+/**
+ * Denkaufwand fuer den Auftrag. Die Wahl kennt nur low/medium/high; steht in
+ * den Einstellungen mehr (Can: "Sehr hoch"), bekommt eine schwere Aufgabe
+ * das -- die Automatik soll nichts schwaecher machen als vorher.
+ */
+export function aufwandFuer(wahl: WahlAufwand, vorgabe: string | undefined): string {
+  return wahl === 'high' && (vorgabe === 'xhigh' || vorgabe === 'max') ? vorgabe : wahl
+}
+
 /** Stufe zu einer Modell-Id oder einem Kurznamen, null wenn unbekannt. */
 export function stufeVon(modell: string | null | undefined): Stufe | null {
   const m = /(haiku|sonnet|opus)/i.exec(modell ?? '')

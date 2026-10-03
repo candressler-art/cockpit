@@ -1,6 +1,6 @@
 // Reine Teile der automatischen Modellwahl (src/modellwahl.ts) -- ohne
 // Modellaufruf. Vorher `npm run build`.
-import { wahlLesen, wahlPrompt, stufeVon, MODELL_JE_STUFE, AUTO_ERSATZ, MODELL_AUTO } from '../dist/modellwahl.js'
+import { wahlLesen, wahlPrompt, stufeVon, aufwandFuer, MODELL_JE_STUFE, AUTO_ERSATZ, MODELL_AUTO } from '../dist/modellwahl.js'
 import { modellGueltig, MODELLE } from '../dist/einstellungen.js'
 import { chatOptionenBauen, kenntAufwand } from '../dist/chatOptionen.js'
 import { vorgaben } from '../dist/einstellungen.js'
@@ -29,6 +29,9 @@ pruefe('Prompt: Rolle', wahlPrompt({ text: 'x', rolle: 'Gestalter: Oberflaechen'
 const lang = wahlPrompt({ text: 'a'.repeat(9000) })
 pruefe('Prompt: langer Auftrag gekuerzt', lang.length < 4200 && lang.includes('Zeichen gekuerzt'))
 
+pruefe('Aufwand: hoch + Vorgabe sehr hoch -> sehr hoch', aufwandFuer('high', 'xhigh') === 'xhigh' && aufwandFuer('high', 'max') === 'max')
+pruefe('Aufwand: hoch + Vorgabe mittel -> hoch', aufwandFuer('high', 'medium') === 'high')
+pruefe('Aufwand: niedrig bleibt niedrig', aufwandFuer('low', 'xhigh') === 'low' && aufwandFuer('medium', undefined) === 'medium')
 pruefe('stufeVon Id', stufeVon('claude-sonnet-5-5') === 'sonnet' && stufeVon('claude-haiku-4-5-20251001') === 'haiku')
 pruefe('stufeVon unbekannt', stufeVon('auto') === null && stufeVon(null) === null)
 pruefe('Stufen sind angebotene Modelle', Object.values(MODELL_JE_STUFE).every((m) => modellGueltig(m)))
