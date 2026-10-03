@@ -16,6 +16,7 @@ export const AKZENTE = [
   { id: 'rosepine', name: 'Rosé Pine', a: '#ebbcba', b: '#c4a7e7' },
   { id: 'gruvbox', name: 'Gruvbox', a: '#fabd2f', b: '#b8bb26' },
   { id: 'dracula', name: 'Dracula', a: '#bd93f9', b: '#ff79c6' },
+  { id: 'blau', name: 'Blau', a: '#3b82f6', b: '#06b6d4' },
 ]
 
 export function akzentLesen() {

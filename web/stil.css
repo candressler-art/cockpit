@@ -58,6 +58,7 @@
 :root[data-akzent="rosepine"]   { --akzent: #ebbcba; --akzent-2: #c4a7e7; }
 :root[data-akzent="gruvbox"]    { --akzent: #fabd2f; --akzent-2: #b8bb26; }
 :root[data-akzent="dracula"]    { --akzent: #bd93f9; --akzent-2: #ff79c6; }
+:root[data-akzent="blau"]       { --akzent: #3b82f6; --akzent-2: #06b6d4; }
 
 * { box-sizing: border-box; }
 html, body { height: 100%; }
