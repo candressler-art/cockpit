@@ -9,8 +9,11 @@ import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import {
   query, USAGE_LIMIT_ERROR_PREFIXES,
-  type AgentDefinition, type McpServerConfig, type PermissionMode, type PermissionUpdate, type SettingSource,
+  type AgentDefinition, type HookCallback, type McpServerConfig, type PermissionMode, type PermissionUpdate, type SettingSource,
 } from '@anthropic-ai/claude-agent-sdk'
+import { kenntAufwand } from './chatOptionen.js'
+import { modellName } from './einstellungen.js'
+import { AUTO_ERSATZ, MODELL_AUTO, MODELL_JE_STUFE, modellWaehlen, type Auftrag } from './modellwahl.js'
 import { type Entscheidung, freigabeErgebnis } from './freigaben.js'
 import type { CockpitDb } from './db.js'
 import { einordnen } from './normalisieren.js'
@@ -118,6 +121,26 @@ export interface AgentStartOptionen {
    * in die DB: ein Zug haette sonst tausende Zeilen fuer denselben Text).
    */
   liveText?: boolean
+  /**
+   * Nur bei model 'auto' (modellwahl.ts): was der Waehler ausser dem
+   * Auftrag wissen soll -- Fachrolle, Chat-Titel, Modell des vorigen Zugs.
+   * `text` ersetzt den Prompt, wenn der viel Beiwerk traegt (Rollenvorspann).
+   */
+  modellKontext?: Partial<Auftrag>
+  /** Intern: Spezialisten bekommen ihr Modell je Auftrag (Hook auf das Agent-Werkzeug). */
+  subagentenAuto?: boolean
+}
+
+/**
+ * Umgebung fuer den CLI-Prozess eines Kontos. Das Hauptkonto erbt
+ * process.env unveraendert (undefined) -- nur so wirkt ein
+ * CLAUDE_CODE_OAUTH_TOKEN aus /etc/cockpit/umgebung noch. Ein Zusatzkonto
+ * bekommt sein CLAUDE_CONFIG_DIR und keinen geerbten Schluessel, sonst liefe
+ * es gegen den API-Schluessel statt gegen sein Abo.
+ */
+function kontoUmgebung(konto: Konto | null): Record<string, string | undefined> | undefined {
+  if (!konto || konto.name === HAUPT_KONTO) return undefined
+  return { ...process.env, CLAUDE_CONFIG_DIR: konto.configDir, CLAUDE_CODE_OAUTH_TOKEN: undefined, ANTHROPIC_API_KEY: undefined }
 }
 
 /** Pseudo-Lauf fuer alles, was zu keinem Agentenlauf gehoert. */
@@ -315,6 +338,15 @@ export class Supervisor extends EventEmitter {
     let fehler: string | null = null
 
     try {
+      // Automatische Modellwahl vor dem ersten Versuch, auf dem Konto, das den
+      // Auftrag auch erledigt -- fuer jeden Weg (Chat, Team-Worker,
+      // Orchestrator), der 'auto' als Modell mitgibt. Hat Can waehrenddessen
+      // angehalten, startet gar nichts mehr (agentAbbrechen hat 'stopped'
+      // schon gesetzt).
+      if (o.model === MODELL_AUTO) {
+        o = await this.modellAutomatisch(o, konto, abort.signal)
+        if (abort.signal.aborted) return { ergebnis: null, volltext: '', fehler: null }
+      }
       // Ein Agent darf hier mehrfach ansetzen: laeuft das gewaehlte Konto ins
       // Limit, wird es bis zum gemessenen (oder geschaetzten) Reset gesperrt
       // und der Agent macht per resume mit dem naechsten freien Konto weiter,
@@ -397,6 +429,55 @@ export class Supervisor extends EventEmitter {
   }
 
   /**
+   * Modell 'auto' aufloesen (modellwahl.ts). Faellt die Wahl aus, laeuft der
+   * Auftrag mit AUTO_ERSATZ -- er soll nie an der Modellwahl scheitern. Die
+   * Wahl steht als Protokollschritt im Lauf (der Chat zeigt sie als Hinweis)
+   * und als Modell am Agenten.
+   */
+  private async modellAutomatisch(o: AgentStartOptionen, konto: Konto | null, signal: AbortSignal): Promise<AgentStartOptionen> {
+    const wahl = await modellWaehlen({ text: o.prompt, ...o.modellKontext }, kontoUmgebung(konto), signal)
+    if (signal.aborted) return o
+    const model = wahl ? MODELL_JE_STUFE[wahl.stufe] : AUTO_ERSATZ
+    const effort = !kenntAufwand(model) ? undefined : wahl ? wahl.aufwand : o.effort
+    this.agentAendern(o.runId, o.agentId, { model })
+    const name = modellName(model)
+    this.melden(o.runId, o.agentId, 'protocol',
+      wahl ? `Modellwahl: ${name}${effort ? `, Denkaufwand ${effort}` : ''} -- ${wahl.grund}` : `Modellwahl ausgefallen, weiter mit ${name}`,
+      { modellwahl: { modell: model, aufwand: effort ?? null, grund: wahl?.grund ?? null, automatisch: wahl !== null } })
+    return { ...o, model, effort, subagentenAuto: true }
+  }
+
+  /**
+   * Hook vor jedem Aufruf des Agent-Werkzeugs: der Spezialist bekommt das
+   * Modell, das zu SEINEM Auftrag passt, statt des festen aus rollen/*.md.
+   * Hat der Chat selbst schon ein Modell genannt, bleibt es dabei; ein Fork
+   * erbt immer, Explore ist ohnehin klein.
+   */
+  private spezialistenModell(o: AgentStartOptionen, konto: Konto | null): HookCallback {
+    return async (eingabe, _id, { signal }) => {
+      if (eingabe.hook_event_name !== 'PreToolUse') return {}
+      const ein = (eingabe.tool_input ?? {}) as Record<string, unknown>
+      const typ = typeof ein.subagent_type === 'string' ? ein.subagent_type : 'general-purpose'
+      if (ein.model || typ === 'fork' || typ === 'Explore' || typeof ein.prompt !== 'string') return {}
+      const rolle = o.agents?.[typ]?.description ?? typ
+      const wahl = await modellWaehlen({ text: ein.prompt, rolle }, kontoUmgebung(konto), signal)
+      if (!wahl || signal.aborted) return {}
+      this.melden(o.runId, o.agentId, 'protocol',
+        `Modellwahl fuer ${rolle.split(':')[0]}: ${modellName(MODELL_JE_STUFE[wahl.stufe])} -- ${wahl.grund}`,
+        { modellwahl: { modell: MODELL_JE_STUFE[wahl.stufe], grund: wahl.grund, automatisch: true, fuer: typ } })
+      // Nur die Eingabe aendern, keine Freigabe erteilen: der Aufruf nimmt
+      // danach den normalen Freigabeweg (die CLI uebernimmt updatedInput auch
+      // ohne permissionDecision).
+      return {
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          updatedInput: { ...ein, model: wahl.stufe },
+        },
+      }
+    }
+  }
+
+  /**
    * Ein einzelner Versuch, den Agenten laufen zu lassen -- mit genau einem
    * Konto. agentStarten ruft das ggf. mehrfach auf, wenn ein Konto ins Limit
    * laeuft.
@@ -476,15 +557,9 @@ export class Supervisor extends EventEmitter {
           // Umgebung -- sonst wuerde jeder Aufruf ueber das Zusatzkonto
           // gegen dessen API-Schluessel statt gegen sein Abo abgerechnet,
           // falls einer der beiden zufaellig im Prozess des Daemons steht.
-          ...(konto && konto.name !== HAUPT_KONTO
-            ? {
-                env: {
-                  ...process.env,
-                  CLAUDE_CONFIG_DIR: konto.configDir,
-                  CLAUDE_CODE_OAUTH_TOKEN: undefined,
-                  ANTHROPIC_API_KEY: undefined,
-                },
-              }
+          ...(kontoUmgebung(konto) ? { env: kontoUmgebung(konto) } : {}),
+          ...(o.subagentenAuto && o.agents
+            ? { hooks: { PreToolUse: [{ matcher: 'Agent|Task', timeout: 40, hooks: [this.spezialistenModell(o, konto)] }] } }
             : {}),
           canUseTool: (toolName: string, input: Record<string, unknown>, optionen?: { suggestions?: PermissionUpdate[] }) => {
             // Vor dem Broker: eng umrissene Faelle (z.B. Lesezugriff im

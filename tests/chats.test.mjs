@@ -27,6 +27,8 @@ process.env.CLAUDE_CONFIG_DIR = claudeConfig
 
 const {
   chatsIndizieren, verlaufLesen, fortsetzungLesen, fortsetzungVorbereiten, fortsetzungAktualisieren, chatFuerSitzung,
+  einreihen, warteschlangeLesen, ausWarteschlange, warteschlangeEntnehmen, zusammenfassen,
+  warteschlangeHalten, alleWartendenHalten, chatOptionenMerken, chatOptionenGeaendert, chatBerechtigungSetzen,
 } = await import('../dist/chats.js')
 const { vaultZugriffErlaubt } = await import('../dist/vaultZugriff.js')
 
@@ -182,6 +184,48 @@ let f
     'Bash-Werkzeug NICHT automatisch erlaubt',
     vaultZugriffErlaubt('Bash', { command: `cat ${notizPfad}` }, vaultWurzel) === false,
   )
+}
+
+// --- Warteschlange: Nachrichten waehrend Claude arbeitet ---------------------
+{
+  const sid = 'warte-test-1'
+  pruefe('Warteschlange: anfangs leer', warteschlangeLesen(dbPfad, sid).length === 0)
+  einreihen(dbPfad, sid, 'erste', [], { modell: 'auto' })
+  einreihen(dbPfad, sid, 'zweite', ['/a/b.png'], { modell: 'claude-opus-5-5' })
+  einreihen(dbPfad, 'anderer-chat', 'fremd', [], {})
+  const l = warteschlangeLesen(dbPfad, sid)
+  pruefe('Warteschlange: Reihenfolge wie geschrieben', l.length === 2 && l[0].text === 'erste' && l[1].text === 'zweite')
+  pruefe('Warteschlange: Anhaenge und Optionen bleiben', l[1].anhaenge[0] === '/a/b.png' && l[0].optionen.modell === 'auto')
+  const z = zusammenfassen(l)
+  pruefe('zusammenfassen: ein Zug, Texte in Reihenfolge', z.text === 'erste\n\nzweite')
+  pruefe('zusammenfassen: Anhaenge ohne Doppelte', z.anhaenge.length === 1)
+  pruefe('neu eingereiht: nicht gehalten', l.every((e) => e.gehalten === false))
+  pruefe('zuruecknehmen: nur im eigenen Chat', !ausWarteschlange(dbPfad, 'anderer-chat', l[0].nr))
+  pruefe('zuruecknehmen: Eintrag weg', ausWarteschlange(dbPfad, sid, l[0].nr) && warteschlangeLesen(dbPfad, sid).length === 1)
+  pruefe('zuruecknehmen: zweimal geht nicht', !ausWarteschlange(dbPfad, sid, l[0].nr))
+  const raus = warteschlangeEntnehmen(dbPfad, sid)
+  pruefe('entnehmen: alles auf einmal, danach leer', raus.length === 1 && warteschlangeLesen(dbPfad, sid).length === 0)
+  pruefe('entnehmen: fremder Chat bleibt', warteschlangeLesen(dbPfad, 'anderer-chat').length === 1)
+
+  einreihen(dbPfad, sid, 'a', [], {})
+  einreihen(dbPfad, sid, 'b', [], {})
+  const [a, b] = warteschlangeLesen(dbPfad, sid)
+  warteschlangeHalten(dbPfad, sid, [a.nr])
+  pruefe('halten: nur der genannte Eintrag', warteschlangeLesen(dbPfad, sid).map((e) => e.gehalten).join() === 'true,false')
+  const nurB = warteschlangeEntnehmen(dbPfad, sid, [b.nr, 99999])
+  pruefe('entnehmen nach Nummern: nur diese, Unbekanntes faellt weg', nurB.length === 1 && nurB[0].text === 'b' && warteschlangeLesen(dbPfad, sid).length === 1)
+  einreihen(dbPfad, sid, 'c', [], {})
+  const betroffen = alleWartendenHalten(dbPfad)
+  pruefe('Start: alles Wartende gehalten', warteschlangeLesen(dbPfad, sid).every((e) => e.gehalten) && betroffen.includes(sid) && betroffen.includes('anderer-chat'))
+  warteschlangeEntnehmen(dbPfad, sid)
+  warteschlangeEntnehmen(dbPfad, 'anderer-chat')
+
+  pruefe('Optionen nie gemerkt: kein Zeitpunkt', chatOptionenGeaendert(dbPfad, 'warte-opt') === null)
+  chatOptionenMerken(dbPfad, 'warte-opt', { modell: 'auto', berechtigung: 'plan' })
+  const t1 = chatOptionenGeaendert(dbPfad, 'warte-opt')
+  await new Promise((r) => setTimeout(r, 5))
+  chatBerechtigungSetzen(dbPfad, 'warte-opt', 'auto')
+  pruefe('Plan angenommen: Zeitpunkt rueckt vor', typeof t1 === 'number' && chatOptionenGeaendert(dbPfad, 'warte-opt') > t1)
 }
 
 console.log(`\n${ok}/${gesamt} bestanden`)

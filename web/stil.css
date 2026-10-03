@@ -342,6 +342,8 @@ a.dran-modul:hover { background: color-mix(in oklab, var(--orange) 80%, white); 
 .hinweis .sym { margin-top: 3px; }
 .hinweis.limit { color: var(--orange); border-color: color-mix(in srgb, var(--orange) 30%, var(--surface0)); }
 .hinweis.fehler { color: var(--rot); border-color: color-mix(in srgb, var(--rot) 30%, var(--surface0)); }
+/* Automatische Modellwahl: nur zur Info, leiser als die anderen Hinweise. */
+.hinweis.modell { color: var(--subtext); border-style: dashed; font-size: 12.5px; }
 
 /* Markdown */
 .md { overflow-wrap: anywhere; min-width: 0; line-height: 1.65; }
@@ -577,6 +579,23 @@ pre.diff { white-space: pre; overflow-wrap: normal; }
 }
 .vorschlag:hover { border-color: var(--akzent-rand); color: var(--text); }
 
+/* Warteschlange: Nachrichten, die nach dem laufenden Zug rausgehen (chat.js) */
+.schlange { padding: 0 24px; }
+.schlange[hidden] { display: none; }
+.schlange-rahmen {
+  max-width: var(--breite); margin: 0 auto; display: flex; flex-direction: column; gap: 6px;
+  padding: 10px 10px 10px 14px; border: 1px dashed var(--akzent-rand); border-radius: 14px;
+  background: color-mix(in srgb, var(--akzent) 6%, var(--mantle));
+}
+.schlange-kopf { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12.5px; }
+.schlange-titel { font: 600 12.5px/1.2 var(--mono); color: var(--akzent); }
+.schlange-kopf .knopf { margin-left: auto; }
+.schlange-eintrag {
+  display: flex; align-items: center; gap: 8px; min-width: 0; padding: 6px 4px 6px 10px;
+  border-radius: 9px; background: rgb(255 255 255 / .04); font-size: 13.5px; color: var(--text);
+}
+.schlange-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* Eingabe */
 .eingabe { padding: 8px 24px 18px; padding-bottom: max(18px, env(safe-area-inset-bottom)); }
 .eingabe-rahmen {
@@ -800,6 +819,7 @@ select.chip option { background: var(--mantle-fest); color: var(--text); }
   .schritte-gruppe > summary { padding: 9px 11px 9px 9px; font-size: 13.5px; }
   .denken summary { padding: 7px 8px; }
   .eingabe { padding: 6px 8px 8px; }
+  .schlange { padding: 0 8px; }
   .eingabe-rahmen { border-radius: 16px; padding: 10px 8px 8px 13px; gap: 8px; }
   .eingabe-feld { font-size: 15px; }
   .feld-huelle::before { font-size: 18px; line-height: 1.38; }

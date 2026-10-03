@@ -94,7 +94,7 @@ const dbPfad = join(verzeichnis, 'test.db')
 }
 {
   const l = auswahlListen()
-  pruefe('Auswahllisten vollstaendig', l.modelle.length === 3 && l.aufwaende.length === 5 && l.berechtigungen.length === 5)
+  pruefe('Auswahllisten vollstaendig', l.modelle.length === 4 && l.modelle[0].id === 'auto' && l.aufwaende.length === 5 && l.berechtigungen.length === 5)
   pruefe('Selbststaendig (auto) ist ein gueltiger Modus', l.berechtigungen.some((b) => b.id === 'auto'))
 }
 

@@ -39,7 +39,7 @@ export class ChatZuege {
    * behandelt `arbeit` selbst; hier wird sie nur geschluckt, damit kein
    * unbehandeltes Versprechen den Prozess stoert).
    */
-  starten(id: string, startSeq: number, arbeit: () => Promise<void>): void {
+  starten(id: string, startSeq: number, arbeit: () => Promise<void>, danach?: () => void): void {
     // Erst eintragen, dann starten: arbeit laeuft synchron bis zum ersten
     // await an, und endet sie ganz ohne await, muss finally den Eintrag
     // schon vorfinden, sonst bliebe er fuer immer stehen.
@@ -49,6 +49,9 @@ export class ChatZuege {
       try { await arbeit() } catch { /* Sache von arbeit */ } finally {
         if (this.zuege.get(id) === zug) this.zuege.delete(id)
       }
+      // Erst nach dem Austragen: danach darf schon den naechsten Zug starten
+      // (die Warteschlange in daemon.ts).
+      danach?.()
     })()
   }
 

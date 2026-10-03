@@ -72,5 +72,21 @@ const offenerZug = () => {
   neu.ende()
 }
 
+// danach (Warteschlange) laeuft erst, wenn der Zug ausgetragen ist --
+// sonst saehe der naechste Zug den alten noch als laufend.
+{
+  const z = new ChatZuege()
+  let sahLaufend = null
+  await new Promise((fertig) => {
+    z.starten('d1', 0, async () => {}, () => { sahLaufend = z.laeuft('d1'); fertig() })
+  })
+  pruefe('danach: Zug schon ausgetragen', sahLaufend === false)
+  let nachFehler = false
+  await new Promise((fertig) => {
+    z.starten('d2', 0, async () => { throw new Error('kaputt') }, () => { nachFehler = true; fertig() })
+  })
+  pruefe('danach: auch nach einem Fehler', nachFehler)
+}
+
 console.log(`\n${ok}/${gesamt} bestanden`)
 if (ok !== gesamt) process.exit(1)

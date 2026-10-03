@@ -21,6 +21,7 @@ import {
 } from './protokoll.js'
 import { rolleLesen, workerRollen, modellAufloesen, VORGABE_ROLLE, type Fachrolle } from './rollen.js'
 import { mcpAufloesen } from './mcp.js'
+import { MODELL_AUTO } from './modellwahl.js'
 import { gedaechtnisVorspann, gedaechtnisZugriffErlaubt } from './gedaechtnis.js'
 
 export interface OrchestratorKonfig {
@@ -194,6 +195,8 @@ export class Orchestrator extends EventEmitter {
   private supervisor: Supervisor
   private db: CockpitDb
   private abbruch = false
+  /** Bei "Automatisch": das einmal gewaehlte Orchestrator-Modell, fuer alle weiteren Runden. */
+  private orchestratorGewaehlt: string | null = null
   /** Wer gerade auf eine Antwort wartet. */
   private warteAufAntwort: ((text: string | null) => void) | null = null
 
@@ -350,7 +353,10 @@ export class Orchestrator extends EventEmitter {
             cwd: k.cwd,
             // Modell der Rolle schlaegt die Laufvorgabe: ein Rechercheur auf
             // Opus waere Verschwendung, ein Coder auf Haiku ein Rueckschritt.
-            model: modellAufloesen(fach?.modell, k.workerModell),
+            // Ausser bei "Automatisch": dann entscheidet die Modellwahl je
+            // Teilauftrag (modellwahl.ts), mit der Rolle als Kontext.
+            model: k.workerModell === MODELL_AUTO ? MODELL_AUTO : modellAufloesen(fach?.modell, k.workerModell),
+            modellKontext: { text: auftragstext, rolle: fach ? `${fach.name}: ${fach.einsatz}` : null },
             // Drei Faelle, und der Unterschied ist wichtig:
             //   Rolle mit Werkzeugliste  -> genau diese Werkzeuge
             //   Rolle mit leerem Feld    -> keine Einschraenkung (der Coder)
@@ -412,19 +418,27 @@ export class Orchestrator extends EventEmitter {
           runde,
           leseErgebnis,
         )
+        const orchId = `orchestrator-r${runde}${leseRunden ? `-l${leseRunden}` : ''}`
         const r = await this.supervisor.agentStarten({
           runId: k.runId,
-          agentId: `orchestrator-r${runde}${leseRunden ? `-l${leseRunden}` : ''}`,
+          agentId: orchId,
           role: 'orchestrator',
           fachrolle: 'orchestrator',
           label: `Orchestrator R${runde}${leseRunden ? `·L${leseRunden}` : ''}`,
           prompt: `${this.systemPrompt(k)}\n\n---\n\n${prompt}`,
           cwd: k.cwd,
-          model: k.orchestratorModell,
+          // Bei "Automatisch" waehlt die Modellwahl einmal je Lauf, nach dem
+          // Auftrag selbst -- nicht jede Runde neu nach dem Rundenprotokoll.
+          model: this.orchestratorGewaehlt ?? k.orchestratorModell,
+          modellKontext: { text: k.anfangsPrompt, rolle: 'Orchestrator: plant und verteilt einen Team-Auftrag' },
           maxBudgetUsd: k.maxBudgetUsd,
           // Der Orchestrator urteilt ueber Text und braucht keine Werkzeuge.
           allowedTools: [],
         })
+        if (k.orchestratorModell === MODELL_AUTO && !this.orchestratorGewaehlt) {
+          const gewaehlt = this.supervisor.agentenListe(k.runId).find((a) => a.agentId === orchId)?.model
+          if (gewaehlt && gewaehlt !== MODELL_AUTO) this.orchestratorGewaehlt = gewaehlt
+        }
         const text = (r.volltext || r.ergebnis || '').trim()
         if (r.fehler && !text) return { grund: 'fehler', text: r.fehler }
 

@@ -16,13 +16,14 @@ import { h, symbol, api, leeren, uhrzeit, pfadKurz, modellName, melden, fehlerTe
 import { markdown } from './markdown.js'
 import { werkzeugZeichnen, rollenSetzen, todoListe, kopfDaten } from './werkzeuge.js'
 import { aktuelleTodos } from './taskliste.js'
-import { eingabeBauen, einstellungenHolen } from './eingabe.js'
+import { eingabeBauen, einstellungenHolen, NUR_ANHANG_TEXT } from './eingabe.js'
 import { AKZENTE, akzentLesen, akzentSetzen } from '../akzent.js'
 import { anhaengeTrennen, mitAnhaengen, istBild } from './anhangtext.js'
 import { freigabeKarteBauen, freigabeNormalisieren } from './freigabekarten.js'
 import { vorschauBauen } from './vorschau.js'
 
 const ENDZUSTAENDE = new Set(['done', 'failed', 'stopped', 'waiting_ratelimit'])
+const AUFWAND_TEXT = { low: 'niedrig', medium: 'mittel', high: 'hoch', xhigh: 'sehr hoch', max: 'maximal' }
 const SCHREIB_WERKZEUGE = new Set(['Write', 'Edit', 'MultiEdit'])
 
 export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
@@ -42,6 +43,8 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
   let offen = new Set()   // aufgeklappte Werkzeuge ueber Neuzeichnen hinweg
   let hinweise = []       // Hinweise dieses Zugs (Kontowechsel, Limit, Fehler)
   let optionenGeholt = false // gemerkte Chat-Optionen nur beim Oeffnen, nicht nach jedem Zug
+  let warteschlange = []  // Nachrichten, die nach dem laufenden Zug rausgehen (daemon.ts)
+  let letzterSchlangenStart = null // startSeq -- Bus und Antwort melden denselben Start
 
   // --- Geruest --------------------------------------------------------------
   const titelEl = h('div.chat-titel')
@@ -57,7 +60,8 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
     beiKommentar: (t) => eingabe.textAnhaengen(t),
     beiOffen: (an) => el.classList.toggle('mit-vorschau', an),
   })
-  const el = h('section.chat', {}, kopfEl, scroller, vorschau.leiste, eingabe.el, vorschau.el)
+  const schlangeEl = h('div.schlange', { hidden: true, 'aria-live': 'polite' })
+  const el = h('section.chat', {}, kopfEl, scroller, vorschau.leiste, schlangeEl, eingabe.el, vorschau.el)
   // Anderer Bereich (Aufgaben, Terminal ...): Vorschau zu, Ton und Video aus.
   new MutationObserver(() => { if (!el.classList.contains('an')) vorschau.schliessen() })
     .observe(el, { attributes: true, attributeFilter: ['class'] })
@@ -94,6 +98,9 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
     offen = new Set()
     hinweise = []
     optionenGeholt = false
+    warteschlange = []
+    letzterSchlangenStart = null
+    schlangeZeichnen()
     schreibend.clear()
     vorschau.zuruecksetzen()
     eingabe.laeuftSetzen(false)
@@ -141,6 +148,7 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
     // Spaeter nicht mehr: wer waehrend eines Zugs den Modus umstellt, dem
     // soll ihn das Neuladen nach dem Zug nicht zuruecksetzen.
     if (!optionenGeholt) { optionenGeholt = true; eingabe.optionenSetzen(d.optionen) }
+    warteschlange = d.warteschlange ?? []
     const lief = kopf.fortsetzung?.laeuft
     laeuftSetzen(Boolean(lief))
     if (lief) {
@@ -201,6 +209,15 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
     if (ENDZUSTAENDE.has(a.status)) zugBeendet(a)
     else { laeuftSetzen(true); liveZeichnen() }
   })
+  // Warteschlange geaendert (auch von einem anderen Geraet) oder als
+  // naechster Zug gestartet.
+  bus.abonnieren('warteschlange', (d) => {
+    if (!id || d?.id !== id) return
+    warteschlange = d.eintraege ?? []
+    if (d.gestartet) schlangeGestartet(d.gestartet)
+    if (d.fehler) melden(`Warteschlange nicht gesendet: ${d.fehler}`, 'fehler')
+    schlangeZeichnen()
+  })
   bus.abonnieren('freigabe', (f) => {
     if (!laufId || f?.runId !== laufId) return
     freigabeAufnehmen(f)
@@ -238,6 +255,13 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
       // "Operation aborted" ist das Anhalten selbst -- kein Fehler, dafuer
       // steht am Zugende "Angehalten".
       hinweisDazu(e.kind === 'error' ? 'fehler' : 'limit', e.summary)
+    } else if (e.kind === 'protocol' && e.payload?.modellwahl) {
+      // Automatik (modellwahl.ts): welches Modell diesen Zug bzw. einen Spezialisten bekam.
+      const w = e.payload.modellwahl
+      const fuer = w.fuer ? `${(e.summary ?? '').match(/fuer ([^:]+):/)?.[1] ?? w.fuer}: ` : ''
+      hinweisDazu('modell', w.automatisch
+        ? `${fuer}${modellName(w.modell)}${w.aufwand ? ` · Denken ${AUFWAND_TEXT[w.aufwand] ?? w.aufwand}` : ''}${w.grund ? ` – ${w.grund}` : ''}`
+        : `Modellwahl ausgefallen, weiter mit ${modellName(w.modell)}`)
     } else if (e.kind === 'protocol' && e.payload?.nach) {
       // Kontowechsel des Supervisors: ruhig erwaehnen, der Zug laeuft weiter.
       hinweisDazu('info', `Konto gewechselt: weiter mit „${e.payload.nach}“ (${e.payload.von} nicht nutzbar).`)
@@ -287,6 +311,7 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
     laeuft = an
     eingabe.laeuftSetzen(an)
     el.classList.toggle('laeuft', an)
+    schlangeZeichnen()
   }
 
   // --- Senden / Anhalten ----------------------------------------------------
@@ -316,8 +341,16 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
     } else {
       const { cwd, ...rest } = optionen
       const r = await api(`/api/chats/${encodeURIComponent(id)}/weiter`, { body: { text, ...rest } })
+      // Claude arbeitet noch: die Nachricht wartet und geht danach raus.
+      if (r.eingereiht) {
+        warteschlange = r.warteschlange ?? warteschlange
+        schlangeZeichnen()
+        return
+      }
       laufId = r.laufId
       hinweise = []
+      // Lag noch etwas in der Warteschlange, ging es vorneweg mit raus.
+      if (r.prompt) vorlaeufig.bloecke[0].text = r.prompt
       nachrichten.push(vorlaeufig)
       laeuftSetzen(true)
       status = 'starting'
@@ -325,6 +358,70 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
     }
     liveZeichnen()
     nachUnten(true)
+  }
+
+  // --- Warteschlange ----------------------------------------------------------
+  /** Der Server hat die Warteschlange als naechsten Zug gestartet. */
+  function schlangeGestartet(g) {
+    if (g.startSeq === letzterSchlangenStart) return
+    letzterSchlangenStart = g.startSeq
+    laufId = g.laufId
+    // Scheiterte der vorige Zug, soll das sichtbar bleiben -- der naechste
+    // startet sofort, und zugBeendet kommt dann nicht mehr zum Zug.
+    hinweise = hinweise.filter((x) => x.art === 'fehler' || x.art === 'limit')
+    nachrichten.push({ id: '', rolle: 'user', ts: Date.now(), bloecke: [{ typ: 'text', text: g.prompt }], modell: null, eltern: null, vorlaeufig: true })
+    laeuftSetzen(true)
+    status = 'starting'
+    neuZeichnen()
+    liveZeichnen()
+    nachUnten(true)
+  }
+
+  async function schlangeSenden() {
+    try {
+      const r = await api(`/api/chats/${encodeURIComponent(id)}/warteschlange/senden`, { method: 'POST' })
+      warteschlange = []
+      schlangeGestartet(r)
+      schlangeZeichnen()
+    } catch (e) {
+      melden(`Warteschlange nicht gesendet: ${fehlerText(e)}`, 'fehler')
+    }
+  }
+
+  /** Zuruecknehmen: raus aus der Schlange, zurueck ins Eingabefeld -- zum Aendern oder Verwerfen. */
+  async function schlangeZuruecknehmen(e) {
+    try {
+      const r = await api(`/api/chats/${encodeURIComponent(id)}/warteschlange/${e.nr}`, { method: 'DELETE' })
+      warteschlange = r.eintraege ?? []
+      if (e.text !== NUR_ANHANG_TEXT || !e.anhaenge?.length) eingabe.textAnhaengen(e.text)
+      if (e.anhaenge?.length) eingabe.anhaengeUebernehmen(e.anhaenge)
+      schlangeZeichnen()
+    } catch (f) {
+      // 404: schon losgeschickt -- dann ist nichts mehr zurueckzunehmen.
+      melden(f.status === 404 ? 'Die Nachricht ist schon unterwegs.' : `Nicht zurückgenommen: ${fehlerText(f)}`, f.status === 404 ? 'info' : 'fehler')
+    }
+  }
+
+  function schlangeZeichnen() {
+    schlangeEl.hidden = !warteschlange.length
+    if (!warteschlange.length) { leeren(schlangeEl); return }
+    const n = warteschlange.length
+    const titel = `${n} ${n === 1 ? 'Nachricht wartet' : 'Nachrichten warten'}`
+    const gehalten = warteschlange.filter((e) => e.gehalten).length
+    // Gehalten (nach Anhalten, Limit oder Neustart) geht nur auf Cans Knopfdruck raus.
+    const unter = laeuft
+      ? (gehalten === n ? 'Angehalten – sie gehen erst raus, wenn du willst' : 'Claude liest sie, sobald er fertig ist')
+      : 'Nicht gesendet – sie gehen erst raus, wenn du willst'
+    leeren(schlangeEl, h('div.schlange-rahmen', {},
+      h('div.schlange-kopf', {},
+        h('span.schlange-titel', {}, titel),
+        h('span.leise', {}, unter),
+        laeuft ? null : h('button.knopf.knopf-schmal.primaer', { type: 'button', onclick: schlangeSenden }, symbol('senden', 14), 'Jetzt senden')),
+      warteschlange.map((e) => h('div.schlange-eintrag', {},
+        h('span.schlange-text', { title: e.text }, e.text === NUR_ANHANG_TEXT && e.anhaenge?.length ? 'Nur Anhänge' : e.text),
+        e.gehalten && laeuft && gehalten < n ? h('span.marke-klein', { title: 'Geht erst raus, wenn du „Jetzt senden“ drückst' }, 'angehalten') : null,
+        e.anhaenge?.length ? h('span.leise.klein', {}, `+ ${e.anhaenge.length} ${e.anhaenge.length === 1 ? 'Anhang' : 'Anhänge'}`) : null,
+        h('button.knopf-klein', { type: 'button', title: 'Zurücknehmen (zurück ins Eingabefeld)', 'aria-label': 'Nachricht zurücknehmen', onclick: () => schlangeZuruecknehmen(e) }, symbol('kreuz', 14))))))
   }
 
   async function anhalten() {
@@ -422,7 +519,7 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
     if (vorgaben.status === 'fulfilled') {
       const { werte: w, modelle = [], aufwaende = [], berechtigungen = [] } = vorgaben.value
       const name = (liste, wert) => liste.find((x) => x.id === wert)?.name ?? wert
-      zeile('Modell', name(modelle, w.modell), w.modell.includes('haiku') ? null : h('span.leise', {}, ` · ${name(aufwaende, w.aufwand)}`))
+      zeile('Modell', name(modelle, w.modell), w.modell.includes('haiku') || w.modell === 'auto' ? null : h('span.leise', {}, ` · ${name(aufwaende, w.aufwand)}`))
       zeile('Modus', name(berechtigungen, w.berechtigung))
     }
     if (aufgaben.status === 'fulfilled') {
@@ -506,7 +603,7 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
     // Letzte Frage ohne Antwort und nichts laeuft: angehalten oder
     // abgebrochen (dasselbe wie zwischen zwei Fragen, src/nachrichten.ts).
     const letzte = haupt[haupt.length - 1]
-    if (!laeuft && !hinweise.length && letzte?.rolle === 'user' && letzte.bloecke.some((b) => b.typ === 'text')) {
+    if (!laeuft && !hinweise.some((x) => x.art !== 'modell') && letzte?.rolle === 'user' && letzte.bloecke.some((b) => b.typ === 'text')) {
       kinder.push(hinweisEl('Ohne Antwort (angehalten oder abgebrochen).', 'info'))
     }
     for (const x of hinweise) kinder.push(hinweisEl(x.text, x.art))
@@ -542,7 +639,7 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
   }
 
   function hinweisEl(text, art = 'info') {
-    return h(`div.hinweis.${art}`, {}, symbol(art === 'fehler' || art === 'limit' ? 'info' : 'info', 14), h('span', {}, text))
+    return h(`div.hinweis.${art}`, {}, symbol(art === 'modell' ? 'denken' : 'info', 14), h('span', {}, text))
   }
 
   function blockEl(b, ergebnisse, unter, n) {

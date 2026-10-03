@@ -21,7 +21,11 @@ import {
   chatsIndizieren, chatsSuchen, verlaufLesen, chatKopfLesen, zuletztBenutzteOrdner,
   fortsetzungLesen, fortsetzungVorbereiten, fortsetzungAktualisieren, chatRegistrieren, sitzungVorhanden, chatMarkieren, sitzungBeschreiben, chatFuerSitzung, type Markierung,
   type Fortsetzung, chatOptionenMerken, chatOptionenLesen, chatBerechtigungSetzen,
+  einreihen, warteschlangeLesen, ausWarteschlange, warteschlangeEntnehmen, zusammenfassen,
+  warteschlangeHalten, alleWartendenHalten, chatOptionenGeaendert,
 } from './chats.js'
+import { schlangeEntscheiden, schlangeOptionen } from './warteschlange.js'
+import { MODELL_AUTO } from './modellwahl.js'
 import { chatOptionenBauen, type ChatOptionen } from './chatOptionen.js'
 import { entscheidungLesen } from './freigaben.js'
 import { AufgabenSammler, AUFGABEN_FENSTER_MS, agentAusZeile } from './aufgaben.js'
@@ -353,6 +357,9 @@ function chatZugStarten(
   const startSeq = db.letzteSeq(f.laufId)
   // Gilt auch fuer den naechsten Zug und fuer die Anzeige nach Neuladen.
   chatOptionenMerken(DB_PFAD, id, { modell: opt.model, aufwand: opt.effort, berechtigung: opt.permissionMode })
+  // Fuer die Modellwahl: womit der vorige Zug lief (vor agentStarten lesen,
+  // das setzt den Agenten neu auf).
+  const bisher = neu ? null : supervisor.agentenListe(f.laufId).find((a) => a.agentId === 'chat')?.model ?? null
   chatZuege.starten(id, startSeq, async () => {
     try {
       const r = await supervisor.agentStarten({
@@ -367,6 +374,7 @@ function chatZugStarten(
         ...(neu ? { sessionId: id } : { resume: f.aktuelleSession }),
         model: opt.model,
         effort: opt.effort,
+        ...(opt.model === MODELL_AUTO ? { modellKontext: { titel: neu ? null : titel, bisher } } : {}),
         permissionMode: opt.permissionMode,
         settingSources: opt.settingSources,
         agents: opt.agents,
@@ -393,9 +401,102 @@ function chatZugStarten(
       await chatsIndizieren(DB_PFAD).catch(() => {})
       verteilen('chats', { id })
     }
-  })
+  }, () => void warteschlangeAbarbeiten(id).catch((e) => console.warn(`[chats] Warteschlange ${id.slice(0, 8)}:`, String(e))))
   if (neu) void neuenChatFruehEintragen(id)
   return startSeq
+}
+
+type WeiterErgebnis = { laufId: string; cwd: string; startSeq: number; prompt: string } | { status: number; fehler: string }
+
+interface WeiterNachricht {
+  text: string
+  anhaenge: string[]
+  /** Modell/Aufwand/Modus; was fehlt, bleibt wie im letzten Zug dieses Chats. */
+  wunsch: Record<string, unknown>
+  /** Wenn der Zug doch nicht startet: die Nachricht zurueckgeben (Warteschlange). */
+  zurueck?: () => void
+}
+
+/**
+ * Naechsten Zug in einem bestehenden Chat starten (POST /weiter und das
+ * Abarbeiten der Warteschlange). `holen` liefert die Nachricht erst, wenn
+ * feststeht, dass der Zug startet -- ohne await dazwischen. So kann nichts aus
+ * der Warteschlange genommen werden und dann doch liegen bleiben (Neustart,
+ * ein anderer Zug kam zuvor). null, wenn `holen` nichts mehr hatte.
+ */
+async function chatWeiterStarten(id: string, holen: () => WeiterNachricht | null): Promise<WeiterErgebnis | null> {
+  // Ein eben erst im Cockpit begonnener Chat steht womoeglich noch nicht
+  // im Index (der laeuft erst nach dem ersten Zug) -- dann reicht die
+  // Zuordnung aus chat_fortsetzung.
+  const kopf = chatKopfLesen(DB_PFAD, id)
+  const f = kopf
+    ? await fortsetzungVorbereiten(DB_PFAD, id, process.env.HOME ?? '/opt/cockpit')
+    : fortsetzungLesen(DB_PFAD, id)
+  if (!f) return { status: 404, fehler: 'Sitzung unbekannt' }
+  // Ab hier synchron bis chatZugStarten: zwei gleichzeitige Anfragen kommen
+  // beide am await oben vorbei, aber nur eine hierueber.
+  if (faehrtHerunter) return { status: 503, fehler: 'Das Cockpit startet gerade neu' }
+  if (chatZuege.laeuft(id)) return { status: 409, fehler: 'Diese Sitzung schreibt gerade schon weiter' }
+  const n = holen()
+  if (!n) return null
+  const opt = chatOptionen({ ...chatOptionenLesen(DB_PFAD, id), ...n.wunsch })
+  if ('fehler' in opt) {
+    n.zurueck?.()
+    return { status: 400, fehler: opt.fehler }
+  }
+  // Ohne Sitzungsdatei (erster Zug eines neuen Chats ist vorher
+  // gescheitert) wird neu begonnen, unter derselben Id.
+  const neu = !kopf && !sitzungVorhanden(DB_PFAD, id)
+  const prompt = promptMitAnhaengen(n.text, n.anhaenge)
+  const startSeq = chatZugStarten(id, f, prompt, kopf?.titel ?? n.text.slice(0, 50), opt.optionen, neu)
+  return { laufId: f.laufId, cwd: f.cwd, startSeq, prompt }
+}
+
+/** Wann Can in einem Chat "Anhalten" gedrueckt hat -- fuer schlangeEntscheiden. */
+const angehaltenAm = new Map<string, number>()
+
+/**
+ * Nach dem Ende eines Zugs (und auf "Jetzt senden"): was Can inzwischen
+ * geschrieben hat, geht gesammelt als naechster Zug raus. Was gilt, steht in
+ * warteschlange.ts (schlangeEntscheiden, schlangeOptionen).
+ */
+async function warteschlangeAbarbeiten(id: string, trotzHalt = false): Promise<WeiterErgebnis | null> {
+  // Beim Herunterfahren nichts anfangen: der neue Zug stuerbe mit dem
+  // Prozess, und die Nachrichten waeren weg. Sie bleiben stehen und werden
+  // beim naechsten Start gehalten (alleWartendenHalten).
+  if (faehrtHerunter || chatZuege.laeuft(id)) return null
+  const laufId = fortsetzungLesen(DB_PFAD, id)?.laufId ?? `chat-${id}`
+  const status = supervisor.agentenListe(laufId).find((a) => a.agentId === 'chat')?.status
+  const { senden, halten } = schlangeEntscheiden(warteschlangeLesen(DB_PFAD, id), {
+    status, angehaltenAm: angehaltenAm.get(id) ?? null, trotzHalt,
+  })
+  angehaltenAm.delete(id)
+  if (halten.length) warteschlangeHalten(DB_PFAD, id, halten)
+  if (!senden.length) {
+    if (halten.length) verteilen('warteschlange', { id, eintraege: warteschlangeLesen(DB_PFAD, id) })
+    return null
+  }
+  const r = await chatWeiterStarten(id, () => {
+    const raus = warteschlangeEntnehmen(DB_PFAD, id, senden.map((e) => e.nr))
+    if (!raus.length) return null
+    return {
+      ...zusammenfassen(raus),
+      wunsch: schlangeOptionen(raus, chatOptionenGeaendert(DB_PFAD, id)),
+      // Nichts verlieren: zurueck in die Schlange, gehalten -- Can sieht sie weiter.
+      zurueck: () => {
+        for (const e of raus) einreihen(DB_PFAD, id, e.text, e.anhaenge, e.optionen)
+        warteschlangeHalten(DB_PFAD, id, warteschlangeLesen(DB_PFAD, id).map((e) => e.nr))
+      },
+    }
+  })
+  if (!r) return null
+  if ('fehler' in r) {
+    console.warn(`[chats] Warteschlange ${id.slice(0, 8)} nicht gestartet: ${r.fehler}`)
+    verteilen('warteschlange', { id, eintraege: warteschlangeLesen(DB_PFAD, id), fehler: r.fehler })
+    return r
+  }
+  verteilen('warteschlange', { id, eintraege: warteschlangeLesen(DB_PFAD, id), gestartet: { prompt: r.prompt, laufId: r.laufId, startSeq: r.startSeq } })
+  return r
 }
 
 /** HTML-Entwuerfe eines Laufs, die es noch gibt (neueste zuerst) -- fuer die Live-Vorschau. */
@@ -555,6 +656,22 @@ gedaechtnisOrdnerAnlegen(rollenListe().filter((r) => r.gedaechtnis === 'user').m
 // lesen dauert Sekunden -- der Daemon soll deswegen nicht spaeter lauschen.
 // Unveraenderte Dateien werden uebersprungen, spaetere Laeufe sind billig.
 void chatsIndizieren(DB_PFAD).catch((e) => console.warn('[chats] Index fehlgeschlagen:', String(e)))
+
+// Was beim letzten Herunterfahren noch in einer Warteschlange stand, hat
+// seinen Zug verloren: halten statt ungefragt losschicken, und Can Bescheid
+// geben -- sonst liegt es unbemerkt da, wenn er nur am Handy ist.
+{
+  const chats = alleWartendenHalten(DB_PFAD)
+  if (chats.length) {
+    console.log(`[chats] Nach dem Neustart warten Nachrichten in ${chats.length} Chat(s), gehalten`)
+    setTimeout(() => void pushSenden({
+      titel: 'Cockpit',
+      text: `Boss, nach dem Neustart warten noch Nachrichten in ${chats.length === 1 ? 'einem Chat' : `${chats.length} Chats`} – „Jetzt senden“ schickt sie los.`,
+      ziel: `#/chat/${encodeURIComponent(chats[0]!)}`,
+      tag: 'warteschlange',
+    }).catch((e) => console.warn('[push]', String(e))), 5000).unref()
+  }
+}
 setInterval(
   () => void chatsIndizieren(DB_PFAD).catch(() => {}),
   10 * 60_000,
@@ -795,7 +912,7 @@ const server = createServer(async (req, res) => {
   const corsKopf: Record<string, string> = erlaubt && origin
     ? {
         'access-control-allow-origin': origin,
-        'access-control-allow-methods': 'GET, POST, PATCH, OPTIONS',
+        'access-control-allow-methods': 'GET, POST, PATCH, DELETE, OPTIONS',
         'access-control-allow-headers': 'content-type',
         'access-control-max-age': '600',
         vary: 'Origin',
@@ -932,10 +1049,13 @@ const server = createServer(async (req, res) => {
         for (const a of supervisor.agentenListe(runId)) {
           if (supervisor.agentAbbrechen(runId, a.agentId)) gestoppt++
         }
+        if (gestoppt && runId.startsWith('chat-')) angehaltenAm.set(runId.slice('chat-'.length), Date.now())
         const ok = Boolean(orch) || gestoppt > 0
         return json(ok ? 200 : 404, { ok, gestoppt })
       }
       const ok = supervisor.agentAbbrechen(runId, agentId)
+      // Chat angehalten: was davor in die Warteschlange kam, wird gehalten (warteschlange.ts).
+      if (ok && agentId === 'chat' && runId.startsWith('chat-')) angehaltenAm.set(runId.slice('chat-'.length), Date.now())
       return json(ok ? 200 : 404, { ok })
     }
 
@@ -982,35 +1102,61 @@ const server = createServer(async (req, res) => {
       if (!text) return json(400, { fehler: 'text fehlt' })
       const anh = anhaengePruefen(ANHAENGE, k?.anhaenge)
       if ('fehler' in anh) return json(400, { fehler: anh.fehler })
-      const besetzt = () => json(409, { fehler: 'Diese Sitzung schreibt gerade schon weiter' })
+      // Nur Modell, Aufwand und Modus merken -- der Rest der Anfrage ist der Text.
+      const wunsch: Record<string, unknown> = {}
+      for (const feld of ['modell', 'aufwand', 'berechtigung']) if (k && k[feld] !== undefined) wunsch[feld] = k[feld]
+      // Pruefen schon jetzt, nicht erst beim Abarbeiten: ein Tippfehler im
+      // Modell soll sofort auffallen, nicht spaeter still die Schlange stauen.
+      const probe = chatOptionen({ ...chatOptionenLesen(DB_PFAD, id), ...wunsch })
+      if ('fehler' in probe) return json(400, { fehler: probe.fehler })
       // Direkt nach "Stoppen" steht der Agent schon auf 'stopped', laeuft
-      // aber noch aus -- dann kurz warten statt 409 (siehe chatZuege.ts).
+      // aber noch aus -- dann kurz warten (siehe chatZuege.ts). Arbeitet er
+      // wirklich noch, kommt die Nachricht in die Warteschlange und geht
+      // raus, sobald er fertig ist.
       const laufIdVorher = fortsetzungLesen(DB_PFAD, id)?.laufId ?? `chat-${id}`
       const statusVorher = supervisor.agentenListe(laufIdVorher).find((a) => a.agentId === 'chat')?.status
-      if (!(await chatZuege.freiWerden(id, statusVorher, CHAT_AUSLAUF_WARTEN_MS))) return besetzt()
+      if (!(await chatZuege.freiWerden(id, statusVorher, CHAT_AUSLAUF_WARTEN_MS)) || chatZuege.laeuft(id)) {
+        einreihen(DB_PFAD, id, text, anh.pfade, wunsch)
+        const eintraege = warteschlangeLesen(DB_PFAD, id)
+        verteilen('warteschlange', { id, eintraege })
+        return json(202, { eingereiht: true, warteschlange: eintraege })
+      }
+      // Nur diese Nachricht: was nach "Anhalten" gehalten in der Schlange
+      // steht, geht nicht ungefragt mit -- Can schickt es selbst oder nimmt
+      // es zurueck. Die Oberflaeche verfolgt den Zug per WS bzw. Poll auf
+      // /api/lauf/<laufId>.
+      const r = await chatWeiterStarten(id, () => ({ text, anhaenge: anh.pfade, wunsch }))
+      if (r && 'fehler' in r && r.status === 409) {
+        // Ein anderer Zug kam zuvor (zweites Geraet): dann eben danach.
+        einreihen(DB_PFAD, id, text, anh.pfade, wunsch)
+        const eintraege = warteschlangeLesen(DB_PFAD, id)
+        verteilen('warteschlange', { id, eintraege })
+        return json(202, { eingereiht: true, warteschlange: eintraege })
+      }
+      if (!r || 'fehler' in r) return json(r?.status ?? 500, { fehler: r?.fehler ?? 'nicht gestartet' })
+      return json(202, { laufId: r.laufId, cwd: r.cwd, startSeq: r.startSeq })
+    }
 
-      // Was die Anfrage nicht nennt, bleibt wie im letzten Zug dieses Chats.
-      const opt = chatOptionen({ ...chatOptionenLesen(DB_PFAD, id), ...k })
-      if ('fehler' in opt) return json(400, { fehler: opt.fehler })
-
-      // Ein eben erst im Cockpit begonnener Chat steht womoeglich noch nicht
-      // im Index (der laeuft erst nach dem ersten Zug) -- dann reicht die
-      // Zuordnung aus chat_fortsetzung.
-      const kopf = chatKopfLesen(DB_PFAD, id)
-      const f = kopf
-        ? await fortsetzungVorbereiten(DB_PFAD, id, process.env.HOME ?? '/opt/cockpit')
-        : fortsetzungLesen(DB_PFAD, id)
-      if (!f) return json(404, { fehler: 'Sitzung unbekannt' })
-
-      // Zweite Pruefung ohne await dazwischen: zwei gleichzeitige Anfragen
-      // kommen beide an den awaits oben vorbei, aber nur eine hierueber.
-      if (chatZuege.laeuft(id)) return besetzt()
-      // Die Oberflaeche verfolgt den Zug per WS bzw. Poll auf /api/lauf/<laufId>.
-      // Ohne Sitzungsdatei (erster Zug eines neuen Chats ist vorher
-      // gescheitert) wird neu begonnen, unter derselben Id.
-      const neu = !kopf && !sitzungVorhanden(DB_PFAD, id)
-      const startSeq = chatZugStarten(id, f, promptMitAnhaengen(text, anh.pfade), kopf?.titel ?? text.slice(0, 50), opt.optionen, neu)
-      return json(202, { laufId: f.laufId, cwd: f.cwd, startSeq })
+    // Warteschlange: einzelne Nachricht zuruecknehmen, oder nach "Anhalten"
+    // alles jetzt abschicken.
+    if (pfad.startsWith('/api/chats/') && pfad.includes('/warteschlange')) {
+      const [idTeil, rest] = pfad.slice('/api/chats/'.length).split('/warteschlange')
+      const id = decodeURIComponent(idTeil ?? '')
+      if (req.method === 'GET' && !rest) return json(200, { eintraege: warteschlangeLesen(DB_PFAD, id) })
+      if (req.method === 'DELETE' && /^\/\d+$/.test(rest ?? '')) {
+        if (!ausWarteschlange(DB_PFAD, id, Number(rest!.slice(1)))) return json(404, { fehler: 'Nicht (mehr) in der Warteschlange' })
+        const eintraege = warteschlangeLesen(DB_PFAD, id)
+        verteilen('warteschlange', { id, eintraege })
+        return json(200, { eintraege })
+      }
+      if (req.method === 'POST' && rest === '/senden') {
+        if (chatZuege.laeuft(id)) return json(409, { fehler: 'Claude arbeitet noch -- die Warteschlange geht danach von selbst raus' })
+        const r = await warteschlangeAbarbeiten(id, true)
+        if (!r) return json(404, { fehler: 'Nichts mehr in der Warteschlange' })
+        if ('fehler' in r) return json(r.status, { fehler: r.fehler })
+        return json(202, { laufId: r.laufId, cwd: r.cwd, startSeq: r.startSeq, prompt: r.prompt })
+      }
+      return json(405, { fehler: 'Methode nicht erlaubt' })
     }
 
     // Live-Vorschau: welche HTML-Entwuerfe dieser Chat angelegt hat. Muss wie
@@ -1103,6 +1249,7 @@ const server = createServer(async (req, res) => {
       return json(200, {
         ...d,
         optionen: chatOptionenLesen(DB_PFAD, id),
+        warteschlange: warteschlangeLesen(DB_PFAD, id),
         kopf: {
           ...d.kopf,
           fortsetzbar: true,

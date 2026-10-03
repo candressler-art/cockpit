@@ -11,7 +11,7 @@ import { istBild } from './anhangtext.js'
 const MAX_ANHANG_BYTES = 20 * 1024 * 1024
 const MAX_ANHAENGE = 10
 /** Nur Anhaenge, kein Text: damit der Agent weiss, was er tun soll. */
-const NUR_ANHANG_TEXT = 'Sieh dir die angehängten Dateien an.'
+export const NUR_ANHANG_TEXT = 'Sieh dir die angehängten Dateien an.'
 
 /** Einstellungen + Auswahllisten aus /api/einstellungen, einmal geladen und bei WS-Aenderung nachgezogen. */
 let vorgaben = null
@@ -82,8 +82,9 @@ export function eingabeBauen(opt) {
     const modus = modusWahl.value
     // Die Denkstufe als eigener Teil: am schmalen Handy blendet stil.css sie aus,
     // damit Ordner und Senden-Knopf daneben passen (aufgeklappt steht sie voll da).
-    optionenKnopf.replaceChildren(h('span', {}, text(modellWahl)),
-      aufwandWahl.disabled ? null : h('span.opt-aufwand', {}, `· ${text(aufwandWahl).replace(/^Denken: /, '')}`))
+    // replaceChildren macht aus null den Text "null" -- deshalb filtern.
+    optionenKnopf.replaceChildren(...[h('span', {}, text(modellWahl)),
+      aufwandWahl.disabled ? null : h('span.opt-aufwand', {}, `· ${text(aufwandWahl).replace(/^Denken: /, '')}`)].filter(Boolean))
     // Ein anderer Modus als "Nachfragen" soll auffallen, auch zugeklappt.
     if (modus && modus !== 'default') optionenKnopf.append(h(`span.modus-marke${modus === 'bypassPermissions' ? '.alles' : ''}`, { title: text(modusWahl) }, symbol('schild', 12)))
   }
@@ -118,7 +119,7 @@ export function eingabeBauen(opt) {
     const leer = !feld.value.trim() && !anhaenge.length
     const laedt = anhaenge.some((a) => !a.pfad && !a.fehler)
     sendeKnopf.replaceChildren(symbol(laeuft && leer ? 'stopp' : 'senden', 18))
-    sendeKnopf.title = laeuft && leer ? 'Anhalten' : laedt ? 'Anhänge laden noch …' : 'Senden (Enter)'
+    sendeKnopf.title = laeuft && leer ? 'Anhalten' : laedt ? 'Anhänge laden noch …' : laeuft ? 'In die Warteschlange (Enter)' : 'Senden (Enter)'
     sendeKnopf.setAttribute('aria-label', sendeKnopf.title)
     sendeKnopf.classList.toggle('stopp', laeuft && leer)
     sendeKnopf.disabled = (!laeuft && leer) || (!leer && laedt)
@@ -142,12 +143,12 @@ export function eingabeBauen(opt) {
     knopfZustand()
   }
   function anhangEntfernen(a) {
-    if (a.vorschau) URL.revokeObjectURL(a.vorschau)
+    if (a.vorschau?.startsWith('blob:')) URL.revokeObjectURL(a.vorschau)
     anhaenge = anhaenge.filter((x) => x !== a)
     anhaengeZeichnen()
   }
   function anhaengeLeeren() {
-    for (const a of anhaenge) if (a.vorschau) URL.revokeObjectURL(a.vorschau)
+    for (const a of anhaenge) if (a.vorschau?.startsWith('blob:')) URL.revokeObjectURL(a.vorschau)
     anhaenge = []
     anhaengeZeichnen()
   }
@@ -201,10 +202,8 @@ export function eingabeBauen(opt) {
       if (laeuft) opt.beiStopp?.()
       return
     }
-    if (laeuft) {
-      melden('Claude arbeitet noch -- warte auf das Ende oder halte an.', 'info')
-      return
-    }
+    // Arbeitet Claude noch, geht die Nachricht in die Warteschlange (chat.js
+    // und daemon.ts) und wird gelesen, sobald der laufende Zug fertig ist.
     if (anhaenge.some((a) => !a.pfad && !a.fehler)) return
     if (anhaenge.some((a) => a.fehler)) {
       melden('Ein Anhang ist fehlgeschlagen -- entferne ihn, bevor du sendest.', 'fehler')
@@ -251,12 +250,13 @@ export function eingabeBauen(opt) {
     ordnerZeigen()
     optionenKurz()
   }
-  // Haiku kennt keine Denkstufen (siehe chatOptionen.ts) -- dann ausgrauen
-  // statt still zu ignorieren.
+  // Haiku kennt keine Denkstufen (siehe chatOptionen.ts), und "Automatisch"
+  // waehlt den Denkaufwand selbst -- dann ausgrauen statt still zu ignorieren.
   function aufwandPruefen() {
     const haiku = /haiku/.test(modellWahl.value)
-    aufwandWahl.disabled = haiku
-    aufwandWahl.title = haiku ? 'Haiku hat keine Denkstufen' : 'Denkaufwand'
+    const auto = modellWahl.value === 'auto'
+    aufwandWahl.disabled = haiku || auto
+    aufwandWahl.title = haiku ? 'Haiku hat keine Denkstufen' : auto ? 'Die Automatik wählt auch den Denkaufwand' : 'Denkaufwand'
   }
   modellWahl.addEventListener('change', () => { wahl.modell = modellWahl.value; aufwandPruefen(); optionenKurz() })
   aufwandWahl.addEventListener('change', () => { wahl.aufwand = aufwandWahl.value })
@@ -538,10 +538,25 @@ export function eingabeBauen(opt) {
   return {
     el,
     fokus: () => { if (!matchMedia('(pointer: coarse)').matches) feld.focus() },
-    laeuftSetzen(an) { laeuft = an; el.classList.toggle('laeuft', an); knopfZustand() },
+    laeuftSetzen(an) {
+      laeuft = an
+      el.classList.toggle('laeuft', an)
+      // Das Diktat setzt seinen eigenen Platzhalter und stellt danach PLATZHALTER her.
+      if (diktatZustand === 'aus') feld.placeholder = an ? 'Weiterschreiben – wird gelesen, sobald Claude fertig ist' : PLATZHALTER
+      knopfZustand()
+    },
     /** Fuer bestehende Chats steht der Ordner fest (null = frei waehlbar). */
     ordnerFestlegen(p) { ordnerFest = p; ordnerZeigen() },
     textSetzen(t) { laufend?.anhalten(); feld.value = t; groesse(); knopfZustand() },
+    /** Schon hochgeladene Anhaenge (Pfade unter ANHAENGE) wieder ins Feld -- "Zuruecknehmen" aus der Warteschlange. */
+    anhaengeUebernehmen(pfade) {
+      for (const pfad of pfade) {
+        if (anhaenge.length >= MAX_ANHAENGE || anhaenge.some((a) => a.pfad === pfad)) continue
+        const name = pfad.split('/').pop()
+        anhaenge.push({ name, groesse: 0, pfad, fehler: null, vorschau: istBild(name) ? bus.api(`/api/anhaenge/datei?pfad=${encodeURIComponent(pfad)}`) : null })
+      }
+      anhaengeZeichnen()
+    },
     /** Kommentar aus der Vorschau: unten anfuegen, Getipptes bleibt stehen. */
     textAnhaengen(t) { laufend?.anhalten(); feld.value = feld.value.trim() ? `${feld.value.trimEnd()}\n\n${t}` : t; groesse(); knopfZustand() },
     /** Nach "Plan umsetzen" gilt der gewaehlte Modus auch fuer die naechste Nachricht (wie in Claude Code). */

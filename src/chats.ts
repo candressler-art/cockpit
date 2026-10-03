@@ -64,6 +64,21 @@ CREATE TABLE IF NOT EXISTS chat_fortsetzung (
   cwd              TEXT NOT NULL,
   geaendert        INTEGER NOT NULL
 );
+-- Nachrichten, die Can schreibt, waehrend Claude noch arbeitet. Sie gehen
+-- gesammelt als naechster Zug raus, sobald der laufende fertig ist (daemon.ts,
+-- warteschlangeAbarbeiten; Regeln in warteschlange.ts). gehalten: nach
+-- "Anhalten", Limit oder Neustart -- dann erst auf Cans "Jetzt senden".
+-- Kein abgeleiteter Zustand: ueberlebt Neustart und Neubau des Index.
+CREATE TABLE IF NOT EXISTS chat_warteschlange (
+  nr         INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL,
+  text       TEXT NOT NULL,
+  anhaenge   TEXT NOT NULL DEFAULT '[]',
+  optionen   TEXT NOT NULL DEFAULT '{}',
+  erstellt   INTEGER NOT NULL,
+  gehalten   INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_warteschlange ON chat_warteschlange (session_id, nr);
 -- Was man im Cockpit an einem Chat einstellt: eigener Titel, angeheftet,
 -- aus der Liste genommen. Kein abgeleiteter Zustand (ueberlebt den Neubau
 -- des Index), und nie eine Aenderung an der Sitzungsdatei -- die gehoert
@@ -737,4 +752,101 @@ export function sitzungBeschreiben(
     projekt: r.projekt,
     chat: r.sichtbar ? chat : null,
   }
+}
+
+// --- Warteschlange ------------------------------------------------------------
+
+export interface WarteEintrag {
+  nr: number
+  text: string
+  /** Schon gepruefte Pfade unter ANHAENGE (anhaengePruefen). */
+  anhaenge: string[]
+  /** Modell, Aufwand, Modus -- wie in der Anfrage an /weiter. */
+  optionen: Record<string, unknown>
+  erstellt: number
+  /** Geht erst auf Cans "Jetzt senden" raus (warteschlange.ts). */
+  gehalten: boolean
+}
+
+export function einreihen(
+  dbPfad: string, sessionId: string, text: string, anhaenge: string[], optionen: Record<string, unknown>,
+): void {
+  handle(dbPfad).prepare(
+    'INSERT INTO chat_warteschlange (session_id, text, anhaenge, optionen, erstellt) VALUES (?,?,?,?,?)',
+  ).run(sessionId, text, JSON.stringify(anhaenge), JSON.stringify(optionen), Date.now())
+}
+
+export function warteschlangeLesen(dbPfad: string, sessionId: string): WarteEintrag[] {
+  return (handle(dbPfad).prepare(
+    'SELECT nr, text, anhaenge, optionen, erstellt, gehalten FROM chat_warteschlange WHERE session_id = ? ORDER BY nr',
+  ).all(sessionId) as { nr: number; text: string; anhaenge: string; optionen: string; erstellt: number; gehalten: number }[])
+    .map((r) => ({
+      nr: r.nr, text: r.text, anhaenge: JSON.parse(r.anhaenge), optionen: JSON.parse(r.optionen),
+      erstellt: r.erstellt, gehalten: r.gehalten === 1,
+    }))
+}
+
+/** Diese Eintraege gehen erst auf Cans "Jetzt senden" raus. */
+export function warteschlangeHalten(dbPfad: string, sessionId: string, nrs: readonly number[]): void {
+  const st = handle(dbPfad).prepare('UPDATE chat_warteschlange SET gehalten = 1 WHERE session_id = ? AND nr = ?')
+  for (const nr of nrs) st.run(sessionId, nr)
+}
+
+/**
+ * Beim Start des Daemons: was noch wartet, hat seinen Zug verloren (Neustart
+ * mitten im Zug) -- nicht ungefragt losschicken, sondern halten. Liefert die
+ * betroffenen Chats.
+ */
+export function alleWartendenHalten(dbPfad: string): string[] {
+  const h = handle(dbPfad)
+  h.prepare('UPDATE chat_warteschlange SET gehalten = 1').run()
+  return (h.prepare('SELECT DISTINCT session_id FROM chat_warteschlange').all() as { session_id: string }[])
+    .map((r) => r.session_id)
+}
+
+/** Einen Eintrag loeschen. false, wenn es ihn (fuer diesen Chat) nicht gibt. */
+export function ausWarteschlange(dbPfad: string, sessionId: string, nr: number): boolean {
+  return Number(handle(dbPfad).prepare(
+    'DELETE FROM chat_warteschlange WHERE session_id = ? AND nr = ?',
+  ).run(sessionId, nr).changes) > 0
+}
+
+/**
+ * Diese Eintraege (oder alle) herausnehmen -- in einem Schritt, damit nichts
+ * doppelt rausgeht. Was inzwischen zurueckgenommen wurde, fehlt im Ergebnis.
+ */
+export function warteschlangeEntnehmen(dbPfad: string, sessionId: string, nrs?: readonly number[]): WarteEintrag[] {
+  const h = handle(dbPfad)
+  h.exec('BEGIN IMMEDIATE')
+  try {
+    const raus = warteschlangeLesen(dbPfad, sessionId).filter((e) => !nrs || nrs.includes(e.nr))
+    const st = h.prepare('DELETE FROM chat_warteschlange WHERE session_id = ? AND nr = ?')
+    for (const e of raus) st.run(sessionId, e.nr)
+    h.exec('COMMIT')
+    return raus
+  } catch (e) {
+    h.exec('ROLLBACK')
+    throw e
+  }
+}
+
+/**
+ * Mehrere wartende Nachrichten werden EIN Zug: Claude liest sie zusammen, in
+ * der Reihenfolge, in der Can sie geschrieben hat. Welche Optionen gelten,
+ * entscheidet warteschlange.ts (schlangeOptionen).
+ */
+export function zusammenfassen(eintraege: readonly Pick<WarteEintrag, 'text' | 'anhaenge'>[]): {
+  text: string; anhaenge: string[]
+} {
+  return {
+    text: eintraege.map((e) => e.text).join('\n\n'),
+    anhaenge: [...new Set(eintraege.flatMap((e) => e.anhaenge))],
+  }
+}
+
+/** Wann Modell/Aufwand/Modus dieses Chats zuletzt gesetzt wurden (Zugstart, Plan angenommen). */
+export function chatOptionenGeaendert(dbPfad: string, sessionId: string): number | null {
+  const r = handle(dbPfad).prepare('SELECT geaendert FROM chat_optionen WHERE session_id = ?').get(sessionId) as
+    { geaendert: number } | undefined
+  return r?.geaendert ?? null
 }
