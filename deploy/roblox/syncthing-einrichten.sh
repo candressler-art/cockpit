@@ -26,7 +26,7 @@ case "${1:-}" in
     # Suche im Heimnetz (die Netzsperre laesst sie ohnehin nicht durch),
     # Verbindungen ueber globale Suche und Relays.
     sed -i \
-      -e 's|<address>127.0.0.1:8384</address>|<address>127.0.0.1:8385</address>|' \
+      -e 's|<address>127.0.0.1:[0-9]\+</address>|<address>127.0.0.1:8385</address>|' \
       -e 's|<listenAddress>default</listenAddress>|<listenAddress>tcp://:22001</listenAddress><listenAddress>quic://:22001</listenAddress><listenAddress>dynamic+https://relays.syncthing.net/endpoint</listenAddress>|' \
       -e 's|<localAnnounceEnabled>true</localAnnounceEnabled>|<localAnnounceEnabled>false</localAnnounceEnabled>|' \
       "$HEIM/config.xml"
