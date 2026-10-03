@@ -195,3 +195,10 @@ export function melden(text, art = 'info') {
   box.append(el)
   setTimeout(() => { el.classList.add('weg'); setTimeout(() => el.remove(), 300) }, art === 'fehler' ? 6000 : 3000)
 }
+
+/** Ein/Aus-Schalter (Einstellungen, Konten im Bereich Nutzung). */
+export function schalter(an, aendern, label, gesperrt = false) {
+  const b = h('button.schalter', { type: 'button', role: 'switch', 'aria-checked': String(an), 'aria-label': label, disabled: gesperrt,
+    onclick: () => { b.disabled = true; aendern(!an) } }, h('span.schalter-knopf'))
+  return b
+}

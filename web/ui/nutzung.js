@@ -10,9 +10,8 @@
  * Die Konten stehen nur hier: Limits, Reset, Prognose, Guthaben und der
  * Vorzug gehoeren zusammen -- man waehlt ein Konto nach dem, was es noch hat.
  */
-import { h, symbol, api, leeren, kurzZahl, zahl, uhrzeit, wann, modellName, melden, fehlerText } from './dom.js'
+import { h, symbol, api, leeren, kurzZahl, zahl, uhrzeit, wann, modellName, melden, fehlerText, schalter } from './dom.js'
 import * as bus from '../bus.js'
-import { schalter } from './einstellungen.js'
 
 const WOCHENTAGE = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So']
 
