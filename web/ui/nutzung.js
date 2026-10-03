@@ -9,9 +9,15 @@
  *
  * Die Konten stehen nur hier: Limits, Reset, Prognose, Guthaben und der
  * Vorzug gehoeren zusammen -- man waehlt ein Konto nach dem, was es noch hat.
+ *
+ * Cloud-Sitzungen stehen in keiner lokalen Sitzungsdatei; sie zaehlen hier in
+ * Dollar aus dem Guthabenverlauf (src/cloudNutzung.ts) -- als eigene Zeile in
+ * den Kacheln, als Markierung im Raster und im Tagesdetail. Nie mit Tokens
+ * zusammengerechnet.
  */
 import { h, symbol, api, leeren, kurzZahl, zahl, uhrzeit, wann, modellName, melden, fehlerText, schalter } from './dom.js'
 import * as bus from '../bus.js'
+import { dollar, cloudZeileAuftrag } from './cloud.js'
 
 const WOCHENTAGE = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So']
 
@@ -117,27 +123,47 @@ export function nutzungBauen() {
     const b = bericht
     const k = b.kennzahlen
     const nachTag = new Map(b.tage.map((t) => [t.tag, t]))
-    if (!gewaehlt) gewaehlt = nachTag.has(b.heute) ? b.heute : (b.tage.at(-1)?.tag ?? b.heute)
+    const c = b.cloud ?? null
+    const cloudTag = new Map((c?.tage ?? []).map((t) => [t.tag, t.dollar]))
+    if (!gewaehlt) gewaehlt = nachTag.has(b.heute) || cloudTag.has(b.heute) ? b.heute : (b.tage.at(-1)?.tag ?? b.heute)
+    // Cloud-Dollar unter den Tokens derselben Kachel, nur wenn es ueberhaupt einen Verlauf gibt.
+    const mitCloud = (k0, betrag) => {
+      if (c) k0.append(h('div.kachel-cloud', { title: 'Cloud-Sitzungen (aus dem Cloud-Guthaben, in Dollar)' }, symbol('wolke', 12), dollar(betrag)))
+      return k0
+    }
     leeren(inhalt,
       h('div.kacheln', {},
-        kachel('Heute', kurzZahl(k.heute), 'Tokens'),
-        kachel('7 Tage', kurzZahl(k.sieben), 'Tokens'),
-        kachel('30 Tage', kurzZahl(k.dreissig), `Ø ${kurzZahl(k.schnittAktiv30)} je aktivem Tag`),
+        mitCloud(kachel('Heute', kurzZahl(k.heute), 'Tokens'), c?.heute),
+        mitCloud(kachel('7 Tage', kurzZahl(k.sieben), 'Tokens'), c?.sieben),
+        mitCloud(kachel('30 Tage', kurzZahl(k.dreissig), `Ø ${kurzZahl(k.schnittAktiv30)} je aktivem Tag`), c?.dreissig),
         kachel('Serie', `${k.serie} ${k.serie === 1 ? 'Tag' : 'Tage'}`, `längste: ${k.laengsteSerie}`),
         kachel('Aktivster Tag', k.aktivsterTag ? kurzZahl(k.aktivsterTag.tokens) : '–', k.aktivsterTag ? tagKurz(k.aktivsterTag.tag) : 'noch keiner'),
         gesamtKachel(b.gesamt)),
-      karte('Aktivität', `${k.aktiveTage} aktive Tage im letzten Jahr`, raster(b, nachTag), tagOrt),
+      karte('Aktivität', `${k.aktiveTage} aktive Tage im letzten Jahr`, raster(b, nachTag, cloudTag), tagOrt),
       karte('Konten', kontenStatus, kontenOrt),
+      c ? karte('Cloud-Aufträge', cloudUnter(c), cloudAuftraegeListe(c.auftraege)) : null,
       h('div.zwei-spalten', {},
         karte('Tageszeit', 'Wann du arbeitest (letztes Jahr)', stundenBild(b.stunden)),
         karte('Modelle', null, balkenListe(b.modelle.map((m) => ({ name: modellName(m.modell) || m.modell, wert: m.tokens, zusatz: `${zahl(m.antworten)} Antworten` }))))),
       karte('Projekte', 'Nach Tokens, letztes Jahr', balkenListe(b.projekte.map((p) => ({ name: p.projekt === '?' ? 'ohne Projekt' : p.projekt, wert: p.tokens, zusatz: `${zahl(p.antworten)} Antworten` })))),
     )
-    tagZeigen(gewaehlt, nachTag)
+    tagZeigen(gewaehlt, nachTag, cloudTag)
+  }
+
+  /** Seit wann gezaehlt wird -- was vorher verbraucht war, steht nur hier, keinem Tag zugeschlagen. */
+  function cloudUnter(c) {
+    const teile = [`${dollar(c.gesamt)} seit Beginn der Aufzeichnung`]
+    if (c.vorAufzeichnung > 0) teile.push(`${dollar(c.vorAufzeichnung)} davor`)
+    return teile.join(' · ')
+  }
+
+  function cloudAuftraegeListe(auftraege) {
+    if (!auftraege?.length) return h('div.leise.pad', {}, 'Noch keine. Im Chat startet der Knopf „In der Cloud“ einen Auftrag mit dem Kontext des Chats.')
+    return h('div.tag-liste', {}, auftraege.map(cloudZeileAuftrag))
   }
 
   // --- Raster -------------------------------------------------------------------
-  function raster(b, nachTag) {
+  function raster(b, nachTag, cloudTag) {
     // 53 Spalten (Wochen), letzte Spalte endet mit heute. Start: Montag vor 52 Wochen.
     const start = tagPlus(b.heute, -(52 * 7 + wochentag(b.heute)))
     const grenzen = stufenGrenzen(b.tage.map((t) => t.tokens))
@@ -160,10 +186,12 @@ export function nutzungBauen() {
         if (tag > b.heute) { zellen.push(h('span.zelle.zukunft', { style: { gridColumn: `${w + 1}`, gridRow: `${d + 1}` } })); continue }
         const t = nachTag.get(tag)
         const st = stufe(t?.tokens ?? 0, grenzen)
-        zellen.push(h(`span.zelle.s${st}${tag === gewaehlt ? '.gewaehlt' : ''}${tag === b.heute ? '.heute' : ''}`, {
+        const wolke = cloudTag.get(tag)
+        const titel = t ? `${tagKurz(tag)}: ${kurzZahl(t.tokens)} Tokens, ${zahl(t.antworten)} Antworten, ${t.sitzungen} ${t.sitzungen === 1 ? 'Sitzung' : 'Sitzungen'}` : `${tagKurz(tag)}: ${wolke ? 'lokal nichts' : 'nichts'}`
+        zellen.push(h(`span.zelle.s${st}${wolke ? '.wolke' : ''}${tag === gewaehlt ? '.gewaehlt' : ''}${tag === b.heute ? '.heute' : ''}`, {
           style: { gridColumn: `${w + 1}`, gridRow: `${d + 1}` },
           dataset: { tag },
-          title: t ? `${tagKurz(tag)}: ${kurzZahl(t.tokens)} Tokens, ${zahl(t.antworten)} Antworten, ${t.sitzungen} ${t.sitzungen === 1 ? 'Sitzung' : 'Sitzungen'}` : `${tagKurz(tag)}: nichts`,
+          title: wolke ? `${titel} · Cloud ${dollar(wolke)}` : titel,
         }))
       }
     }
@@ -174,7 +202,7 @@ export function nutzungBauen() {
       gitter.querySelector('.gewaehlt')?.classList.remove('gewaehlt')
       ev.target.classList.add('gewaehlt')
       gewaehlt = tag
-      tagZeigen(tag, nachTag)
+      tagZeigen(tag, nachTag, cloudTag)
     })
     const scroller = h('div.raster-scroll', {},
       h('div.raster-rahmen', {},
@@ -183,23 +211,30 @@ export function nutzungBauen() {
         gitter))
     // Am Handy passt das Jahr nicht in die Breite: rechts (heute) beginnen.
     requestAnimationFrame(() => { scroller.scrollLeft = scroller.scrollWidth })
-    const legende = h('div.legende', {}, h('span', {}, 'weniger'), [0, 1, 2, 3, 4].map((s) => h(`span.zelle.s${s}`)), h('span', {}, 'mehr'))
+    const legende = h('div.legende', {}, h('span', {}, 'weniger'), [0, 1, 2, 3, 4].map((s) => h(`span.zelle.s${s}`)), h('span', {}, 'mehr'),
+      cloudTag.size ? [h('span.legende-luecke'), h('span.zelle.s0.wolke'), h('span', {}, 'Cloud')] : null)
     return h('div', {}, scroller, legende)
   }
 
   let tagAnfrage = 0
-  async function tagZeigen(tag, nachTag) {
+  async function tagZeigen(tag, nachTag, cloudTag) {
     const t = nachTag.get(tag)
+    const wolke = cloudTag?.get(tag)
     const kopf = h('div.tag-kopf', {}, h('strong', {}, tagLang(tag)),
-      t ? h('span.leise', {}, `${kurzZahl(t.tokens)} Tokens · ${zahl(t.antworten)} Antworten · Cache gelesen ${kurzZahl(t.cacheLesen)}`) : h('span.leise', {}, 'Keine Nutzung an diesem Tag.'))
-    if (!t) { leeren(tagOrt, kopf); return }
+      t ? h('span.leise', {}, `${kurzZahl(t.tokens)} Tokens · ${zahl(t.antworten)} Antworten · Cache gelesen ${kurzZahl(t.cacheLesen)}`)
+        : h('span.leise', {}, wolke ? 'Lokal keine Nutzung.' : 'Keine Nutzung an diesem Tag.'),
+      wolke ? h('span.tag-cloud', {}, symbol('wolke', 13), `Cloud: ${dollar(wolke)}`) : null)
+    if (!t && !wolke) { leeren(tagOrt, kopf); return }
     const liste = h('div.tag-liste', {}, h('div.leise', {}, 'Lädt …'))
     leeren(tagOrt, kopf, liste)
     const nr = ++tagAnfrage
     try {
       const d = await api(`/api/nutzung/tag?tag=${tag}`)
       if (nr !== tagAnfrage) return
-      leeren(liste, d.eintraege.length ? d.eintraege.map(rueckblickEintrag) : h('div.leise', {}, 'Keine Sitzungen gefunden.'))
+      const cloud = d.cloud?.auftraege ?? []
+      leeren(liste, d.eintraege.length || cloud.length
+        ? [...d.eintraege.map(rueckblickEintrag), ...cloud.map(cloudZeileAuftrag)]
+        : h('div.leise', {}, 'Keine Sitzungen gefunden.'))
     } catch (e) {
       if (nr === tagAnfrage) leeren(liste, h('div.fehlertext', {}, fehlerText(e)))
     }
@@ -457,6 +492,8 @@ export function nutzungBauen() {
   }
 
   bus.abonnieren('limit', () => { if (sichtbar) kontenLaden() })
+  // Neuer oder fertiger Cloud-Auftrag: Liste und Kacheln nachziehen.
+  bus.abonnieren('cloud', () => { if (sichtbar && bericht) laden() })
   // Zurueck ins Fenster (anderes Programm, Handy entsperrt) zaehlt wie ein
   // neues Oeffnen des Bereichs.
   document.addEventListener('visibilitychange', () => {

@@ -132,6 +132,32 @@ a.tag-eintrag:hover { background: var(--surface0); }
 /* Loops und Sonstiges sind Hintergrundarbeit, keine eigenen Gespraeche -- etwas zuruecknehmen. */
 .tag-eintrag.loop .tag-titel, .tag-eintrag.sonst .tag-titel { color: var(--subtext); }
 
+/* Cloud (web/ui/cloud.js): Dollar aus dem Cloud-Guthaben, getrennt von den
+   Tokens. Farbe Lavendel, damit es sich vom Akzent des Rasters abhebt. */
+.kachel-cloud { display: flex; align-items: center; gap: 5px; margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--surface0); font: 500 12.5px/1.3 var(--mono); color: var(--lavendel); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.kachel-cloud .sym { flex: 0 0 auto; }
+.zelle.wolke { position: relative; }
+.zelle.wolke::after { content: ""; position: absolute; top: -2px; right: -2px; width: 6px; height: 6px; border-radius: 50%; background: var(--lavendel); box-shadow: 0 0 0 1.5px var(--base); }
+.legende .legende-luecke { width: 8px; }
+.tag-cloud { display: inline-flex; align-items: center; gap: 5px; font: 500 13px/1.3 var(--mono); color: var(--lavendel); }
+.tag-eintrag.cloud .sym { color: var(--lavendel); }
+.tag-eintrag.cloud.unklar .tag-meta { color: var(--orange); }
+
+.cloud-karten { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+.cloud-karte { border: 1px solid color-mix(in srgb, var(--lavendel) 35%, var(--surface0)); background: var(--mantle); border-radius: var(--radius); padding: 10px 12px; font-size: 13px; min-width: 0; }
+.cloud-kopf { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cloud-kopf .sym { color: var(--lavendel); flex: 0 0 auto; }
+.cloud-kopf strong { font-size: 14px; min-width: 0; overflow-wrap: anywhere; }
+.cloud-status { font: 500 11.5px/1.6 var(--mono); padding: 0 7px; border-radius: 999px; background: var(--surface0); color: var(--subtext); }
+.cloud-status.laeuft { color: var(--lavendel); }
+.cloud-status.fertig { color: var(--gruen); }
+.cloud-status.unklar { color: var(--orange); }
+.cloud-meta { margin-top: 4px; color: var(--overlay); font-size: 12.5px; overflow-wrap: anywhere; }
+.cloud-meta code { font: 12px var(--mono); color: var(--subtext); }
+.cloud-notiz { margin-top: 6px; color: var(--subtext); }
+.cloud-knoepfe { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 8px; }
+.cloud-knoepfe a { color: var(--akzent); font-size: 13px; }
+
 .konten-modus { display: flex; align-items: flex-start; gap: 8px; font-size: 13.5px; color: var(--subtext); margin-bottom: 10px; flex-wrap: wrap; }
 .konten-modus .sym { margin-top: 3px; flex: 0 0 auto; }
 .konten-modus span { flex: 1; min-width: 200px; }
