@@ -104,6 +104,7 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
     schlangeZeichnen()
     schreibend.clear()
     vorschau.zuruecksetzen()
+    eingabe.vorschlagWeg()
     eingabe.laeuftSetzen(false)
     eingabe.ordnerFestlegen(null)
     klebt = true
@@ -152,6 +153,7 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
     warteschlange = d.warteschlange ?? []
     const lief = kopf.fortsetzung?.laeuft
     laeuftSetzen(Boolean(lief))
+    if (!lief) eingabe.vorschlagSetzen(d.vorschlag)
     if (lief) {
       await laufNachholen(nr, kopf.fortsetzung.startSeq ?? 0)
       // Wettlauf beim Anhalten: der Agent ist schon 'stopped', der Server
@@ -218,6 +220,11 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
     if (d.gestartet) schlangeGestartet(d.gestartet)
     if (d.fehler) melden(`Warteschlange nicht gesendet: ${d.fehler}`, 'fehler')
     schlangeZeichnen()
+  })
+  // Vorschlag fuer die naechste Nachricht (kommt nach der Antwort, ~2-4 s spaeter).
+  bus.abonnieren('vorschlag', (d) => {
+    if (!id || d?.id !== id || laeuft) return
+    eingabe.vorschlagSetzen(d.text)
   })
   bus.abonnieren('freigabe', (f) => {
     if (!laufId || f?.runId !== laufId) return
@@ -310,6 +317,7 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
 
   function laeuftSetzen(an) {
     laeuft = an
+    if (an) eingabe.vorschlagWeg()
     eingabe.laeuftSetzen(an)
     el.classList.toggle('laeuft', an)
     schlangeZeichnen()

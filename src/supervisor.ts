@@ -291,7 +291,7 @@ export class Supervisor extends EventEmitter {
    */
   async agentStarten(
     o: AgentStartOptionen,
-  ): Promise<{ ergebnis: string | null; volltext: string; fehler: string | null }> {
+  ): Promise<{ ergebnis: string | null; volltext: string; fehler: string | null; umgebung?: Record<string, string | undefined> }> {
     const k = this.schluessel(o.runId, o.agentId)
     const zustand: AgentState = {
       agentId: o.agentId,
@@ -437,7 +437,8 @@ export class Supervisor extends EventEmitter {
       this.laufende.delete(k)
     }
 
-    return { ergebnis, volltext: textBloecke.join('\n'), fehler }
+    const umgebung = kontoUmgebung(konto)
+    return { ergebnis, volltext: textBloecke.join('\n'), fehler, ...(umgebung ? { umgebung } : {}) }
   }
 
   /**

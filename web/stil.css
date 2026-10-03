@@ -723,6 +723,8 @@ select.chip option { background: var(--mantle-fest); color: var(--text); }
 .eingabe.diktat-an .feld-spiegel { display: block; }
 .eingabe.diktat-an .eingabe-feld { color: transparent; caret-color: var(--text); }
 .eingabe.diktat-an .eingabe-feld::selection { color: transparent; background: color-mix(in srgb, var(--akzent) 35%, transparent); }
+/* Vorschlag fuer die naechste Nachricht: gedaempft, bis Can etwas daran aendert. */
+.eingabe-feld.vorschlag-text { color: color-mix(in srgb, var(--text) 62%, transparent); font-style: italic; }
 /* --overlay auf --mantle: 5,6:1 -- deutlich grau, aber lesbar genug zum Mitlesen. */
 .feld-spiegel .vorlaeufig { color: var(--overlay); }
 

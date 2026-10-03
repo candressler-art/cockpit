@@ -94,7 +94,20 @@ export function eingabeBauen(opt) {
     feld.style.height = 'auto'
     feld.style.height = `${Math.min(feld.scrollHeight, Math.round(innerHeight * 0.4))}px`
   }
+  // Vorschlag fuer die naechste Nachricht (daemon vorschlag.ts): steht als
+  // echter Text im Feld, grau, solange er unveraendert ist. Ein Klick ans Ende
+  // zum Ergaenzen, am Rechner ein Rechtsklick zum Senden.
+  let vorschlagText = null
+  const vorschlagAus = () => { vorschlagText = null; feld.classList.remove('vorschlag-text'); feld.removeAttribute('title') }
+  feld.addEventListener('contextmenu', (ev) => {
+    // Nur am Rechner (am Handy ist langes Druecken das Auswahlmenue) und nur,
+    // solange der Text noch genau der Vorschlag ist.
+    if (vorschlagText === null || feld.value !== vorschlagText || matchMedia('(pointer: coarse)').matches) return
+    ev.preventDefault()
+    senden()
+  })
   feld.addEventListener('input', () => {
+    if (vorschlagText !== null && feld.value !== vorschlagText) vorschlagAus()
     // Waehrend des Diktats: was Can tippt, gehoert ihm -- die Erkennung
     // schreibt danach dahinter weiter (diktat.js).
     if (laufend) { laufend.eingabe(); spiegelZeichnen() }
@@ -223,6 +236,7 @@ export function eingabeBauen(opt) {
     mikroKnopf.disabled = true
     try {
       await opt.beiSenden(text, optionen)
+      vorschlagAus()
       feld.value = ''
       anhaengeLeeren()
       groesse()
@@ -547,7 +561,23 @@ export function eingabeBauen(opt) {
     },
     /** Fuer bestehende Chats steht der Ordner fest (null = frei waehlbar). */
     ordnerFestlegen(p) { ordnerFest = p; ordnerZeigen() },
-    textSetzen(t) { laufend?.anhalten(); feld.value = t; groesse(); knopfZustand() },
+    /** Vorschlag ins leere Feld legen -- nie über etwas, das Can schon tippt, diktiert oder anhängt. */
+    vorschlagSetzen(t) {
+      if (!t || laeuft || diktatZustand !== 'aus' || feld.value.trim() || anhaenge.length) return
+      feld.value = t
+      vorschlagText = t
+      feld.classList.add('vorschlag-text')
+      feld.title = 'Vorschlag – Rechtsklick sendet ihn, ein Klick ans Ende zum Ergänzen'
+      groesse()
+      knopfZustand()
+      // Cursor ans Ende: wer das Feld schon im Fokus hat, tippt direkt weiter.
+      feld.setSelectionRange(t.length, t.length)
+    },
+    vorschlagWeg() {
+      if (vorschlagText !== null && feld.value === vorschlagText) { feld.value = ''; groesse(); knopfZustand() }
+      vorschlagAus()
+    },
+    textSetzen(t) { vorschlagAus(); laufend?.anhalten(); feld.value = t; groesse(); knopfZustand() },
     /** Schon hochgeladene Anhaenge (Pfade unter ANHAENGE) wieder ins Feld -- "Zuruecknehmen" aus der Warteschlange. */
     anhaengeUebernehmen(pfade) {
       for (const pfad of pfade) {

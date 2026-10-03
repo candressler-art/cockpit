@@ -39,6 +39,7 @@ import { cwdPruefen, folgenLesen, zahlLesen } from './eingaben.js'
 import { nutzungAbfragen, guthabenAbfragen, guthabenRest, guthabenPrognose, type Guthaben, type CloudGuthaben } from './kontenNutzung.js'
 import { AnfrageFehler, fehlerStatus, koerperAuswerten, textFeld } from './httpFehler.js'
 import { ChatZuege } from './chatZuege.js'
+import { vorschlagErzeugen } from './vorschlag.js'
 import { nachliefern, senden as klientSenden, type Klient } from './nachlieferung.js'
 import { ereignisAufbereiten } from './nachrichten.js'
 import { auftraegeTrennen } from './protokoll.js'
@@ -379,10 +380,35 @@ async function neuenChatFruehEintragen(id: string): Promise<void> {
   }
 }
 
+/**
+ * Vorschlag fuer Cans naechste Nachricht je Chat (vorschlag.ts), nur im
+ * Speicher. `vorschlagNr` zaehlt jeden Zugstart: ein Vorschlag, der erst nach
+ * dem naechsten Start fertig wird, gehoert zu einer Antwort von gestern.
+ */
+const vorschlaege = new Map<string, string>()
+const vorschlagNr = new Map<string, number>()
+
+function vorschlagLiefern(id: string, frage: string, antwort: string | null, umgebung?: Record<string, string | undefined>): void {
+  const nr = vorschlagNr.get(id)
+  if (!antwort || !vorschlagWaehlbar(id)) return
+  void vorschlagErzeugen(frage, antwort, umgebung).then((v) => {
+    if (!v || vorschlagNr.get(id) !== nr || chatZuege.laeuft(id) || !vorschlagWaehlbar(id)) return
+    vorschlaege.set(id, v)
+    verteilen('vorschlag', { id, text: v })
+  })
+}
+
+/** Wartet schon eine Nachricht in der Schlange, folgt gleich der naechste Zug -- dann ist ein Vorschlag nur im Weg. */
+function vorschlagWaehlbar(id: string): boolean {
+  return !warteschlangeLesen(DB_PFAD, id).length
+}
+
 function chatZugStarten(
   id: string, f: Fortsetzung, text: string, titel: string, opt: ChatOptionen, neu: boolean,
 ): number {
   const startSeq = db.letzteSeq(f.laufId)
+  vorschlaege.delete(id)
+  vorschlagNr.set(id, (vorschlagNr.get(id) ?? 0) + 1)
   // Gilt auch fuer den naechsten Zug und fuer die Anzeige nach Neuladen.
   chatOptionenMerken(DB_PFAD, id, { modell: opt.model, aufwand: opt.effort, berechtigung: opt.permissionMode })
   // Fuer die Modellwahl: womit der vorige Zug lief (vor agentStarten lesen,
@@ -422,6 +448,7 @@ function chatZugStarten(
       const neueSession = supervisor.agentenListe(f.laufId).find((a) => a.agentId === 'chat')?.sessionId
       if (neueSession) fortsetzungAktualisieren(DB_PFAD, id, neueSession)
       if (r.fehler) console.warn(`[chats] Zug ${id.slice(0, 8)} endete mit Fehler:`, r.fehler)
+      else vorschlagLiefern(id, text, r.ergebnis ?? r.volltext, r.umgebung)
     } catch (e) {
       // Darf den Daemon nicht mitreissen -- ein gestorbener Chat-Zug ist
       // Sache dieser Sitzung, nicht des ganzen Prozesses.
@@ -1342,6 +1369,7 @@ const server = createServer(async (req, res) => {
         ...d,
         optionen: chatOptionenLesen(DB_PFAD, id),
         warteschlange: warteschlangeLesen(DB_PFAD, id),
+        vorschlag: chatZuege.laeuft(id) ? null : vorschlaege.get(id) ?? null,
         kopf: {
           ...d.kopf,
           fortsetzbar: true,
