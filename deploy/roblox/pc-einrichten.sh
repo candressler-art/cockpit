@@ -150,12 +150,12 @@ else
   fehlt "PC auf dem Server nicht eingetragen"
 fi
 # Gegenprobe vom Server aus: der Schluessel fuer Blender darf KEINE Befehle.
-if "${SSH[@]}" "sudo -u roblox ssh -i /home/roblox/.ssh/pc_blender -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/home/roblox/.ssh/known_hosts_pc $USER@$PC_IP id" 2>/dev/null | grep -q 'uid='; then
+if "${SSH[@]}" "cd / && sudo -u roblox -H ssh -i /home/roblox/.ssh/pc_blender -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/home/roblox/.ssh/known_hosts_pc $USER@$PC_IP id" 2>/dev/null | grep -q 'uid='; then
   fehlt "Blender-Schluessel kann Befehle ausfuehren -- Einschraenkung greift nicht"
 else
   ok "Gegenprobe: Blender-Schluessel fuehrt keine Befehle aus"
 fi
-if "${SSH[@]}" "sudo -u roblox ssh -i /home/roblox/.ssh/pc_studio -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/home/roblox/.ssh/known_hosts_pc $USER@$PC_IP id" 2>/dev/null | grep -q 'uid='; then
+if "${SSH[@]}" "cd / && sudo -u roblox -H ssh -i /home/roblox/.ssh/pc_studio -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/home/roblox/.ssh/known_hosts_pc $USER@$PC_IP id" 2>/dev/null | grep -q 'uid='; then
   fehlt "Studio-Schluessel kann Befehle ausfuehren -- Einschraenkung greift nicht"
 else
   ok "Gegenprobe: Studio-Schluessel fuehrt keine Befehle aus"
@@ -198,7 +198,7 @@ HINWEIS
 
 # --- 6. Vault ---------------------------------------------------------------------------------
 schritt "6/6  Roblox-Vault als ~/Roblox-Vault"
-SERVER_ID=$("${SSH[@]}" 'sudo -u roblox -H /home/roblox/.local/bin/vault-teilen --id' 2>/dev/null)
+SERVER_ID=$("${SSH[@]}" 'cd / && sudo -u roblox -H /home/roblox/.local/bin/vault-teilen --id' 2>/dev/null)
 if [ -z "$SERVER_ID" ]; then
   fehlt "Syncthing auf dem Server antwortet nicht"
 elif ! command -v syncthing >/dev/null; then
@@ -212,7 +212,7 @@ else
     syncthing cli config devices add --device-id "$SERVER_ID" --name servertwo-roblox 2>/dev/null
     # Ordner vom Server automatisch annehmen; landet unter dem Standardpfad mit dem Namen "Roblox-Vault".
     syncthing cli config devices "$SERVER_ID" auto-accept-folders set true 2>/dev/null
-    if "${SSH[@]}" "sudo -u roblox -H /home/roblox/.local/bin/vault-teilen $EIGENE_ID $(hostname)" | sed 's/^/        /'; then
+    if "${SSH[@]}" "cd / && sudo -u roblox -H /home/roblox/.local/bin/vault-teilen $EIGENE_ID $(hostname)" | sed 's/^/        /'; then
       ok "Vault geteilt -- erscheint gleich als Ordner 'Roblox-Vault' (Standard: ~/Roblox-Vault)"
     else
       fehlt "Vault nicht geteilt"
