@@ -170,6 +170,8 @@ export class Supervisor extends EventEmitter {
     }
   >()
   private konten: KontenVerwaltung
+  /** Auf welchem Konto ein Lauf zuletzt arbeitete -- fuer Cloud-Auftraege (Guthaben je Konto). Nur im Speicher. */
+  private laufKonten = new Map<string, string>()
 
   constructor(db: CockpitDb) {
     super()
@@ -182,6 +184,14 @@ export class Supervisor extends EventEmitter {
   /** Gesamtbild aller Konten (Liste, Modus, naechstes Konto, Abstand) fuer /api/konten. */
   kontenUebersicht(): KontenUebersicht {
     return this.konten.uebersicht()
+  }
+
+  /**
+   * Konto, auf dem ein Lauf zuletzt arbeitete; ohne Zug seit dem Start das,
+   * das eine Wahl jetzt treffen wuerde. null ohne nutzbares Konto.
+   */
+  kontoVonLauf(runId: string): string | null {
+    return this.laufKonten.get(runId) ?? this.konten.uebersicht().naechstesKonto
   }
 
   /** Angemeldete Konten -- Grundlage fuer den periodischen Nutzungs-Poll in daemon.ts. */
@@ -366,7 +376,10 @@ export class Supervisor extends EventEmitter {
       // hoechstens einmal versucht, sonst waere ein Ringschluss moeglich,
       // wenn zwei Konten sich gegenseitig knapp vor dem Reset ablehnen.
       while (true) {
-        if (konto) versuchteKonten.add(konto.name)
+        if (konto) {
+          versuchteKonten.add(konto.name)
+          this.laufKonten.set(o.runId, konto.name)
+        }
         // "Schon geantwortet" heisst: es steht ein Textblock in textBloecke,
         // der NICHT selbst nur die Limitmeldung ist. Ohne den Ausschluss
         // wuerde ein Konto, das direkt mit "You've hit your session limit"

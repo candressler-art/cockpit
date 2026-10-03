@@ -55,6 +55,14 @@ import {
   rueckblickGruppieren, nutzungGesamt, type SitzungsArt,
 } from './nutzung.js'
 import { kontenLesen } from './konten.js'
+import {
+  cloudMessungMerken, cloudVerlaufLesen, cloudTageBerechnen, cloudKennzahlen, auftragSpeichern, auftragLesen,
+  auftragZuTrigger, auftraegeLesen, auftraegeAmTag, umgebungMerken, umgebungLesen, type CloudAuftrag,
+} from './cloudNutzung.js'
+import {
+  auftragsId, auftragVerpacken, pruefNachricht, remoteTriggerBloecke, istCreate, createErgebnisParsen, gitInfo,
+  branchVorhanden,
+} from './cloudAuftrag.js'
 import { VARIANTE, bereichAn, cwdInWurzel, varianteFuerOberflaeche } from './variante.js'
 import { pcKonfigLesen, wecken, herunterfahren, pcErreichbar } from './pc.js'
 import { mcpAufloesen } from './mcp.js'
@@ -354,6 +362,148 @@ supervisor.on('agent', (a: { runId: string }) => {
   verteilen('agent', a)
   melden('agent', a)
 })
+// --- Cloud-Auftraege (cloudAuftrag.ts, cloudNutzung.ts) ------------------------
+//
+// Jedes RemoteTrigger-create, das ein Chat-Agent absetzt -- ob ueber den Knopf
+// "In der Cloud" bestellt oder von sich aus --, wird hier aus dem
+// Nachrichtenstrom gelesen und als Auftrag gefuehrt. Der Aufruf und sein
+// Ergebnis kommen in zwei Nachrichten; dazwischen merkt sich der Daemon die
+// tool_use_id. Nur im Speicher: ein Neustart genau dazwischen verliert einen
+// Auftrag, den Ablauf selbst stoert das nicht.
+const offeneTrigger = new Map<string, { eingabe: Record<string, unknown> }>()
+
+function chatVonEreignis(e: CockpitEvent): string | null {
+  const ueberSitzung = e.sessionId ? chatFuerSitzung(DB_PFAD, e.sessionId)?.id ?? null : null
+  return ueberSitzung ?? (e.runId.startsWith('chat-') ? e.runId.slice('chat-'.length) : null)
+}
+
+function cloudEreignis(e: CockpitEvent): void {
+  if (e.kind !== 'tool_use' && e.kind !== 'tool_result' && e.kind !== 'text') return
+  for (const b of remoteTriggerBloecke(e.payload)) {
+    if (b.art === 'aufruf') {
+      if (istCreate(b.eingabe)) offeneTrigger.set(b.toolUseId, { eingabe: b.eingabe ?? {} })
+      continue
+    }
+    const offen = offeneTrigger.get(b.toolUseId)
+    if (!offen) continue
+    offeneTrigger.delete(b.toolUseId)
+    if (b.istFehler) continue
+    const p = createErgebnisParsen(b.text ?? '')
+    if (!p || auftragZuTrigger(DB_PFAD, p.triggerId)) continue
+    // Was das Ergebnis nicht hergibt, steht vielleicht in der Eingabe (Prompt mit dem Branch, Repo-URL).
+    const eingabeText = JSON.stringify(offen.eingabe)
+    const ausEingabe = createErgebnisParsen(`HTTP 200\n${p.triggerId}\n${eingabeText}`)
+    const konto = supervisor.kontoVonLauf(e.runId)
+    const vorhanden = p.auftragsId ? auftragLesen(DB_PFAD, p.auftragsId) : null
+    const a: CloudAuftrag = {
+      id: vorhanden ? auftragsId() : p.auftragsId ?? auftragsId(),
+      chatId: chatVonEreignis(e),
+      konto,
+      triggerId: p.triggerId,
+      name: p.name ?? ausEingabe?.name ?? null,
+      branch: p.branch ?? ausEingabe?.branch ?? null,
+      repo: p.repo ?? ausEingabe?.repo ?? null,
+      link: p.link,
+      erstellt: Date.now(),
+      guthabenVorher: konto ? cloudGuthaben.get(konto)?.verbraucht ?? null : null,
+      status: 'gestartet',
+      fertigAm: null,
+      kosten: null,
+    }
+    auftragSpeichern(DB_PFAD, a)
+    const env = p.environmentId ?? ausEingabe?.environmentId ?? null
+    if (konto && env) umgebungMerken(DB_PFAD, konto, env)
+    console.log(`[cloud] Auftrag ${a.id} erfasst (${a.triggerId}, Konto ${konto ?? '?'}, Branch ${a.branch ?? '?'})`)
+    verteilen('cloud', { chatId: a.chatId, id: a.id })
+  }
+}
+supervisor.on('ereignis', (e: CockpitEvent) => {
+  try {
+    cloudEreignis(e)
+  } catch (f) {
+    console.warn('[cloud] Ereignis nicht ausgewertet:', String(f))
+  }
+})
+
+/** Ohne Branch nach so langer Zeit: Status 'unklar' (weiter geprueft, bis UNKLAR_AUFGEBEN_MS). */
+const UNKLAR_NACH_MS = 6 * 3_600_000
+const UNKLAR_AUFGEBEN_MS = 3 * 86_400_000
+
+/**
+ * Fertig-Erkennung ohne Modellaufruf: taucht der Ergebnis-Branch auf GitHub
+ * auf, ist die Routine durch. Kosten = Guthaben jetzt minus vorher --
+ * ungefaehr, parallele Auftraege auf demselben Konto zaehlen mit hinein.
+ */
+let cloudPruefungLaeuft = false
+async function cloudAuftraegePruefen(): Promise<void> {
+  if (cloudPruefungLaeuft) return
+  cloudPruefungLaeuft = true
+  try {
+    const jetzt = Date.now()
+    const offen = [...auftraegeLesen(DB_PFAD, { status: 'gestartet' }), ...auftraegeLesen(DB_PFAD, { status: 'unklar' })]
+      .filter((a) => jetzt - a.erstellt < UNKLAR_AUFGEBEN_MS)
+    let gemessen = false
+    for (const a of offen) {
+      const da = a.repo && a.branch ? await branchVorhanden(a.repo, a.branch) : null
+      if (da !== true) {
+        if (a.status === 'gestartet' && jetzt - a.erstellt > UNKLAR_NACH_MS) {
+          auftragSpeichern(DB_PFAD, { ...a, status: 'unklar' })
+          verteilen('cloud', { chatId: a.chatId, id: a.id })
+        }
+        continue
+      }
+      if (!gemessen) {
+        await kontenMessen().catch(() => {})
+        gemessen = true
+      }
+      const nachher = a.konto ? cloudGuthaben.get(a.konto)?.verbraucht ?? null : null
+      const kosten = nachher !== null && a.guthabenVorher !== null ? Math.max(0, Math.round((nachher - a.guthabenVorher) * 100) / 100) : null
+      auftragSpeichern(DB_PFAD, { ...a, status: 'fertig', fertigAm: Date.now(), kosten })
+      console.log(`[cloud] Auftrag ${a.id} fertig: ${a.branch}`)
+      verteilen('cloud', { chatId: a.chatId, id: a.id })
+      void pushSenden({
+        titel: 'Cloud-Auftrag fertig',
+        text: `Boss, ${a.name ?? a.id} ist fertig – Branch ${a.branch} liegt bereit.`,
+        ziel: a.chatId ? `#/chat/${a.chatId}` : '#/nutzung',
+        tag: `cloud-${a.id}`,
+      }).catch((f) => console.warn('[push]', String(f)))
+    }
+  } finally {
+    cloudPruefungLaeuft = false
+  }
+}
+setInterval(() => void cloudAuftraegePruefen().catch((f) => console.warn('[cloud] Pruefung:', String(f))), 5 * 60_000).unref()
+setTimeout(() => void cloudAuftraegePruefen().catch(() => {}), 30_000).unref()
+
+/**
+ * Den Text eines Cloud-Knopfdrucks in die feste Anweisung verpacken
+ * (cloudAuftrag.ts). Repo und Branch liest der Daemon selbst aus dem
+ * Projektordner -- der Agent soll sie nicht raten muessen.
+ */
+async function cloudAuftragVerpacken(chatId: string, text: string, cwd: string, titel: string): Promise<string> {
+  const laufId = fortsetzungLesen(DB_PFAD, chatId)?.laufId ?? `chat-${chatId}`
+  const konto = supervisor.kontoVonLauf(laufId)
+  const g = await gitInfo(cwd)
+  return auftragVerpacken({
+    id: auftragsId(),
+    text,
+    chatTitel: titel,
+    konto,
+    environmentId: konto ? umgebungLesen(DB_PFAD, konto) : null,
+    cwd,
+    repo: g.repo,
+    remote: g.remote,
+    basisBranch: g.branch,
+    gedaechtnisPfad: gedaechtnisWurzel(),
+  })
+}
+
+/** Cloud-Teil fuer /api/nutzung: Verbrauch je Tag in Dollar, Kennzahlen, Auftraege. */
+function cloudBericht(heute: string): Record<string, unknown> {
+  const { tage, vorAufzeichnung } = cloudTageBerechnen(cloudVerlaufLesen(DB_PFAD))
+  return { tage, ...cloudKennzahlen(tage, heute), vorAufzeichnung, auftraege: auftraegeLesen(DB_PFAD, { grenze: 50 }) }
+}
+
 // Live-Text eines Chat-Zugs (nur mit liveText). Wird nicht nachgeliefert:
 // wer spaeter kommt, bekommt die fertige Nachricht ueber die Ereignisse.
 supervisor.on('delta', (d: unknown) => verteilen('delta', d))
@@ -656,8 +806,11 @@ async function kontenNutzungPuls(): Promise<void> {
       if (r) {
         supervisor.nutzungMelden(konto.name, r.stand, r.quelle)
         // Meldet Anthropic keins mehr (verfallen), auch hier verschwinden lassen.
-        if (r.cloud) cloudGuthaben.set(konto.name, r.cloud)
-        else cloudGuthaben.delete(konto.name)
+        if (r.cloud) {
+          cloudGuthaben.set(konto.name, r.cloud)
+          // Verlauf fuer den Verbrauch je Tag (cloudNutzung.ts) -- eine Zeile nur bei Aenderung.
+          cloudMessungMerken(DB_PFAD, konto.name, r.cloud.verbraucht, r.cloud.gemessenAm)
+        } else cloudGuthaben.delete(konto.name)
       }
     } catch (e) {
       // Ein Konto darf die anderen nicht mitreissen -- weiterpollen.
@@ -1214,7 +1367,19 @@ const server = createServer(async (req, res) => {
     if (pfad.startsWith('/api/chats/') && pfad.endsWith('/weiter') && req.method === 'POST') {
       const id = decodeURIComponent(pfad.slice('/api/chats/'.length, -'/weiter'.length))
       const k = (await koerperLesen(req)) as Record<string, unknown> | null
-      const text = (textFeld(k, 'text') ?? '').trim()
+      let text = (textFeld(k, 'text') ?? '').trim()
+      // Cloud (cloudAuftrag.ts): der Text -- leer heisst "die bisherige
+      // Aufgabe" -- geht verpackt als Anweisung an den Chat-Agenten.
+      const pruefen = typeof k?.cloudPruefen === 'string' ? auftragLesen(DB_PFAD, k.cloudPruefen) : null
+      if (typeof k?.cloudPruefen === 'string' && !pruefen) return json(404, { fehler: 'Cloud-Auftrag unbekannt' })
+      if (pruefen) text = pruefNachricht(pruefen)
+      else if (k?.cloud === true) {
+        const f0 = fortsetzungLesen(DB_PFAD, id)
+        const kopf0 = chatKopfLesen(DB_PFAD, id)
+        const cwd0 = f0?.cwd ?? kopf0?.cwd
+        if (!cwd0) return json(404, { fehler: 'Sitzung unbekannt' })
+        text = await cloudAuftragVerpacken(id, text, cwd0, kopf0?.titel ?? '')
+      }
       if (!text) return json(400, { fehler: 'text fehlt' })
       const anh = anhaengePruefen(ANHAENGE, k?.anhaenge)
       if ('fehler' in anh) return json(400, { fehler: anh.fehler })
@@ -1325,9 +1490,11 @@ const server = createServer(async (req, res) => {
       if ('fehler' in opt) return json(400, { fehler: opt.fehler })
 
       const id = randomUUID()
+      // Gleich in die Cloud: der erste Zug ist schon die verpackte Anweisung.
+      const prompt = k?.cloud === true ? await cloudAuftragVerpacken(id, text, cwd, text.slice(0, 50)) : text
       chatRegistrieren(DB_PFAD, id, `chat-${id}`, cwd)
       const f: Fortsetzung = { laufId: `chat-${id}`, aktuelleSession: id, cwd }
-      const startSeq = chatZugStarten(id, f, promptMitAnhaengen(text, anh.pfade), text.slice(0, 50), opt.optionen, true)
+      const startSeq = chatZugStarten(id, f, promptMitAnhaengen(prompt, anh.pfade), text.slice(0, 50), opt.optionen, true)
       return json(202, { id, laufId: f.laufId, cwd, startSeq })
     }
 
@@ -1506,7 +1673,10 @@ const server = createServer(async (req, res) => {
       await nutzungPuls()
       const heute = tagVon(Date.now())
       const bericht = nutzungLesen(DB_PFAD, tagVerschieben(heute, -(tage - 1)))
-      return json(200, { ...bericht, kennzahlen: kennzahlenBerechnen(bericht.tage, bericht.heute), gesamt: nutzungGesamt(DB_PFAD) })
+      return json(200, {
+        ...bericht, kennzahlen: kennzahlenBerechnen(bericht.tage, bericht.heute), gesamt: nutzungGesamt(DB_PFAD),
+        cloud: cloudBericht(bericht.heute),
+      })
     }
 
     if (pfad === '/api/nutzung/tag' && req.method === 'GET') {
@@ -1523,7 +1693,13 @@ const server = createServer(async (req, res) => {
         if (lauf) return { art: 'team', runId: lauf.runId, titel: lauf.label, projekt }
         return { art: 'sonst', projekt }
       })
-      return json(200, { tag, eintraege })
+      const cloudTag = cloudTageBerechnen(cloudVerlaufLesen(DB_PFAD)).tage.find((t) => t.tag === tag)
+      return json(200, { tag, eintraege, cloud: { dollar: cloudTag?.dollar ?? 0, auftraege: auftraegeAmTag(auftraegeLesen(DB_PFAD, { grenze: 1000 }), tag) } })
+    }
+
+    if (pfad === '/api/cloud/auftraege' && req.method === 'GET') {
+      const chat = url.searchParams.get('chat') ?? undefined
+      return json(200, { auftraege: auftraegeLesen(DB_PFAD, { chatId: chat, grenze: chat ? 50 : 200 }) })
     }
 
     // Push-Abos: das Handy meldet sein Abo, sobald man in den Einstellungen
