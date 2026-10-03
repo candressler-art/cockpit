@@ -60,12 +60,14 @@ export function eingabeBauen(opt) {
   // Am Handy passen vier Auswahlfelder nicht in eine Zeile. Dort stehen
   // Modell, Denken und Modus hinter einem Chip, der ihre Kurzform zeigt und
   // sie beim Antippen aufklappt (nur per CSS unterschieden, siehe stil.css).
+  const vorschlagChip = h('button.vorschlag-chip', { type: 'button', hidden: true, title: 'Vorschlag übernehmen' })
   const optionenKnopf = h('button.chip.optionen-chip', { type: 'button', 'aria-expanded': 'false', title: 'Modell, Denken, Berechtigungen' })
   const optionen = h('div.eingabe-optionen', {}, modellWahl, aufwandWahl, modusWahl)
   const diktat = diktatLeisteBauen()
   const el = h('div.eingabe', {},
     h('div.eingabe-rahmen', {},
       anhangListe,
+      vorschlagChip,
       h('div.feld-huelle', {}, spiegel, feld),
       h('div.eingabe-leiste', {},
         ordnerKnopf, optionenKnopf, optionen,
@@ -98,17 +100,25 @@ export function eingabeBauen(opt) {
   // Schatten im leeren Feld (Platzhalter, also nie echter Text). Sobald Can
   // tippt, ist er weg; Pfeil nach rechts uebernimmt ihn ans Ende, in normaler Farbe.
   let vorschlagText = null
-  const vorschlagAus = () => { vorschlagText = null; feld.placeholder = PLATZHALTER }
-  feld.addEventListener('keydown', (ev) => {
-    if (ev.key !== 'ArrowRight' || vorschlagText === null || feld.value !== '' || ev.shiftKey || ev.ctrlKey || ev.altKey || ev.metaKey || ev.isComposing) return
-    ev.preventDefault()
+  const vorschlagAus = () => { vorschlagText = null; vorschlagChip.hidden = true; feld.placeholder = PLATZHALTER }
+  function vorschlagUebernehmen() {
     feld.value = vorschlagText
     vorschlagAus()
     groesse()
     knopfZustand()
     feld.setSelectionRange(feld.value.length, feld.value.length)
+  }
+  feld.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'ArrowRight' || vorschlagText === null || feld.value !== '' || ev.shiftKey || ev.ctrlKey || ev.altKey || ev.metaKey || ev.isComposing) return
+    ev.preventDefault()
+    vorschlagUebernehmen()
+  })
+  // Am Handy gibt es keine Pfeiltaste: dort steht der Vorschlag zusaetzlich als antippbarer Chip (nur per CSS sichtbar).
+  vorschlagChip.addEventListener('click', () => {
+    if (vorschlagText !== null && feld.value === '') { vorschlagUebernehmen(); feld.focus() }
   })
   feld.addEventListener('input', () => {
+    vorschlagChip.hidden = vorschlagText === null || feld.value !== ''
     // Waehrend des Diktats: was Can tippt, gehoert ihm -- die Erkennung
     // schreibt danach dahinter weiter (diktat.js).
     if (laufend) { laufend.eingabe(); spiegelZeichnen() }
@@ -567,6 +577,8 @@ export function eingabeBauen(opt) {
       if (!t || laeuft || diktatZustand !== 'aus' || anhaenge.length) return
       vorschlagText = t
       feld.placeholder = t
+      vorschlagChip.textContent = t
+      vorschlagChip.hidden = false
     },
     vorschlagWeg: vorschlagAus,
     textSetzen(t) { vorschlagAus(); laufend?.anhalten(); feld.value = t; groesse(); knopfZustand() },

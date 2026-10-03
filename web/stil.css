@@ -985,3 +985,14 @@ select.chip option { background: var(--mantle-fest); color: var(--text); }
   .puls-punkt, .laeuft > summary .w-zustand { animation: none; }
   #seite, .sg-pfeil, .neu-chat, .ws-knopf, .knopf, .senden, .eingabe-rahmen { transition: none; }
 }
+
+/* Vorschlag fuer die naechste Nachricht: am Handy als antippbarer Chip (am Rechner genuegt der Schatten + Pfeil rechts). */
+.vorschlag-chip { display: none; }
+@media (pointer: coarse) {
+  .vorschlag-chip:not([hidden]) {
+    display: block; max-width: 100%; margin: 0 0 6px; padding: 8px 12px; text-align: left;
+    border: 1px dashed var(--akzent-rand); border-radius: 12px; background: transparent;
+    color: var(--text); font: inherit; font-size: 14px; font-style: italic;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+}
