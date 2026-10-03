@@ -31,9 +31,10 @@ esac
 SERVER="${COCKPIT_SERVER:-192.168.2.193}"
 KEY="${COCKPIT_SSH_KEY:-$HOME/.ssh/id_ed25519_claude}"
 SSH=(ssh -i "$KEY" -o ConnectTimeout=10 "claude@$SERVER")
-# Alles, was als 'roblox' laufen soll. -H setzt HOME, cd vermeidet
-# "could not change directory" aus /home/claude.
-ALS_ROBLOX='cd /home/roblox && sudo -u roblox -H'
+# Alles, was als 'roblox' laufen soll. -H setzt HOME. cd / vermeidet
+# "could not change directory": sudo behaelt das Arbeitsverzeichnis, und weder
+# /home/claude (fuer roblox) noch /home/roblox (fuer claude) ist fremd lesbar.
+ALS_ROBLOX='cd / && sudo -u roblox -H'
 COCKPIT_PORT=8766
 COCKPIT_TS_PORT=10000
 ROJO_LOKAL_PORT=34873
