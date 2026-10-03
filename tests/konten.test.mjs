@@ -18,6 +18,8 @@ import {
   wochenPrognose,
   kontoAktiv,
   GETEILT_MARKE,
+  grenzeErreicht,
+  grenzeProzentLesen,
 } from '../dist/konten.js'
 import {
   nutzungAusAntwort, nutzungAbfragen, naechsteBackoffMs, guthabenAusAntwort, guthabenPrognose, guthabenRest,
@@ -1117,6 +1119,69 @@ const SDK_LIMIT_PRAEFIXE = ["You've hit your", "You've reached your"]
     }
     rmSync(haupt, { recursive: true, force: true })
     rmSync(zusatz, { recursive: true, force: true })
+  }
+}
+
+// --- Obergrenze je Konto ---
+{
+  const stand = (f5, w, jetzt = Date.now()) => ({
+    status: 'allowed', rateLimitType: null, resetsAt: null,
+    fuenfStundenAnteil: f5, fuenfStundenResetsAt: Math.floor(jetzt / 1000) + 3600,
+    siebenTageAnteil: w, siebenTageResetsAt: Math.floor(jetzt / 1000) + 86400, gemessenAm: jetzt,
+  })
+  const g = { fuenf: 0.7, woche: 0.6 }
+  pruefe('Grenze: darunter frei', grenzeErreicht(stand(0.69, 0.59), g) === null)
+  pruefe('Grenze: 5h genau erreicht', grenzeErreicht(stand(0.7, 0.1), g)?.fenster === 'fuenf')
+  pruefe('Grenze: Woche erreicht', grenzeErreicht(stand(0.1, 0.6), g)?.fenster === 'woche')
+  pruefe('Grenze: Woche zuerst, wenn beide', grenzeErreicht(stand(0.9, 0.9), g)?.fenster === 'woche')
+  pruefe('Grenze: nur eine gesetzt', grenzeErreicht(stand(0.1, 0.99), { fuenf: 0.7, woche: null }) === null)
+  pruefe('Grenze: ohne Messung kein Urteil', grenzeErreicht(null, g) === null)
+  pruefe('Grenze: ohne Grenze kein Urteil', grenzeErreicht(stand(1, 1), null) === null)
+  pruefe('Grenze: Prozent 60 -> 0.6', grenzeProzentLesen('60') === 0.6 && grenzeProzentLesen(70) === 0.7)
+  pruefe('Grenze: leer -> keine', grenzeProzentLesen('') === null && grenzeProzentLesen(null) === null)
+  pruefe('Grenze: 0, 101, Text sind ungueltig',
+    grenzeProzentLesen('0') === undefined && grenzeProzentLesen('101') === undefined && grenzeProzentLesen('abc') === undefined)
+
+  const alt = { HOME: process.env.HOME, K: process.env.COCKPIT_KONTEN_DIR, C: process.env.CLAUDE_CONFIG_DIR }
+  const anm = (dir) => { mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'x' } })) }
+  const haupt = mkdtempSync(join(tmpdir(), 'grenze-haupt-'))
+  const zusatz = mkdtempSync(join(tmpdir(), 'grenze-zusatz-'))
+  anm(haupt); anm(join(zusatz, 'freund'))
+  process.env.HOME = haupt; process.env.CLAUDE_CONFIG_DIR = haupt; process.env.COCKPIT_KONTEN_DIR = zusatz
+  try {
+    let gespeichert = {}
+    const persistenz = {
+      kontoSperrenLesen: () => ({}), kontoSperren: () => {},
+      kontoVorzugLesen: () => null, kontoVorzugSetzen: () => {},
+      kontoNutzungLesen: () => ({}), kontoNutzungSpeichern: () => {},
+      kontoGrenzenLesen: () => ({ ...gespeichert }),
+      kontoGrenzeSetzen: (n, gr) => { if (gr) gespeichert[n] = gr; else delete gespeichert[n] },
+    }
+    const kv = new KontenVerwaltung(persistenz)
+    kv.nutzungMelden('haupt', stand(0.9, 0.9), 'usage_api')
+    kv.nutzungMelden('freund', stand(0.3, 0.3), 'usage_api')
+    kv.grenzeSetzen('freund', g)
+    pruefe('Grenze: freund unter Grenze, gewinnt mit weniger Woche', kv.waehlen()?.name === 'freund')
+    kv.nutzungMelden('freund', stand(0.3, 0.61, Date.now() + 1), 'usage_api')
+    pruefe('Grenze: freund ueber Wochengrenze -> haupt', kv.waehlen()?.name === 'haupt')
+    kv.bevorzugtesKontoSetzen('freund')
+    pruefe('Grenze: schlaegt auch den Vorzug', kv.waehlen()?.name === 'haupt')
+    pruefe('Grenze: nicht "als Naechstes"', kv.uebersicht().naechstesKonto === 'haupt')
+    kv.bevorzugtesKontoSetzen(null)
+    const z = kv.uebersicht().konten.find((k) => k.name === 'freund')
+    pruefe('Grenze: Uebersicht meldet Grenze und Fenster', z.grenze?.woche === 0.6 && z.grenzeErreicht?.fenster === 'woche' && z.grenzeErreicht.bisMs > Date.now())
+    pruefe('Grenze ueberlebt einen Neustart', new KontenVerwaltung(persistenz).uebersicht().konten.find((k) => k.name === 'freund')?.grenze?.fuenf === 0.7)
+    // Reset des Fensters vorbei: wieder frei
+    const vorbei = Date.now() - 1000
+    kv.nutzungMelden('freund', { ...stand(0.3, 0.7, Date.now() + 2), siebenTageResetsAt: Math.floor(vorbei / 1000), fuenfStundenResetsAt: Math.floor(vorbei / 1000) }, 'usage_api')
+    pruefe('Grenze: nach dem Reset wieder waehlbar', kv.uebersicht().konten.find((k) => k.name === 'freund')?.grenzeErreicht === null)
+    kv.grenzeSetzen('freund', { fuenf: null, woche: null })
+    pruefe('Grenze entfernen', kv.uebersicht().konten.find((k) => k.name === 'freund')?.grenze === null && !('freund' in gespeichert))
+  } finally {
+    for (const [k, v] of [['HOME', alt.HOME], ['COCKPIT_KONTEN_DIR', alt.K], ['CLAUDE_CONFIG_DIR', alt.C]]) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v
+    }
+    rmSync(haupt, { recursive: true, force: true }); rmSync(zusatz, { recursive: true, force: true })
   }
 }
 

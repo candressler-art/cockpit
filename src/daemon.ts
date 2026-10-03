@@ -54,7 +54,7 @@ import {
   nutzungIndizieren, nutzungLesen, kennzahlenBerechnen, tagVerschieben, tagVon, tagSitzungen,
   rueckblickGruppieren, nutzungGesamt, type SitzungsArt,
 } from './nutzung.js'
-import { kontenLesen } from './konten.js'
+import { kontenLesen, grenzeProzentLesen } from './konten.js'
 import { VARIANTE, bereichAn, cwdInWurzel, varianteFuerOberflaeche } from './variante.js'
 import { pcKonfigLesen, wecken, herunterfahren, pcErreichbar } from './pc.js'
 import { mcpAufloesen } from './mcp.js'
@@ -1571,6 +1571,17 @@ const server = createServer(async (req, res) => {
       const name = textFeld(k, 'name') ?? ''
       if (typeof k?.an !== 'boolean') return json(400, { fehler: 'an muss true oder false sein' })
       const ok = supervisor.kontoSchalterSetzen(name, k.an)
+      return json(ok ? 200 : 404, { ok, ...supervisor.kontenUebersicht() })
+    }
+
+    if (pfad === '/api/konten/grenze' && req.method === 'POST') {
+      // Obergrenzen je Konto in Prozent (1..100), leer/null = keine Grenze.
+      const k = (await koerperLesen(req)) as Record<string, unknown> | null
+      const name = textFeld(k, 'name') ?? ''
+      const fuenf = grenzeProzentLesen(k?.fuenf)
+      const woche = grenzeProzentLesen(k?.woche)
+      if (fuenf === undefined || woche === undefined) return json(400, { fehler: 'Grenze muss eine Zahl von 1 bis 100 sein (oder leer)' })
+      const ok = supervisor.kontoGrenzeSetzen(name, { fuenf, woche })
       return json(ok ? 200 : 404, { ok, ...supervisor.kontenUebersicht() })
     }
 

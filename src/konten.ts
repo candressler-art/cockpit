@@ -61,6 +61,16 @@ export interface KontoMitZustand extends Konto {
   /** Reicht das Wochenlimit beim bisherigen Tempo bis zum Reset? null: zu
    *  wenig Daten fuer eine ehrliche Aussage (siehe wochenPrognose). */
   wochePrognose: WochenPrognose | null
+  /** Eingestellte Obergrenzen (Anteil 0..1) oder null, wenn keine gesetzt ist. */
+  grenze: KontoGrenze | null
+  /** Welches Fenster die Obergrenze gerade erreicht hat; das Konto kommt dann nicht in die Wahl. */
+  grenzeErreicht: { fenster: 'fuenf' | 'woche'; bisMs: number | null } | null
+}
+
+/** Obergrenze je Konto: bis zu diesem Anteil nimmt das Cockpit das Konto, danach nicht mehr (null = keine Grenze). */
+export interface KontoGrenze {
+  fuenf: number | null
+  woche: number | null
 }
 
 export interface WochenPrognose {
@@ -325,6 +335,9 @@ export interface KontenPersistenz {
   /** Optional wie kontoSperrGruendeLesen: ohne Eintrag gilt die Vorgabe (siehe kontoAktiv). */
   kontoSchalterLesen?(): Record<string, boolean>
   kontoSchalterSetzen?(name: string, an: boolean): void
+  /** Obergrenzen je Konto (siehe KontoGrenze); optional wie die Schalter. */
+  kontoGrenzenLesen?(): Record<string, KontoGrenze>
+  kontoGrenzeSetzen?(name: string, grenze: KontoGrenze | null): void
   kontoNutzungLesen(): Record<string, { stand: LimitStand; quelle: 'usage_api' | 'rate_limit_event' }>
   kontoNutzungSpeichern(name: string, stand: LimitStand, quelle: 'usage_api' | 'rate_limit_event'): void
 }
@@ -377,6 +390,35 @@ export function fensterNachReset(stand: LimitStand, jetzt: number): LimitStand {
 }
 
 /**
+ * Hat das Konto seine Obergrenze erreicht? Rechnet mit dem Stand nach
+ * fensterNachReset, ein zurueckgesetztes Fenster zaehlt also wieder als frei.
+ * Ohne Messung gibt es keine Aussage (null): ein nie gemessenes Konto bleibt
+ * waehlbar, sonst kaeme ein frisch angemeldetes nie dran.
+ */
+export function grenzeErreicht(
+  stand: LimitStand | null,
+  grenze: KontoGrenze | null,
+): { fenster: 'fuenf' | 'woche'; bisMs: number | null } | null {
+  if (!stand || !grenze) return null
+  // Die Woche zuerst: sie haelt am laengsten, und bis zu ihrem Reset ist das Konto sowieso weg.
+  if (grenze.woche !== null && stand.siebenTageAnteil !== null && stand.siebenTageAnteil >= grenze.woche) {
+    return { fenster: 'woche', bisMs: stand.siebenTageResetsAt ? stand.siebenTageResetsAt * 1000 : null }
+  }
+  if (grenze.fuenf !== null && stand.fuenfStundenAnteil !== null && stand.fuenfStundenAnteil >= grenze.fuenf) {
+    return { fenster: 'fuenf', bisMs: stand.fuenfStundenResetsAt ? stand.fuenfStundenResetsAt * 1000 : null }
+  }
+  return null
+}
+
+/** Eine Grenze aus der Oberflaeche (Prozent) pruefen: null/leer = keine, sonst 1..100. */
+export function grenzeProzentLesen(wert: unknown): number | null | undefined {
+  if (wert === null || wert === '' || wert === undefined) return null
+  const n = typeof wert === 'number' ? wert : Number(wert)
+  if (!Number.isFinite(n) || n < 1 || n > 100) return undefined
+  return Math.round(n) / 100
+}
+
+/**
  * Warum ein Konto gesperrt ist. 'limit': volles Nutzungsfenster -- die
  * Sperre haelt bis zum Reset, egal was sonst passiert. 'anmeldung': die CLI
  * meldete einen Anmeldefehler (Token abgelaufen und nicht erneuerbar,
@@ -402,6 +444,7 @@ export class KontenVerwaltung {
   private bevorzugt: string | null = null
   /** Schalter "im Cockpit nutzen" je Konto, nur die ausdruecklich gesetzten. */
   private schalter = new Map<string, boolean>()
+  private grenzen = new Map<string, KontoGrenze>()
   private gesperrtBis = new Map<string, number>()
   private sperrGrund = new Map<string, SperrGrund>()
   /**
@@ -445,6 +488,7 @@ export class KontenVerwaltung {
     }
     this.bevorzugt = persistenz.kontoVorzugLesen()
     for (const [name, an] of Object.entries(persistenz.kontoSchalterLesen?.() ?? {})) this.schalter.set(name, an)
+    for (const [name, g] of Object.entries(persistenz.kontoGrenzenLesen?.() ?? {})) this.grenzen.set(name, g)
     for (const [name, { stand, quelle }] of Object.entries(persistenz.kontoNutzungLesen())) {
       const gefiltert = nutzungBeimLadenFiltern(stand, jetzt)
       if (gefiltert) this.nutzung.set(name, { stand: gefiltert, quelle })
@@ -468,9 +512,22 @@ export class KontenVerwaltung {
     return true
   }
 
-  /** Angemeldet und eingeschaltet -- nur diese Konten kommen in die Wahl. */
+  /** Obergrenzen eines Kontos setzen; beide null entfernen sie. */
+  grenzeSetzen(name: string, grenze: KontoGrenze): void {
+    const leer = grenze.fuenf === null && grenze.woche === null
+    if (leer) this.grenzen.delete(name)
+    else this.grenzen.set(name, grenze)
+    this.persistenz?.kontoGrenzeSetzen?.(name, leer ? null : grenze)
+  }
+
+  private grenzeDes(name: string, jetzt: number): ReturnType<typeof grenzeErreicht> {
+    return grenzeErreicht(this.nutzungLesen(name, jetzt)?.stand ?? null, this.grenzen.get(name) ?? null)
+  }
+
+  /** Angemeldet, eingeschaltet und unter der eigenen Obergrenze -- nur diese Konten kommen in die Wahl. */
   private waehlbar(konten: readonly Konto[]): Konto[] {
-    return konten.filter((k) => k.angemeldet && kontoAktiv(k, this.schalter))
+    const jetzt = Date.now()
+    return konten.filter((k) => k.angemeldet && kontoAktiv(k, this.schalter) && !this.grenzeDes(k.name, jetzt))
   }
 
   /** Merkt ein Konto als gesperrt bis zum angegebenen Zeitpunkt. */
@@ -574,6 +631,8 @@ export class KontenVerwaltung {
         fuenfStundenResetAm: n?.stand.fuenfStundenResetsAt ? n.stand.fuenfStundenResetsAt * 1000 : null,
         siebenTageResetAm: n?.stand.siebenTageResetsAt ? n.stand.siebenTageResetsAt * 1000 : null,
         wochePrognose: n ? wochenPrognose(n.stand.siebenTageAnteil, n.stand.siebenTageResetsAt, jetzt) : null,
+        grenze: this.grenzen.get(k.name) ?? null,
+        grenzeErreicht: this.grenzeDes(k.name, jetzt),
       }
     })
   }
@@ -587,6 +646,7 @@ export class KontenVerwaltung {
     const konten = this.alleMitZustand()
     // Abgeschaltete Konten zaehlen weder beim Abstand noch bei der Wahl mit.
     const angemeldet = konten.filter((k) => k.angemeldet && k.aktiv)
+    const unterGrenze = angemeldet.filter((k) => !k.grenzeErreicht)
 
     // Nur gemessene Konten: ein nie gemessenes als 0 zu zaehlen (wie es das
     // Balancing tut) wuerde hier einen Abstand anzeigen, den es nicht gibt --
@@ -602,7 +662,7 @@ export class KontenVerwaltung {
     // Dieselbe Wahl wie waehlen(), aber OHNE zuletztGenutzt zu veraendern --
     // eine reine Anzeige darf den echten Zustand nicht durch blosses
     // Ansehen verschieben.
-    const nutzbar = angemeldet
+    const nutzbar = unterGrenze
     const naechstesKonto = kontoWaehlen(
       this.balancingListe(nutzbar), this.gesperrtBisMap(), this.bevorzugt,
       this.zuletztGenutzt, Date.now(),

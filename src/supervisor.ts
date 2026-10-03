@@ -217,6 +217,13 @@ export class Supervisor extends EventEmitter {
     return this.konten.schalterSetzen(name, an)
   }
 
+  /** Obergrenzen eines Kontos setzen. false bei unbekanntem Konto. */
+  kontoGrenzeSetzen(name: string, grenze: { fuenf: number | null; woche: number | null }): boolean {
+    if (!this.konten.konto(name)) return false
+    this.konten.grenzeSetzen(name, grenze)
+    return true
+  }
+
   /** Setzt das bevorzugte Konto. null hebt die Bevorzugung auf. */
   bevorzugtesKontoSetzen(name: string | null): boolean {
     if (name !== null && !this.konten.konto(name)) return false
