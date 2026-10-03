@@ -57,5 +57,13 @@ pruefe('SSH: Ziel nutzer@host', b.includes('can@192.168.2.50'))
 // --- Erreichbarkeit ---
 pruefe('Zeitlimit greift (TEST-NET, nie erreichbar)', (await pcErreichbar({ ...k, host: '192.0.2.1' }, 300)) === false)
 
+// --- Studio-MCP ueber SSH (src/mcp.ts) ---
+const { studioServer } = await import('../dist/mcp.js')
+pruefe('Studio: ohne PC kein Server', studioServer({ HOME: '/home/roblox' }) === null)
+const st = studioServer({ COCKPIT_PC_MAC: 'aa:bb:cc:dd:ee:ff', COCKPIT_PC_HOST: '192.168.2.203', COCKPIT_PC_NUTZER: 'buergermiteis', HOME: '/home/roblox' })
+pruefe('Studio: ssh mit eigenem Schluessel, strikter Hostpruefung, Befehl mcp',
+  st?.command === 'ssh' && st.args.includes('/home/roblox/.ssh/pc_studio') && st.args.includes('StrictHostKeyChecking=yes') &&
+  st.args.includes('BatchMode=yes') && st.args.at(-2) === 'buergermiteis@192.168.2.203' && st.args.at(-1) === 'mcp')
+
 console.log(`\n${ok}/${gesamt} bestanden`)
 if (ok !== gesamt) process.exit(1)

@@ -1,6 +1,9 @@
 {
   "name": "Roblox-Cockpit",
-  "bereicheAus": ["terminal", "server"],
+  "bereicheAus": [
+    "terminal",
+    "server"
+  ],
   "sessionSpiegel": false,
   "arbeitsWurzel": "~/spiele",
   "vault": "~/vault",
@@ -9,6 +12,9 @@
   "vorschlaege": [
     "Lass uns ein neues Spiel anfangen. Frag mich erst nach meiner Idee.",
     "Welche Spiele gibt es schon, und wo waren wir stehengeblieben?",
-    "Verbinde das Spiel mit Roblox Studio (Rojo)."
+    "Öffne mein Spiel in Studio und zeig mir ein Bild davon."
+  ],
+  "chatMcp": [
+    "studio"
   ]
 }

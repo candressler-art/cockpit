@@ -48,6 +48,8 @@ export interface Variante {
   vault: string | null
   /** Duerfen die Agenten in den Vault schreiben? Im Haupt-Cockpit nicht -- dort ist er nur ein Spiegel. */
   vaultSchreiben: boolean
+  /** MCP-Server (Namen aus mcp.ts), die auch der Chat selbst bekommt, nicht nur Fachrollen. */
+  chatMcp: string[]
 }
 
 export const HAUPT_VARIANTE: Variante = {
@@ -62,6 +64,7 @@ export const HAUPT_VARIANTE: Variante = {
   vorschlaege: null,
   vault: null,
   vaultSchreiben: false,
+  chatMcp: [],
 }
 
 /**
@@ -117,6 +120,11 @@ export function varianteLaden(angabe: string | undefined, wurzel: string, heim: 
     throw new Error(`Variante ${dir}: vorschlaege muss eine Liste von Texten sein`)
   }
 
+  const chatMcp = j.chatMcp ?? []
+  if (!(Array.isArray(chatMcp) && chatMcp.every((x) => typeof x === 'string' && /^[a-z][a-z0-9-]{0,30}$/.test(x)))) {
+    throw new Error(`Variante ${dir}: chatMcp muss eine Liste von Servernamen sein`)
+  }
+
   const anweisungsDatei = join(dir, 'anweisungen.md')
   const anweisungen = existsSync(anweisungsDatei) ? readFileSync(anweisungsDatei, 'utf-8').trim() || null : null
 
@@ -137,6 +145,7 @@ export function varianteLaden(angabe: string | undefined, wurzel: string, heim: 
     vault,
     // Schreiben nur in einen eigenen Vault -- nie in den Spiegel des Haupt-Cockpits.
     vaultSchreiben: vault !== null && j.vaultSchreiben === true,
+    chatMcp: [...new Set(chatMcp as string[])],
   }
 }
 

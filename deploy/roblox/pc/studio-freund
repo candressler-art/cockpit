@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Erzwungener Befehl fuer den Schluessel pc_studio des Roblox-Cockpits
+# (~/.ssh/authorized_keys: command="…/studio-freund", eingetragen von
+# pc-einrichten.sh). Erlaubt genau eins: die gefilterte Studio-MCP-Bruecke
+# (studio-filter.py) ueber stdin/stdout. Keine Shell, keine Dateien.
+set -u
+case "${SSH_ORIGINAL_COMMAND:-}" in
+  mcp) exec python3 "$HOME/.local/lib/studio-freund/studio-filter.py" ;;
+  *) echo "Dieser Schluessel darf nur die Studio-Bruecke (mcp)." >&2; exit 1 ;;
+esac

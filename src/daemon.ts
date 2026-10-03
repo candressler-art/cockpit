@@ -56,6 +56,8 @@ import {
 import { kontenLesen } from './konten.js'
 import { VARIANTE, bereichAn, cwdInWurzel, varianteFuerOberflaeche } from './variante.js'
 import { pcKonfigLesen, wecken, herunterfahren, pcErreichbar } from './pc.js'
+import { mcpAufloesen } from './mcp.js'
+import { geraeteschutzLesen, geraetErlaubt, absenderAdresse, codePasst, geraeteCookie } from './geraeteschutz.js'
 
 const PORT = Number(process.env.COCKPIT_PORT ?? 8765)
 const HOST = process.env.COCKPIT_HOST ?? '127.0.0.1'
@@ -63,6 +65,8 @@ const DB_PFAD = process.env.COCKPIT_DB ?? join(process.env.HOME ?? '.', '.cockpi
 /** In den Chat gezogene Dateien (anhaenge.ts), neben der DB. */
 const ANHAENGE = process.env.COCKPIT_ANHAENGE ?? join(dirname(DB_PFAD), 'anhaenge')
 const WEB_DIR = pfadAuflösen(import.meta.dirname, '..', 'web')
+/** Adressen, die ein Geraete-Cookie brauchen (geraeteschutz.ts), neben der DB. */
+const GERAETESCHUTZ = process.env.COCKPIT_GERAETESCHUTZ ?? join(dirname(DB_PFAD), 'geraeteschutz.json')
 
 // --- Push ans Handy ------------------------------------------------------------
 // Dieselbe Regel wie im Browser (web/ui/meldungen.js ist DOM-frei), damit Push
@@ -405,6 +409,8 @@ function chatZugStarten(
         liveText: opt.liveText,
         ...(vaultNutzbar() ? { zusatzVerzeichnisse: [VAULT] } : {}),
         systemPromptZusatz: opt.systemPromptZusatz,
+        // Eine Variante kann dem Chat selbst MCP-Server geben (Roblox: Studio).
+        mcpServers: mcpAufloesen(VARIANTE.chatMcp),
         // Vault und Anhaenge nur lesen, das Gedaechtnis (eigenes und das der
         // Spezialisten) lesen und schreiben -- dafuer keine Freigabe. Den
         // eigenen Vault einer Variante (vaultSchreiben) auch beschreiben.
@@ -937,6 +943,24 @@ const server = createServer(async (req, res) => {
     return res.end('ungueltiger Pfad')
   }
   const pfad = url.pathname
+
+  // Geraeteschutz (geraeteschutz.ts): Von Cans PC nur mit Geraete-Cookie, damit
+  // Studio oder Blender dort das Cockpit nicht ohne ihn ansprechen koennen.
+  const schutz = geraeteschutzLesen(GERAETESCHUTZ)
+  if (pfad === '/geraet' && req.method === 'GET') {
+    if (schutz && codePasst(url.searchParams.get('code'), schutz.code)) {
+      res.writeHead(302, { 'set-cookie': geraeteCookie(schutz.code), location: '/', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' })
+      return res.end()
+    }
+    res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' })
+    return res.end('Geraetecode falsch.')
+  }
+  if (!geraetErlaubt(req, schutz)) {
+    if (pfad.startsWith('/api/')) console.warn(`[cockpit] ohne Geraetecode abgewiesen: ${absenderAdresse(req)} ${req.method} ${pfad}`)
+    res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' })
+    return res.end('Dieses Geraet braucht einmal den Link mit dem Geraetecode.')
+  }
+
   const origin = req.headers.origin
   const erlaubt = herkunftErlaubt(origin, req.headers.host)
 
@@ -1632,6 +1656,10 @@ const wss = new WebSocketServer({
   // mitlesen, was die Agenten ausgeben -- Dateiinhalte eingeschlossen. Das ist
   // Cross-Site WebSocket Hijacking, und der Browser verhindert es nicht.
   verifyClient: ({ origin, req }, erlauben) => {
+    if (!geraetErlaubt(req, geraeteschutzLesen(GERAETESCHUTZ))) {
+      console.warn(`[cockpit] WebSocket ohne Geraetecode abgewiesen: ${absenderAdresse(req)}`)
+      return erlauben(false, 403, 'Geraetecode fehlt')
+    }
     if (herkunftErlaubt(origin, req.headers.host)) return erlauben(true)
     console.warn(`[cockpit] WebSocket von fremder Herkunft abgewiesen: ${origin}`)
     erlauben(false, 403, 'Herkunft nicht erlaubt')

@@ -18,8 +18,8 @@ aenderst selbst nichts.
 2. **Systeme** mit ihrer Verantwortung: was laeuft auf dem Server, was auf dem
    Client, welche RemoteEvents es gibt und was jedes prueft.
 3. **Daten**: was gespeichert wird (DataStore-Schluessel, Struktur, Version).
-4. **Rojo-Aufbau**: welche Dateien unter src/server, src/client, src/shared,
-   welche Eintraege in default.project.json.
+4. **Aufbau in Studio**: welche Skripte und ModuleScripts wohin
+   (ServerScriptService, StarterPlayerScripts, ReplicatedStorage, StarterGui).
 5. **Reihenfolge** in kleinen Schritten, jeder fuer sich in Studio testbar,
    mit dem Test, der zeigt, dass der Schritt steht.
 6. **Was Studio braucht**: Map, Modelle, Terrain -- was die Nutzer von Hand

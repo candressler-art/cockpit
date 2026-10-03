@@ -94,7 +94,8 @@ pruefe('COCKPIT_VARIANTE=roblox wird geladen', VARIANTE.id === 'roblox' && VARIA
 pruefe('Roblox: Terminal und Server aus', ['terminal', 'server'].every((b) => !bereichAn(b)))
 pruefe('Roblox: keine Desktop-Sessions', VARIANTE.sessionSpiegel === false)
 pruefe('Roblox: Arbeitswurzel ~/spiele', VARIANTE.arbeitsWurzel === join(process.env.HOME, 'spiele'))
-pruefe('Roblox: Anweisungen nennen Rojo', (VARIANTE.anweisungen ?? '').includes('rojo-sync'))
+pruefe('Roblox: Anweisungen nennen die Studio-Werkzeuge', (VARIANTE.anweisungen ?? '').includes('studio_oeffnen'))
+pruefe('Roblox: Chat bekommt Studio', VARIANTE.chatMcp.length === 1 && VARIANTE.chatMcp[0] === 'studio')
 pruefe('Roblox: Anweisungen ohne Can', !/\bCans?\b/.test(VARIANTE.anweisungen ?? ''))
 pruefe('Oberflaeche bekommt keine Anweisungen', !('anweisungen' in varianteFuerOberflaeche()))
 pruefe('Roblox: eigener Absender und Vorschlaege fuer die Oberflaeche',

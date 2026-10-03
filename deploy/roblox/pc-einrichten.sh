@@ -7,14 +7,17 @@
 # Was danach geht:
 #   - Aufwecken (Wake-on-LAN) und Herunterfahren aus dem Roblox-Cockpit,
 #     fuer dich und deinen Freund (Bereich "PC"),
+#   - Roblox Studio aus dem Cockpit steuern (nur freigegebene Spiele, Filter
+#     studio-filter.py; Freigabe in ~/.config/studio-freund/orte.json),
 #   - Blender live aus dem Cockpit steuern (3D-Modellierer, blender-mcp),
 #   - der Roblox-Vault als Ordner ~/Roblox-Vault (Obsidian, Modelle fuer Studio).
 #
-# Der Server bekommt KEINEN normalen Zugang zu diesem PC. Seine zwei
+# Der Server bekommt KEINEN normalen Zugang zu diesem PC. Seine drei
 # Schluessel stehen hier in ~/.ssh/authorized_keys mit Einschraenkungen:
 #   pc_aus      darf nur "sudo systemctl poweroff" ausloesen, sonst nichts,
-#   pc_blender  darf nur eine Weiterleitung auf 127.0.0.1:9876 (Blender), keine Shell.
-# Beide nur vom Server aus (from=...). Rueckgaengig: die zwei Zeilen mit
+#   pc_blender  darf nur eine Weiterleitung auf 127.0.0.1:9876 (Blender), keine Shell,
+#   pc_studio   darf nur die gefilterte Studio-Bruecke (studio-freund mcp), keine Shell.
+# Alle nur vom Server aus (from=...). Rueckgaengig: die drei Zeilen mit
 # "cockpit-roblox-" aus ~/.ssh/authorized_keys loeschen und
 # /etc/sudoers.d/cockpit-pc-aus entfernen.
 #
@@ -102,13 +105,21 @@ if sudo sshd -T 2>/dev/null | grep -qi '^passwordauthentication yes'; then
 fi
 
 # --- 4. Schluessel des Servers mit Einschraenkung ------------------------------------
-schritt "4/6  Zugang fuer den Server (nur Herunterfahren und Blender-Tunnel)"
+schritt "4/6  Zugang fuer den Server (nur Herunterfahren, Blender-Tunnel, gefiltertes Studio)"
 PUB_AUS=$("${SSH[@]}" 'sudo cat /home/roblox/.ssh/pc_aus.pub' 2>/dev/null)
 PUB_BLENDER=$("${SSH[@]}" 'sudo cat /home/roblox/.ssh/pc_blender.pub' 2>/dev/null)
-if [ -z "$PUB_AUS" ] || [ -z "$PUB_BLENDER" ]; then
+PUB_STUDIO=$("${SSH[@]}" 'sudo cat /home/roblox/.ssh/pc_studio.pub' 2>/dev/null)
+if [ -z "$PUB_AUS" ] || [ -z "$PUB_BLENDER" ] || [ -z "$PUB_STUDIO" ]; then
   fehlt "Schluessel des Servers nicht lesbar"; exit 1
 fi
 SYSTEMCTL=$(command -v systemctl)
+# Studio-Filter: erzwungener Befehl und Bruecke, Freigabeliste (bleibt, wenn schon da).
+HIER=$(cd "$(dirname "$0")" && pwd)
+install -d "$HOME/.local/bin" "$HOME/.local/lib/studio-freund" "$HOME/.config/studio-freund"
+install -m 755 "$HIER/pc/studio-freund" "$HOME/.local/bin/studio-freund"
+install -m 644 "$HIER/pc/studio-filter.py" "$HOME/.local/lib/studio-freund/studio-filter.py"
+[ -f "$HOME/.config/studio-freund/orte.json" ] || echo '{"orte": []}' > "$HOME/.config/studio-freund/orte.json"
+ok "Studio-Filter installiert (Freigaben: ~/.config/studio-freund/orte.json)"
 install -d -m 700 "$HOME/.ssh"
 touch "$HOME/.ssh/authorized_keys" && chmod 600 "$HOME/.ssh/authorized_keys"
 # Alte Eintraege dieses Skripts ersetzen, nichts anderes anfassen.
@@ -116,10 +127,11 @@ grep -v 'cockpit-roblox-pc_' "$HOME/.ssh/authorized_keys" > "$HOME/.ssh/authoriz
 {
   echo "from=\"$SERVER\",restrict,command=\"sudo -n $SYSTEMCTL poweroff\" $PUB_AUS"
   echo "from=\"$SERVER\",restrict,port-forwarding,permitopen=\"127.0.0.1:9876\",command=\"echo nur Tunnel\" $PUB_BLENDER"
+  echo "from=\"$SERVER\",restrict,command=\"$HOME/.local/bin/studio-freund\" $PUB_STUDIO"
 } >> "$HOME/.ssh/authorized_keys.neu"
 mv "$HOME/.ssh/authorized_keys.neu" "$HOME/.ssh/authorized_keys"
 chmod 600 "$HOME/.ssh/authorized_keys"
-ok "zwei eingeschraenkte Schluessel eingetragen (nur von $SERVER)"
+ok "drei eingeschraenkte Schluessel eingetragen (nur von $SERVER)"
 SUDOERS=$(mktemp)
 echo "$USER ALL=(root) NOPASSWD: $SYSTEMCTL poweroff" > "$SUDOERS"
 if sudo visudo -cf "$SUDOERS" >/dev/null && sudo install -m 440 -o root -g root "$SUDOERS" /etc/sudoers.d/cockpit-pc-aus; then
@@ -142,6 +154,11 @@ if "${SSH[@]}" "sudo -u roblox ssh -i /home/roblox/.ssh/pc_blender -o BatchMode=
   fehlt "Blender-Schluessel kann Befehle ausfuehren -- Einschraenkung greift nicht"
 else
   ok "Gegenprobe: Blender-Schluessel fuehrt keine Befehle aus"
+fi
+if "${SSH[@]}" "sudo -u roblox ssh -i /home/roblox/.ssh/pc_studio -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/home/roblox/.ssh/known_hosts_pc $USER@$PC_IP id" 2>/dev/null | grep -q 'uid='; then
+  fehlt "Studio-Schluessel kann Befehle ausfuehren -- Einschraenkung greift nicht"
+else
+  ok "Gegenprobe: Studio-Schluessel fuehrt keine Befehle aus"
 fi
 
 # --- 5. Blender ---------------------------------------------------------------------------

@@ -241,7 +241,45 @@ Er nimmt dann in Syncthing das Gerät „servertwo-roblox“ und den Ordner
 „Roblox-Vault“ an. Die Verbindung läuft über die Syncthing-Relays, verschlüsselt,
 ohne Heimnetz oder Tailnet.
 
-## 5. Roblox Studio verbinden (Rojo)
+## Studio auf deinem PC (so arbeitet ihr standardmäßig)
+
+Dein Freund gibt im Roblox-Cockpit nur Anweisungen; gebaut wird in Roblox
+Studio auf **deinem PC**, parallel zu deinem Autopilot. Claude steuert Studio
+über die Studio-MCP-Brücke, die über den Schlüssel `pc_studio` läuft. Auf dem
+PC darf dieser Schlüssel nur `~/.local/bin/studio-freund` starten, und dahinter
+filtert `studio-filter.py`:
+
+- Claude sieht nur Studios mit **freigegebener placeId**, nie Steal a Robot.
+- Gesperrt sind `upload_image`, `store_image` (Dateien auf dem PC) und `http_get`
+  (beliebige Adressen im Heimnetz).
+- Neu ist `studio_oeffnen`: Damit öffnet Claude ein freigegebenes Spiel in einem
+  zweiten Studio.
+
+**Spiel freigeben:** Das Spiel gehört einer Roblox-Gruppe, in der ihr beide seid.
+Lege es in Studio an (Datei → Veröffentlichen, Besitzer: die Gruppe) und schalte
+unter Spieleinstellungen → Berechtigungen **Team Create** ein. Dann speichert
+Roblox jede Änderung von Claude selbst. Danach auf dem PC in
+`~/.config/studio-freund/orte.json` eintragen:
+
+```json
+{"orte": [{"name": "Spielname", "placeId": 123, "universeId": 456}]}
+```
+
+Die IDs zeigt Studio unter Datei → Spieleinstellungen → Sonstiges. Die Datei
+liest der Filter bei jedem Aufruf neu, ein Neustart ist nicht nötig.
+
+**Autopilot:** `mcp-probe.py`, `mcp-bild.py` und `rahmen.md` nehmen nur das
+Studio, dessen Name auf „(placeId: 94507865592921)“ endet. Startet der
+Autopilot Studio neu, schließt `pkill` auch das zweite Studio, und Claude
+öffnet es danach mit `studio_oeffnen` wieder.
+
+**Haupt-Cockpit:** Luau in Studio und Python in Blender könnten sonst per HTTP
+dein Haupt-Cockpit ansprechen, das keine Anmeldung hat. Deshalb verlangt es von
+den Adressen deines PCs ein Geräte-Cookie (`src/geraeteschutz.ts`, Datei
+`/var/lib/cockpit/geraeteschutz.json`). Dein Browser auf dem PC bekommt es
+einmal über `https://servertwo.tail9c8a2b.ts.net:8443/geraet?code=<code>`.
+
+## 5. Eigenes Studio verbinden (Rojo, nur wenn jemand Studio selbst hat)
 
 Einmalig je PC:
 

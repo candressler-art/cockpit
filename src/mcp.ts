@@ -5,6 +5,8 @@
 // Browser umziehen oder abschalten, ohne vier Markdown-Dateien anzufassen.
 
 import type { McpServerConfig } from '@anthropic-ai/claude-agent-sdk'
+import { join } from 'node:path'
+import { pcKonfigLesen } from './pc.js'
 
 export type McpKatalog = Record<string, McpServerConfig>
 
@@ -53,6 +55,40 @@ const KATALOG: McpKatalog = {
 }
 
 /**
+ * Roblox Studio auf dem PC, fuer das Roblox-Cockpit. Nur wenn ein PC
+ * eingetragen ist (pc-einrichten.sh schreibt COCKPIT_PC_HOST/_NUTZER). Der
+ * Schluessel pc_studio darf auf dem PC nur den erzwungenen Befehl
+ * studio-freund, und der laesst nur die gefilterte Bruecke laufen
+ * (deploy/roblox/pc/studio-filter.py: nur freigegebene Spiele, keine
+ * Datei- oder Netzwerkzeuge).
+ */
+export function studioServer(env: NodeJS.ProcessEnv = process.env): McpServerConfig | null {
+  const pc = pcKonfigLesen(env)
+  if (!pc) return null
+  const ssh = join(env.HOME ?? '.', '.ssh')
+  return {
+    type: 'stdio',
+    command: 'ssh',
+    args: [
+      '-i', join(ssh, 'pc_studio'),
+      '-o', 'IdentitiesOnly=yes',
+      '-o', 'BatchMode=yes',
+      '-o', 'StrictHostKeyChecking=yes',
+      '-o', `UserKnownHostsFile=${join(ssh, 'known_hosts_pc')}`,
+      '-o', 'ConnectTimeout=10',
+      '-o', 'ServerAliveInterval=30',
+      `${pc.nutzer}@${pc.host}`,
+      'mcp',
+    ],
+  }
+}
+
+function katalog(): McpKatalog {
+  const studio = studioServer()
+  return studio ? { ...KATALOG, studio } : KATALOG
+}
+
+/**
  * Loest die Namen einer Fachrolle in Serveradressen auf.
  *
  * Unbekannte Namen werden gemeldet und weggelassen, nicht geraten: ein
@@ -62,8 +98,9 @@ const KATALOG: McpKatalog = {
 export function mcpAufloesen(namen: string[] | null | undefined): McpKatalog {
   if (!namen?.length) return {}
   const r: McpKatalog = {}
+  const k = katalog()
   for (const n of namen) {
-    const s = KATALOG[n]
+    const s = k[n]
     if (!s) {
       console.warn(`[mcp] Rolle nennt unbekannten Server '${n}' -- wird ausgelassen`)
       continue
@@ -73,4 +110,4 @@ export function mcpAufloesen(namen: string[] | null | undefined): McpKatalog {
   return r
 }
 
-export const mcpNamen = () => Object.keys(KATALOG)
+export const mcpNamen = () => Object.keys(katalog())

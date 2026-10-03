@@ -216,8 +216,8 @@ else
 fi
 # Zwei Schluessel, je fuer genau eine Sache auf dem PC (pc-einrichten.sh traegt
 # sie dort mit Einschraenkung ein): pc_aus faehrt herunter, pc_blender tunnelt.
-if "${SSH[@]}" "$ALS_ROBLOX bash -c 'install -d -m 700 ~/.ssh && for k in pc_aus pc_blender; do [ -f ~/.ssh/\$k ] || ssh-keygen -q -t ed25519 -N \"\" -C cockpit-roblox-\$k -f ~/.ssh/\$k || exit 1; done'"; then
-  ok "Schluessel fuer den PC bereit (~roblox/.ssh/pc_aus, pc_blender)"
+if "${SSH[@]}" "$ALS_ROBLOX bash -c 'install -d -m 700 ~/.ssh && for k in pc_aus pc_blender pc_studio; do [ -f ~/.ssh/\$k ] || ssh-keygen -q -t ed25519 -N \"\" -C cockpit-roblox-\$k -f ~/.ssh/\$k || exit 1; done'"; then
+  ok "Schluessel fuer den PC bereit (~roblox/.ssh/pc_aus, pc_blender, pc_studio)"
 else
   fehlt "Schluessel fuer den PC nicht erzeugt"
 fi
