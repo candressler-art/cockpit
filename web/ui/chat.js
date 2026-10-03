@@ -21,6 +21,7 @@ import { AKZENTE, akzentLesen, akzentSetzen } from '../akzent.js'
 import { anhaengeTrennen, mitAnhaengen, istBild } from './anhangtext.js'
 import { freigabeKarteBauen, freigabeNormalisieren } from './freigabekarten.js'
 import { vorschauBauen } from './vorschau.js'
+import { variante } from '../variante.js'
 
 const ENDZUSTAENDE = new Set(['done', 'failed', 'stopped', 'waiting_ratelimit'])
 const AUFWAND_TEXT = { low: 'niedrig', medium: 'mittel', high: 'hoch', xhigh: 'sehr hoch', max: 'maximal' }
@@ -438,13 +439,13 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
     if (!id) {
       leeren(titelEl, 'Neuer Chat')
       leeren(metaEl)
-      document.title = 'Cockpit'
+      document.title = document.documentElement.dataset.appName || 'Cockpit'
       beiTitel?.('Neuer Chat')
       return
     }
     const titel = kopf?.titel || 'Chat'
     leeren(titelEl, titel)
-    document.title = `${titel} – Cockpit`
+    document.title = `${titel} – ${document.documentElement.dataset.appName || 'Cockpit'}`
     beiTitel?.(titel)
     const teile = []
     const cwd = kopf?.fortsetzung?.cwd ?? kopf?.zielCwd ?? kopf?.cwd
@@ -459,7 +460,7 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
   }
 
   function willkommen() {
-    const vorschlaege = [
+    const vorschlaege = variante.vorschlaege ?? [
       'Was hat sich heute auf den Servern getan?',
       'Erklär mir den Aufbau dieses Projekts.',
       'Plane mir ein neues Feature, bevor du etwas änderst.',
@@ -481,7 +482,7 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
       h('div.willkommen-titel', {}, 'Womit fangen wir an?'),
       h('div.fetch', {},
         logoBauen(),
-        h('div.fetch-kopf', {}, 'can', h('span', {}, '@'), 'cockpit'),
+        h('div.fetch-kopf', {}, variante.nutzer, h('span', {}, '@'), variante.id === 'haupt' ? 'cockpit' : variante.id),
         zeilen, farben),
       h('div.vorschlaege', {}, vorschlaege.map((v) =>
         h('button.vorschlag', { type: 'button', onclick: () => { eingabe.textSetzen(v); eingabe.fokus() } }, v))))
@@ -620,7 +621,7 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
     return h('div.nutzer', {},
       h('div.prompt-zeile', {},
         h('span.prompt-pfeil', { 'aria-hidden': 'true' }, symbol('pfeil', 13)),
-        h('span.prompt-wer', {}, 'can'),
+        h('span.prompt-wer', {}, variante.nutzer),
         ort ? h('span.prompt-ort', {}, pfadKurz(ort)) : null,
         n.ts ? h('span.prompt-zeit', {}, uhrzeit(n.ts)) : null),
       h('div.blase', { title: uhrzeit(n.ts) }, text,

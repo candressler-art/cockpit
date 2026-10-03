@@ -32,7 +32,7 @@ import { AufgabenSammler, AUFGABEN_FENSTER_MS, agentAusZeile } from './aufgaben.
 import { vaultDa, VAULT } from './vault.js'
 import { notizenLaden, notizenSuchen, notizLesen } from './notizen.js'
 import { vaultZugriffErlaubt } from './vaultZugriff.js'
-import { gedaechtnisOrdnerAnlegen, gedaechtnisWurzel, gedaechtnisZugriffErlaubt } from './gedaechtnis.js'
+import { gedaechtnisOrdnerAnlegen, gedaechtnisWurzel, gedaechtnisZugriffErlaubt, ordnerZugriffErlaubt } from './gedaechtnis.js'
 import { anhangSpeichern, anhaengePruefen, promptMitAnhaengen, alteAnhaengeLoeschen, MAX_ANHANG_BYTES } from './anhaenge.js'
 import { konsoleBefehl, verlaufAufnehmen, type KonsoleEintrag } from './konsole.js'
 import { cwdPruefen, folgenLesen, zahlLesen } from './eingaben.js'
@@ -42,7 +42,7 @@ import { ChatZuege } from './chatZuege.js'
 import { nachliefern, senden as klientSenden, type Klient } from './nachlieferung.js'
 import { ereignisAufbereiten } from './nachrichten.js'
 import { auftraegeTrennen } from './protokoll.js'
-import { existsSync } from 'node:fs'
+import { existsSync, mkdirSync } from 'node:fs'
 import { htmlDateienAusEreignissen, wurzelKodieren, wurzelDekodieren, wurzelErlaubt, vorschauDateiFinden, helferEinbauen } from './vorschau.js'
 import { pathToFileURL } from 'node:url'
 import { pushStarten, pushSenden, pushSchluessel, aboGueltig, aboSpeichern, aboLoeschen, aboAnzahl, type Meldung } from './push.js'
@@ -54,6 +54,8 @@ import {
   rueckblickGruppieren, nutzungGesamt, type SitzungsArt,
 } from './nutzung.js'
 import { kontenLesen } from './konten.js'
+import { VARIANTE, bereichAn, cwdInWurzel, varianteFuerOberflaeche } from './variante.js'
+import { pcKonfigLesen, wecken, herunterfahren, pcErreichbar } from './pc.js'
 
 const PORT = Number(process.env.COCKPIT_PORT ?? 8765)
 const HOST = process.env.COCKPIT_HOST ?? '127.0.0.1'
@@ -79,8 +81,30 @@ const db = new CockpitDb(DB_PFAD)
 const verwaist = db.verwaisteLaeufeAufraeumen()
 if (verwaist > 0) console.log(`[cockpit] ${verwaist} verwaiste Lauf/Laeufe als abgebrochen markiert`)
 
+// Variante (src/variante.ts): ohne COCKPIT_VARIANTE das Haupt-Cockpit wie bisher.
+if (VARIANTE.id !== 'haupt') {
+  console.log(`[cockpit] Variante '${VARIANTE.id}' (${VARIANTE.name})` +
+    (VARIANTE.bereicheAus.length ? `, aus: ${VARIANTE.bereicheAus.join(', ')}` : '') +
+    (VARIANTE.arbeitsWurzel ? `, Arbeitswurzel ${VARIANTE.arbeitsWurzel}` : ''))
+}
+if (VARIANTE.arbeitsWurzel) mkdirSync(VARIANTE.arbeitsWurzel, { recursive: true })
+if (VARIANTE.vault) mkdirSync(VARIANTE.vault, { recursive: true })
+/**
+ * Vault nur, wenn der Bereich Notizen zu dieser Variante gehoert UND er da ist.
+ * Eine Variante bekommt nur ihren eigenen Vault, nie den Spiegel des Haupt-Cockpits.
+ */
+const vaultNutzbar = (): boolean =>
+  bereichAn('notizen') && (VARIANTE.id === 'haupt' || VARIANTE.vault !== null) && existsSync(VAULT)
+/** Wohin ein Chat ohne eigenes (vorhandenes) Arbeitsverzeichnis faellt. */
+const ERSATZ_CWD = VARIANTE.arbeitsWurzel ?? process.env.HOME ?? '/opt/cockpit'
+
+/** PC im Heimnetz (src/pc.ts) -- null, wenn nicht eingerichtet. */
+const PC = pcKonfigLesen()
+/** Wann zuletzt geweckt bzw. heruntergefahren wurde -- gegen Doppelklicks von zwei Leuten. */
+let pcZuletzt = 0
+
 const supervisor = new Supervisor(db)
-const einstellungen = new EinstellungsSpeicher(db, homedir())
+const einstellungen = new EinstellungsSpeicher(db, VARIANTE.arbeitsWurzel ?? homedir())
 const orchestratoren = new Map<string, Orchestrator>()
 
 /**
@@ -379,12 +403,14 @@ function chatZugStarten(
         settingSources: opt.settingSources,
         agents: opt.agents,
         liveText: opt.liveText,
-        ...(existsSync(VAULT) ? { zusatzVerzeichnisse: [VAULT] } : {}),
+        ...(vaultNutzbar() ? { zusatzVerzeichnisse: [VAULT] } : {}),
         systemPromptZusatz: opt.systemPromptZusatz,
         // Vault und Anhaenge nur lesen, das Gedaechtnis (eigenes und das der
-        // Spezialisten) lesen und schreiben -- dafuer keine Freigabe.
+        // Spezialisten) lesen und schreiben -- dafuer keine Freigabe. Den
+        // eigenen Vault einer Variante (vaultSchreiben) auch beschreiben.
         autoErlauben: (toolName, input) =>
-          vaultZugriffErlaubt(toolName, input, VAULT) || vaultZugriffErlaubt(toolName, input, ANHAENGE) ||
+          (vaultNutzbar() && vaultZugriffErlaubt(toolName, input, VAULT)) || vaultZugriffErlaubt(toolName, input, ANHAENGE) ||
+          (vaultNutzbar() && VARIANTE.vaultSchreiben && ordnerZugriffErlaubt(toolName, input, VAULT)) ||
           gedaechtnisZugriffErlaubt(toolName, input),
       })
       const neueSession = supervisor.agentenListe(f.laufId).find((a) => a.agentId === 'chat')?.sessionId
@@ -430,9 +456,11 @@ async function chatWeiterStarten(id: string, holen: () => WeiterNachricht | null
   // Zuordnung aus chat_fortsetzung.
   const kopf = chatKopfLesen(DB_PFAD, id)
   const f = kopf
-    ? await fortsetzungVorbereiten(DB_PFAD, id, process.env.HOME ?? '/opt/cockpit')
+    ? await fortsetzungVorbereiten(DB_PFAD, id, ERSATZ_CWD)
     : fortsetzungLesen(DB_PFAD, id)
   if (!f) return { status: 404, fehler: 'Sitzung unbekannt' }
+  const ausserhalb = cwdInWurzel(f.cwd)
+  if (ausserhalb) return { status: 403, fehler: ausserhalb }
   // Ab hier synchron bis chatZugStarten: zwei gleichzeitige Anfragen kommen
   // beide am await oben vorbei, aber nur eine hierueber.
   if (faehrtHerunter) return { status: 503, fehler: 'Das Cockpit startet gerade neu' }
@@ -520,7 +548,7 @@ async function vorschauDateien(laufId: string): Promise<{ pfad: string; name: st
 function chatOptionen(k: Record<string, unknown> | null): { fehler: string } | { optionen: ChatOptionen } {
   const e = einstellungen.lesen()
   return chatOptionenBauen(
-    e, k, () => agentDefinitionen(e.rollenAus), existsSync(VAULT) ? VAULT : null, gedaechtnisWurzel(),
+    e, k, () => agentDefinitionen(e.rollenAus), vaultNutzbar() ? VAULT : null, gedaechtnisWurzel(), VARIANTE.anweisungen,
   )
 }
 
@@ -571,8 +599,11 @@ async function systemPuls(): Promise<void> {
 // Erster Aufruf sofort, damit die CPU-Differenz eine Grundlage hat: der Wert
 // beim allerersten Lesen ist immer null, weil eine Differenz zwei Messungen
 // braucht.
-void systemPuls()
-setInterval(() => void systemPuls(), 20_000).unref()
+// Ohne Bereich Server (Variante) wird gar nicht erst gemessen.
+if (bereichAn('server')) {
+  void systemPuls()
+  setInterval(() => void systemPuls(), 20_000).unref()
+}
 
 // --- Nutzungsstand je Konto, verbrauchsfrei ----------------------------------
 //
@@ -975,6 +1006,8 @@ const server = createServer(async (req, res) => {
       }
       const schlecht = cwdPruefen(cwd)
       if (schlecht) return json(400, { fehler: schlecht })
+      const ausserhalb = cwdInWurzel(cwd)
+      if (ausserhalb) return json(403, { fehler: ausserhalb })
       const maxRunden = zahlLesen(k?.maxRunden, 'maxRunden', { min: 1, ganzzahlig: true })
       const parallelitaet = zahlLesen(k?.parallelitaet, 'parallelitaet', { min: 1, ganzzahlig: true })
       const maxBudgetUsd = zahlLesen(k?.maxBudgetUsd, 'maxBudgetUsd', { min: 0 })
@@ -1058,6 +1091,38 @@ const server = createServer(async (req, res) => {
       if (ok && agentId === 'chat' && runId.startsWith('chat-')) angehaltenAm.set(runId.slice('chat-'.length), Date.now())
       return json(ok ? 200 : 404, { ok })
     }
+
+    if (pfad === '/api/variante' && req.method === 'GET') {
+      return json(200, { ...varianteFuerOberflaeche(), pc: PC !== null })
+    }
+
+    // --- PC wecken / herunterfahren (src/pc.ts) ---
+    if (pfad.startsWith('/api/pc')) {
+      if (!PC) return json(404, { fehler: 'Kein PC eingerichtet' })
+      if (pfad === '/api/pc' && req.method === 'GET') {
+        return json(200, { an: await pcErreichbar(PC), host: PC.host })
+      }
+      const aktion = pfad === '/api/pc/wecken' ? 'wecken' : pfad === '/api/pc/aus' ? 'aus' : null
+      if (!aktion || req.method !== 'POST') return json(404, { fehler: 'nicht gefunden' })
+      if (Date.now() - pcZuletzt < 20_000) return json(429, { fehler: 'Eben erst geschaltet -- kurz warten' })
+      pcZuletzt = Date.now()
+      if (aktion === 'wecken') {
+        await wecken(PC)
+      } else {
+        const r = await herunterfahren(PC)
+        if (!r.ok) { pcZuletzt = 0; return json(502, { fehler: r.meldung }) }
+      }
+      console.log(`[pc] ${aktion === 'wecken' ? 'Geweckt' : 'Heruntergefahren'}: ${PC.host}`)
+      verteilen('pc', { aktion })
+      melden('pc', { aktion })
+      return json(200, { ok: true })
+    }
+
+    // Bereiche, die die Variante abschaltet, gibt es auch in der API nicht --
+    // ausblenden in der Oberflaeche allein waere keine Sperre.
+    if (pfad.startsWith('/api/konsole') && !bereichAn('terminal')) return json(404, { fehler: 'Terminal gibt es in diesem Cockpit nicht' })
+    if (pfad.startsWith('/api/notizen') && !bereichAn('notizen')) return json(404, { fehler: 'Notizen gibt es in diesem Cockpit nicht' })
+    if (pfad === '/api/system' && !bereichAn('server')) return json(404, { fehler: 'Serveransicht gibt es in diesem Cockpit nicht' })
 
     if (pfad === '/api/konsole' && req.method === 'POST') {
       const k = (await koerperLesen(req)) as Record<string, unknown> | null
@@ -1203,6 +1268,8 @@ const server = createServer(async (req, res) => {
       const schlecht = cwdPruefen(cwd)
       if (schlecht) return json(400, { fehler: schlecht })
       if (!existsSync(cwd)) return json(400, { fehler: `Ordner gibt es nicht: ${cwd}` })
+      const ausserhalb = cwdInWurzel(cwd)
+      if (ausserhalb) return json(403, { fehler: ausserhalb })
       const opt = chatOptionen(k)
       if ('fehler' in opt) return json(400, { fehler: opt.fehler })
 
@@ -1244,7 +1311,8 @@ const server = createServer(async (req, res) => {
       // der erste Zug lief (fortsetzungVorbereiten), und darf sich hinterher
       // nicht mehr aendern. Sonst zeigte der Kopf ein anderes Verzeichnis an
       // als das, in dem tatsaechlich weitergeschrieben wird.
-      const zielCwd = bestehend?.cwd ?? (hierVorhanden ? (d.kopf.cwd as string) : (process.env.HOME ?? '/opt/cockpit'))
+      const zielCwd = bestehend?.cwd ??
+        (hierVorhanden && !cwdInWurzel(d.kopf.cwd as string) ? (d.kopf.cwd as string) : ERSATZ_CWD)
       const laufId = bestehend?.laufId ?? `chat-${id}`
       return json(200, {
         ...d,
@@ -1348,15 +1416,19 @@ const server = createServer(async (req, res) => {
       // kommen immer mit -- die Ordnerwahl braucht alle drei auf einmal, und
       // verschwundene Ordner sollen dort gar nicht erst auftauchen.
       const w = einstellungen.lesen()
+      const gewuenscht = url.searchParams.get('pfad') || w.arbeitsordner
+      // Variante mit Arbeitswurzel: nichts ausserhalb zeigen, auch keine
+      // Favoriten oder zuletzt benutzten Ordner von dort.
+      const imRahmen = (f: string): boolean => existsSync(f) && !cwdInWurzel(f)
+      if (cwdInWurzel(gewuenscht)) return json(403, { fehler: cwdInWurzel(gewuenscht) })
       try {
-        const liste = await ordnerAuflisten(
-          url.searchParams.get('pfad') || w.arbeitsordner,
-          url.searchParams.get('versteckte') === '1',
-        )
+        const liste = await ordnerAuflisten(gewuenscht, url.searchParams.get('versteckte') === '1')
         return json(200, {
           ...liste,
-          favoriten: w.favoriten.filter((f) => existsSync(f)),
-          zuletzt: zuletztBenutzteOrdner(DB_PFAD, 12).filter((f) => existsSync(f)).slice(0, 8),
+          // An der Arbeitswurzel geht es nicht weiter nach oben.
+          eltern: liste.eltern && !cwdInWurzel(liste.eltern) ? liste.eltern : null,
+          favoriten: w.favoriten.filter(imRahmen),
+          zuletzt: zuletztBenutzteOrdner(DB_PFAD, 12).filter(imRahmen).slice(0, 8),
         })
       } catch (e) {
         if (e instanceof OrdnerFehler) return json(e.status, { fehler: e.message })
@@ -1440,6 +1512,16 @@ const server = createServer(async (req, res) => {
       return json(200, { ...supervisor.kontenUebersicht(), ...guthabenUebersicht() })
     }
 
+    if (pfad === '/api/konten/schalter' && req.method === 'POST') {
+      // Schalter "im Cockpit nutzen" (konten.ts kontoAktiv), z.B. fuer ein
+      // geteiltes Konto, das sonst aus ist.
+      const k = (await koerperLesen(req)) as Record<string, unknown> | null
+      const name = textFeld(k, 'name') ?? ''
+      if (typeof k?.an !== 'boolean') return json(400, { fehler: 'an muss true oder false sein' })
+      const ok = supervisor.kontoSchalterSetzen(name, k.an)
+      return json(ok ? 200 : 404, { ok, ...supervisor.kontenUebersicht() })
+    }
+
     if (pfad === '/api/konten' && req.method === 'POST') {
       const k = (await koerperLesen(req)) as Record<string, unknown> | null
       // Leerstring oder fehlendes Feld heben die Bevorzugung auf.
@@ -1501,7 +1583,12 @@ const server = createServer(async (req, res) => {
       res.writeHead(403)
       return res.end('verboten')
     }
-    const inhalt = await readFile(ziel)
+    let inhalt = await readFile(ziel)
+    // Eine Variante soll als eigene App mit eigenem Namen auf dem Handy landen.
+    if (datei === 'manifest.webmanifest' && VARIANTE.id !== 'haupt') {
+      const m = JSON.parse(inhalt.toString('utf8')) as Record<string, unknown>
+      inhalt = Buffer.from(JSON.stringify({ ...m, name: VARIANTE.name, short_name: VARIANTE.name }))
+    }
     // Der Service Worker ist die eine Ausnahme vom no-store unten: manche
     // Browser lehnen die Registrierung ab, wenn das Skript mit no-store
     // ausgeliefert wird, und melden das nur als "unknown error". Eine Minute

@@ -39,6 +39,12 @@ export function meldungFuer(typ, d, { titelVon }) {
     return { titel, text, ziel: chat ? `#/chat/${chat}` : '#/aufgaben', tag: `freigabe-${d.id ?? werkzeug}` }
   }
 
+  if (typ === 'pc') {
+    // Zwei Leute teilen sich den Knopf -- der andere soll es mitbekommen.
+    const an = d.aktion === 'wecken'
+    return { titel: an ? 'PC wird geweckt' : 'PC fährt herunter', text: an ? 'Gleich bereit für Studio und Blender.' : 'Aus dem Cockpit ausgeschaltet.', ziel: '#/pc', tag: 'pc' }
+  }
+
   if (typ === 'lauf_ende') {
     const grund = d.ende?.grund ?? 'beendet'
     if (grund === 'entscheidung') {

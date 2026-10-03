@@ -25,7 +25,9 @@ import { aufgabenBauen } from './ui/aufgaben.js'
 import { serverBauen } from './ui/server.js'
 import { notizenBauen } from './ui/notizen.js'
 import { terminalBauen } from './ui/terminal.js'
+import { pcBauen } from './ui/pc.js'
 import { wallpaperSetzen } from './wallpaper.js'
+import { variante } from './variante.js'
 
 // Wallpaper zuerst: es liegt hinter den durchsichtigen Kacheln.
 wallpaperSetzen()
@@ -34,6 +36,19 @@ addEventListener('akzent-geaendert', (e) => wallpaperSetzen(e.detail))
 await bus.basisErmitteln()
 // Die Stimmstufe ist je Geraet (localStorage) -- vor der ersten Meldung lesen.
 stimme.stufeLaden()
+
+// Variante (src/variante.ts): welche Bereiche es in DIESEM Cockpit gibt und
+// wie es heisst. Antwortet ein aelterer Daemon nicht darauf, ist es das
+// Haupt-Cockpit mit allem.
+Object.assign(variante, await api('/api/variante').catch(() => ({})))
+if (variante.id !== 'haupt') {
+  // Fuer die Fenstertitel in chat.js und benachrichtigen.js.
+  document.documentElement.dataset.appName = variante.name
+  document.title = variante.name
+  document.querySelector('.marke-logo span').textContent = variante.name.toLowerCase()
+  document.querySelector('.marke-logo').setAttribute('aria-label', `${variante.name} – neuer Chat`)
+  document.getElementById('handyTitel').textContent = variante.name
+}
 
 // --- Bereiche -----------------------------------------------------------------
 // bauen() erst beim ersten Anzeigen: ein Bereich, den niemand oeffnet, kostet
@@ -45,8 +60,10 @@ const BEREICHE = [
   { id: 'server', titel: 'Server', symbol: 'server', bauen: serverBauen },
   { id: 'notizen', titel: 'Notizen', symbol: 'notizen', bauen: notizenBauen },
   { id: 'terminal', titel: 'Terminal', symbol: 'terminal', bauen: terminalBauen },
+  // Nur, wenn der Daemon einen PC kennt (src/pc.ts).
+  ...(variante.pc ? [{ id: 'pc', titel: 'PC', symbol: 'pc', bauen: pcBauen }] : []),
   { id: 'einstellungen', titel: 'Einstellungen', symbol: 'einstellungen', bauen: einstellungenBauen },
-]
+].filter((b) => !variante.bereicheAus?.includes(b.id))
 const bereichNach = new Map(BEREICHE.map((b) => [b.id, b]))
 const gebaut = new Map()
 
@@ -146,7 +163,7 @@ function wechseln() {
     try { inst.zeigen?.(z.param) } catch (e) { console.warn('Bereich warf beim Zeigen', e) }
     chatliste.aktivSetzen(null)
     handyTitel.textContent = b.titel
-    document.title = `${b.titel} – Cockpit`
+    document.title = `${b.titel} – ${variante.name}`
   }
   for (const a of nav.querySelectorAll('a')) {
     const an = a.dataset.bereich === z.art
@@ -238,7 +255,7 @@ bus.abonnieren('lauf_ende', (d) => {
 
 // --- Benachrichtigungen --------------------------------------------------------------
 // Nur wenn man nicht hinsieht; was gemeldet wird, steht in ui/meldungen.js.
-for (const typ of ['agent', 'freigabe', 'lauf_ende']) {
+for (const typ of ['agent', 'freigabe', 'lauf_ende', 'pc']) {
   bus.abonnieren(typ, (d) => benachrichtigen.pruefen(typ, d, { titelVon: chatliste.titelVon }))
 }
 

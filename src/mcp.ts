@@ -38,6 +38,18 @@ const KATALOG: McpKatalog = {
       '--headless', '--isolated', '--no-sandbox', '--browser', 'chromium',
     ],
   },
+  /**
+   * Blender auf dem PC (blender-mcp), fuer den 3D-Modellierer des
+   * Roblox-Cockpits. Der MCP-Server laeuft hier, Blender auf dem PC; dazwischen
+   * haelt cockpit-roblox-blender.service einen SSH-Tunnel auf 127.0.0.1:9876,
+   * dessen Schluessel auf dem PC nur genau diese Weiterleitung darf.
+   */
+  blender: {
+    type: 'stdio',
+    command: 'uvx',
+    args: ['blender-mcp'],
+    env: { BLENDER_HOST: '127.0.0.1', BLENDER_PORT: '9876', DISABLE_TELEMETRY: 'true' },
+  },
 }
 
 /**

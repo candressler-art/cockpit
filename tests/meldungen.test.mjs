@@ -40,6 +40,9 @@ x = m('lauf_ende', { runId: 'lauf-5', ende: { grund: 'fertig' } })
 pruefe('Auftrag beendet', x?.titel === 'Team-Auftrag beendet')
 
 pruefe('Unbekanntes meldet nicht', m('delta', { text: 'x' }) === null && m('agent', null) === null)
+x = m('pc', { aktion: 'wecken' })
+pruefe('PC geweckt: Meldung fuer den anderen', x?.titel === 'PC wird geweckt' && x.ziel === '#/pc' && x.tag === 'pc')
+pruefe('PC aus: Meldung', m('pc', { aktion: 'aus' })?.titel === 'PC fährt herunter')
 
 console.log(`\n${ok}/${gesamt} ok`)
 if (ok !== gesamt) process.exit(1)

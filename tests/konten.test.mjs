@@ -16,6 +16,8 @@ import {
   fensterNachReset,
   sitzungsdateiVorhanden,
   wochenPrognose,
+  kontoAktiv,
+  GETEILT_MARKE,
 } from '../dist/konten.js'
 import {
   nutzungAusAntwort, nutzungAbfragen, naechsteBackoffMs, guthabenAusAntwort, guthabenPrognose, guthabenRest,
@@ -1057,6 +1059,65 @@ const SDK_LIMIT_PRAEFIXE = ["You've hit your", "You've reached your"]
   pruefe('allowed: Nutzungsstand', ev('allowed')?.kind === 'usage')
   pruefe('allowed_warning: Nutzungsstand, kein Limit', ev('allowed_warning')?.kind === 'usage')
   pruefe('rejected: Limit', ev('rejected')?.kind === 'rate_limit')
+}
+
+// --- Geteiltes Konto: nur mit Schalter (z.B. Konto 2 fuers Roblox-Cockpit) ---
+{
+  const leer = new Map()
+  pruefe('kontoAktiv: normales Zusatzkonto ist an', kontoAktiv({ name: 'zweit', geteilt: false }, leer) === true)
+  pruefe('kontoAktiv: geteiltes Konto ist ohne Schalter aus', kontoAktiv({ name: 'zweit', geteilt: true }, leer) === false)
+  pruefe('kontoAktiv: Schalter an schlaegt geteilt', kontoAktiv({ name: 'zweit', geteilt: true }, new Map([['zweit', true]])) === true)
+  pruefe('kontoAktiv: Schalter aus gilt auch fuer ungeteilte', kontoAktiv({ name: 'zweit', geteilt: false }, new Map([['zweit', false]])) === false)
+  pruefe('kontoAktiv: haupt ist immer an', kontoAktiv({ name: 'haupt', geteilt: true }, new Map([['haupt', false]])) === true)
+
+  const alt = { HOME: process.env.HOME, K: process.env.COCKPIT_KONTEN_DIR, C: process.env.CLAUDE_CONFIG_DIR }
+  const anmelden = (dir) => {
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'attrappe' } }))
+  }
+  const haupt = mkdtempSync(join(tmpdir(), 'geteilt-haupt-'))
+  const zusatz = mkdtempSync(join(tmpdir(), 'geteilt-zusatz-'))
+  anmelden(haupt)
+  anmelden(join(zusatz, 'zweit'))
+  writeFileSync(join(zusatz, 'zweit', GETEILT_MARKE), '')
+  process.env.HOME = haupt
+  process.env.CLAUDE_CONFIG_DIR = haupt
+  process.env.COCKPIT_KONTEN_DIR = zusatz
+  try {
+    const schalterAufrufe = []
+    let gespeichert = {}
+    const persistenz = {
+      kontoSperrenLesen: () => ({}), kontoSperren: () => {},
+      kontoVorzugLesen: () => null, kontoVorzugSetzen: () => {},
+      kontoNutzungLesen: () => ({}), kontoNutzungSpeichern: () => {},
+      kontoSchalterLesen: () => ({ ...gespeichert }),
+      kontoSchalterSetzen: (name, an) => { gespeichert[name] = an; schalterAufrufe.push([name, an]) },
+    }
+    const kv = new KontenVerwaltung(persistenz)
+    // haupt voll, zweit frei: ohne Schalter darf trotzdem nicht zweit drankommen.
+    kv.sperren('haupt', Date.now() + 100_000)
+    pruefe('geteilt: wird als geteilt erkannt', kv.uebersicht().konten.find((k) => k.name === 'zweit')?.geteilt === true)
+    pruefe('geteilt: ohne Schalter aus', kv.uebersicht().konten.find((k) => k.name === 'zweit')?.aktiv === false)
+    pruefe('geteilt: kommt auch nicht dran, wenn haupt im Limit ist', kv.waehlen() === null)
+    pruefe('geteilt: nicht "als Naechstes" in der Uebersicht', kv.uebersicht().naechstesKonto === null)
+    kv.bevorzugtesKontoSetzen('zweit')
+    pruefe('geteilt: Vorzug allein schaltet es nicht ein', kv.waehlen() === null && kv.uebersicht().modus === 'ausgeglichen')
+    kv.bevorzugtesKontoSetzen(null)
+
+    pruefe('Schalter: haupt laesst sich nicht abschalten', kv.schalterSetzen('haupt', false) === false)
+    pruefe('Schalter an', kv.schalterSetzen('zweit', true) === true && schalterAufrufe.at(-1)?.[1] === true)
+    pruefe('Schalter an: geteiltes Konto kommt dran', kv.waehlen()?.name === 'zweit')
+    pruefe('Schalter ueberlebt einen Neustart', new KontenVerwaltung(persistenz).uebersicht().konten.find((k) => k.name === 'zweit')?.aktiv === true)
+    kv.schalterSetzen('zweit', false)
+    pruefe('Schalter wieder aus: nicht mehr waehlbar', kv.waehlen() === null)
+    pruefe('Hauptkonto bleibt aktiv', kv.uebersicht().konten.find((k) => k.name === 'haupt')?.aktiv === true)
+  } finally {
+    for (const [k, v] of [['HOME', alt.HOME], ['COCKPIT_KONTEN_DIR', alt.K], ['CLAUDE_CONFIG_DIR', alt.C]]) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v
+    }
+    rmSync(haupt, { recursive: true, force: true })
+    rmSync(zusatz, { recursive: true, force: true })
+  }
 }
 
 console.log(`\n${ok}/${gesamt} bestanden`)

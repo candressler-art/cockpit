@@ -17,7 +17,8 @@ import { meldungFuer } from './ui/meldungen.js'
 import { api } from './bus.js'
 
 const SCHLUESSEL = 'cockpit.melden'
-const TITEL = document.title
+/** Name dieses Cockpits (eine Variante setzt ihn in app.js). */
+const titel = () => document.documentElement.dataset.appName || 'Cockpit'
 let an = false
 let ungesehen = 0
 
@@ -53,7 +54,7 @@ export function pruefen(typ, daten, hilfe) {
   const m = meldungFuer(typ, daten, hilfe)
   if (!m) return
   ungesehen++
-  document.title = `(${ungesehen}) ${TITEL}`
+  document.title = `(${ungesehen}) ${titel()}`
   if (zustand() === 'an') void zeigen(m)
 }
 
@@ -72,7 +73,7 @@ async function zeigen(m) {
 function gesehen() {
   if (wegGesehen()) return
   ungesehen = 0
-  document.title = TITEL
+  document.title = titel()
 }
 document.addEventListener('visibilitychange', gesehen)
 addEventListener('focus', gesehen)

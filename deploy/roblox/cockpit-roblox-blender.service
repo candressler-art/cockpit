@@ -1,0 +1,37 @@
+# SSH-Tunnel vom Server zu Blender auf dem PC: 127.0.0.1:9876 hier ->
+# 127.0.0.1:9876 auf dem PC (blender-mcp-Addon). Der 3D-Modellierer im
+# Roblox-Cockpit spricht ueber diesen Tunnel mit Blender (src/mcp.ts 'blender').
+#
+# Der Schluessel ~/.ssh/pc_blender darf auf dem PC NUR diese eine Weiterleitung
+# (authorized_keys: restrict,port-forwarding,permitopen="127.0.0.1:9876"),
+# keine Shell, keine Befehle. Eingerichtet von deploy/roblox/pc-einrichten.sh.
+#
+# Ist der PC aus, scheitert die Verbindung -- systemd versucht es jede Minute
+# wieder, bis er an ist.
+
+[Unit]
+Description=Tunnel vom Roblox-Cockpit zu Blender auf dem PC
+After=network-online.target cockpit-roblox-netz.service
+Wants=network-online.target
+Requires=cockpit-roblox-netz.service
+
+[Service]
+User=roblox
+Group=roblox
+EnvironmentFile=/etc/cockpit-roblox/umgebung
+ExecStart=/usr/bin/ssh -N -T \
+  -i /home/roblox/.ssh/pc_blender \
+  -o BatchMode=yes -o ExitOnForwardFailure=yes \
+  -o ServerAliveInterval=20 -o ServerAliveCountMax=3 -o ConnectTimeout=10 \
+  -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/home/roblox/.ssh/known_hosts_pc \
+  -L 127.0.0.1:9876:127.0.0.1:9876 \
+  ${COCKPIT_PC_NUTZER}@${COCKPIT_PC_HOST}
+Restart=always
+RestartSec=60
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=tmpfs
+BindPaths=/home/roblox
+
+[Install]
+WantedBy=multi-user.target

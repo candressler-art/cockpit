@@ -1,0 +1,19 @@
+# Netzsperre fuer den Benutzer 'roblox' (siehe netz.nft).
+#
+# Eigene Unit statt ExecStartPre im Cockpit: die Regeln brauchen root, das
+# Cockpit laeuft als 'roblox'. cockpit-roblox.service haengt per Requires=
+# daran -- ohne Sperre kein Roblox-Cockpit.
+
+[Unit]
+Description=Netzsperre fuer das Roblox-Cockpit
+Before=cockpit-roblox.service
+After=nftables.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/cockpit-roblox/netz.nft
+ExecStop=/usr/sbin/nft delete table inet cockpit_roblox
+
+[Install]
+WantedBy=multi-user.target

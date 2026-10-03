@@ -21,6 +21,7 @@ import { aufwandGueltig, berechtigungGueltig, modellGueltig } from './einstellun
 import { verlaufNormalisieren, type Nachricht } from './nachrichten.js'
 import { DB_WARTEN_MS } from './db.js'
 import { ANHANG_KOPF } from './anhaenge.js'
+import { VARIANTE } from './variante.js'
 
 const SPIEGEL = process.env.COCKPIT_SESSIONS ?? '/var/lib/cockpit/sessions-desktop'
 
@@ -289,7 +290,8 @@ function auswerten(
  */
 function quellen(): { pfad: string; quelle: 'desktop' | 'server' }[] {
   return [
-    { pfad: SPIEGEL, quelle: 'desktop' },
+    // Eine Variante (z.B. das Roblox-Cockpit) sieht die Desktop-Sessions nicht.
+    ...(VARIANTE.sessionSpiegel ? [{ pfad: SPIEGEL, quelle: 'desktop' as const }] : []),
     { pfad: projekteVerzeichnis(), quelle: 'server' },
   ]
 }
@@ -346,7 +348,7 @@ async function kandidatenSammeln(): Promise<Map<string, Kandidat>> {
       }
     }
   }
-  if (lesbar === 0) console.warn(`[chats] weder ${SPIEGEL} noch ${projekteVerzeichnis()} lesbar -- Index bleibt leer`)
+  if (lesbar === 0) console.warn(`[chats] ${quellen().map((q) => q.pfad).join(' und ')} nicht lesbar -- Index bleibt leer`)
   return je
 }
 

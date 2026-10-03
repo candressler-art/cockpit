@@ -58,6 +58,24 @@ function aufgeloestUeberVorfahr(pfad: string): string {
 /** Werkzeuge, mit denen ein Agent sein Gedaechtnis pflegt. Bash gehoert nicht dazu -- dort laesst sich das Ziel nicht pruefen. */
 const GEDAECHTNIS_WERKZEUGE = new Set(['Read', 'Write', 'Edit', 'Glob', 'Grep'])
 
+/** Aufgeloester Zielpfad eines Datei-Werkzeugs, oder null fuer alles andere (Bash, fehlender Pfad). */
+function zielpfad(toolName: string, input: Record<string, unknown>): string | null {
+  if (!GEDAECHTNIS_WERKZEUGE.has(toolName)) return null
+  const feld = toolName === 'Glob' || toolName === 'Grep' ? 'path' : 'file_path'
+  const ziel = input[feld]
+  return typeof ziel === 'string' && ziel ? aufgeloestUeberVorfahr(ziel) : null
+}
+
+/**
+ * Lesen und Schreiben ohne Rueckfrage in genau einem Ordner -- fuer den
+ * eigenen Vault einer Variante (variante.ts vaultSchreiben), in den die
+ * Agenten alles festhalten sollen. Dieselben Werkzeuge wie beim Gedaechtnis.
+ */
+export function ordnerZugriffErlaubt(toolName: string, input: Record<string, unknown>, wurzel: string): boolean {
+  const pfad = zielpfad(toolName, input)
+  return pfad !== null && innerhalbVon(pfad, aufgeloestUeberVorfahr(wurzel))
+}
+
 /**
  * Darf dieser Werkzeugaufruf ohne Rueckfrage laufen, weil er nur in einem
  * Gedaechtnis liest oder schreibt -- dem der Fachrollen (`wurzel`) oder dem
@@ -74,11 +92,8 @@ export function gedaechtnisZugriffErlaubt(
   wurzel: string = gedaechtnisWurzel(),
   projekte: string = join(hauptConfigDir(), 'projects'),
 ): boolean {
-  if (!GEDAECHTNIS_WERKZEUGE.has(toolName)) return false
-  const feld = toolName === 'Glob' || toolName === 'Grep' ? 'path' : 'file_path'
-  const ziel = input[feld]
-  if (typeof ziel !== 'string' || !ziel) return false
-  const pfad = aufgeloestUeberVorfahr(ziel)
+  const pfad = zielpfad(toolName, input)
+  if (!pfad) return false
   if (innerhalbVon(pfad, aufgeloestUeberVorfahr(wurzel))) return true
   const teile = relative(aufgeloestUeberVorfahr(projekte), pfad).split(sep)
   return teile.length >= 2 && teile[0] !== '..' && teile[0] !== '' && teile[1] === 'memory'

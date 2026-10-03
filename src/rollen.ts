@@ -16,6 +16,7 @@ import { readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { AgentDefinition } from '@anthropic-ai/claude-agent-sdk'
 import { mcpAufloesen } from './mcp.js'
+import { VARIANTE } from './variante.js'
 
 export interface Fachrolle {
   id: string
@@ -53,7 +54,7 @@ export interface Fachrolle {
 }
 
 const ROLLEN_DIR =
-  process.env.COCKPIT_ROLLEN ?? join(import.meta.dirname, '..', 'rollen')
+  process.env.COCKPIT_ROLLEN ?? VARIANTE.rollenDir ?? join(import.meta.dirname, '..', 'rollen')
 
 /** Vorgaberolle, wenn ein Auftrag keine nennt. Haelt alte Laeufe gueltig. */
 export const VORGABE_ROLLE = 'coder'

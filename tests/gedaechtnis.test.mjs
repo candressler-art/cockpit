@@ -5,7 +5,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from 'node
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
-import { gedaechtnisZugriffErlaubt, gedaechtnisVorspann, gedaechtnisOrdnerAnlegen } from '../dist/gedaechtnis.js'
+import { gedaechtnisZugriffErlaubt, gedaechtnisVorspann, gedaechtnisOrdnerAnlegen, ordnerZugriffErlaubt } from '../dist/gedaechtnis.js'
 
 let ok = 0, gesamt = 0
 const pruefe = (name, bedingung) => {
@@ -65,6 +65,22 @@ pruefe('nach 200 Zeilen abgeschnitten', lang.includes('zeile 200') && !lang.incl
 // --- Ordner beim Start ------------------------------------------------------------
 gedaechtnisOrdnerAnlegen(['admin', 'coder'], wurzel)
 pruefe('Ordner je Rolle angelegt, vorhandener bleibt', existsSync(join(wurzel, 'admin')) && existsSync(join(wurzel, 'coder', 'MEMORY.md')))
+
+// --- ordnerZugriffErlaubt: eigener Vault einer Variante ---
+{
+  const v = join(tmp, 'roblox-vault')
+  mkdirSync(join(v, 'Spiele'), { recursive: true })
+  mkdirSync(join(tmp, 'roblox-vault-x'), { recursive: true })
+  symlinkSync(join(tmp, 'roblox-vault-x'), join(v, 'raus'))
+  pruefe('Vault: Write auf neue Notiz erlaubt', ordnerZugriffErlaubt('Write', { file_path: join(v, 'Spiele', 'Obby.md') }, v))
+  pruefe('Vault: Edit erlaubt', ordnerZugriffErlaubt('Edit', { file_path: join(v, 'Index.md') }, v))
+  pruefe('Vault: Grep mit Pfad erlaubt', ordnerZugriffErlaubt('Grep', { path: v }, v))
+  pruefe('Vault: Grep ohne Pfad nicht', !ordnerZugriffErlaubt('Grep', {}, v))
+  pruefe('Vault: Bash nie', !ordnerZugriffErlaubt('Bash', { command: `ls ${v}` }, v))
+  pruefe('Vault: Nachbarordner mit gleichem Praefix nicht', !ordnerZugriffErlaubt('Write', { file_path: join(tmp, 'roblox-vault-x', 'a.md') }, v))
+  pruefe('Vault: .. heraus nicht', !ordnerZugriffErlaubt('Write', { file_path: join(v, '..', 'a.md') }, v))
+  pruefe('Vault: Symlink heraus nicht', !ordnerZugriffErlaubt('Write', { file_path: join(v, 'raus', 'a.md') }, v))
+}
 
 rmSync(tmp, { recursive: true, force: true })
 console.log(`\n${ok}/${gesamt} bestanden`)

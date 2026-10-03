@@ -11,7 +11,7 @@
  * Konten stehen NICHT hier: Vorzug und Limits gehoeren zusammen in den
  * Bereich Nutzung, dort sieht man, worauf man die Wahl stuetzt.
  */
-import { h, symbol, api, leeren, pfadKurz, melden, fehlerText } from './dom.js'
+import { h, symbol, api, leeren, pfadKurz, melden, fehlerText, schalter } from './dom.js'
 import { einstellungenHolen, ordnerWaehlen } from './eingabe.js'
 import * as bus from '../bus.js'
 import * as stimme from '../stimme.js'
@@ -227,11 +227,6 @@ function auswahl(liste, wert, aendern, label) {
   return s
 }
 
-function schalter(an, aendern, label, gesperrt = false) {
-  const b = h('button.schalter', { type: 'button', role: 'switch', 'aria-checked': String(an), 'aria-label': label, disabled: gesperrt,
-    onclick: () => { b.disabled = true; aendern(!an) } }, h('span.schalter-knopf'))
-  return b
-}
 
 function zahlFeld(wert, min, max, aendern, label) {
   const i = h('input.zahl-feld', { type: 'number', inputmode: 'numeric', min, max, step: 1, value: wert, 'aria-label': label })

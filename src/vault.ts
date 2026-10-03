@@ -6,9 +6,11 @@
 
 import { stat } from 'node:fs/promises'
 import { sep } from 'node:path'
+import { VARIANTE } from './variante.js'
 
 /** Auch fuer andere Module (z.B. den Chat-Agenten), die denselben Spiegel lesen wollen. */
-export const VAULT = process.env.COCKPIT_VAULT ?? '/var/lib/cockpit/vault'
+// Eine Variante mit eigenem Vault (z.B. das Roblox-Cockpit) nimmt den, nie den Spiegel.
+export const VAULT = VARIANTE.vault ?? process.env.COCKPIT_VAULT ?? '/var/lib/cockpit/vault'
 
 /** [[Ziel]], [[Ziel|Anzeigetext]] und [[Ziel#Abschnitt]]. */
 export const WIKILINK = /\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]/g

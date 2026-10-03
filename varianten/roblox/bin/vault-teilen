@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# vault-teilen -- den Roblox-Vault per Syncthing mit einem Geraet teilen.
+#
+#   vault-teilen <geraete-id> <name>   Geraet hinzufuegen und den Vault freigeben
+#   vault-teilen --id                  Geraete-ID dieses Servers (fuer Obsidian-Geraete)
+#   vault-teilen --liste               Geraete, mit denen der Vault geteilt ist
+#
+# Laeuft als 'roblox' auf servertwo. Vom Desktop aus:
+#   ssh claude@servertwo "sudo -u roblox -H /home/roblox/.local/bin/vault-teilen --id"
+
+ST="/usr/bin/syncthing"
+HEIM="/home/roblox/.config/syncthing"
+ORDNER="roblox-vault"
+cli() { "$ST" cli --home="$HEIM" "$@"; }
+
+case "${1:-}" in
+  --id) cli show system | grep -oP '"myID":\s*"\K[^"]+'; exit ;;
+  --liste) cli config folders "$ORDNER" devices list; exit ;;
+  ''|-h|--help) sed -n 2,9p "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+esac
+
+ID="$1"; NAME="${2:-geraet}"
+printf '%s' "$ID" | grep -qE '^[A-Z0-9]{7}(-[A-Z0-9]{7}){7}$' || { echo "Das sieht nicht wie eine Syncthing-Geraete-ID aus: $ID"; exit 1; }
+cli config devices add --device-id "$ID" --name "$NAME" 2>/dev/null || true
+if cli config folders "$ORDNER" devices add --device-id "$ID" 2>/dev/null; then
+  echo "Vault mit '$NAME' geteilt. Auf dem Geraet die Einladung von 'servertwo-roblox' annehmen."
+else
+  echo "Schon geteilt oder fehlgeschlagen -- 'vault-teilen --liste' zeigt den Stand."
+fi

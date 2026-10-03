@@ -41,7 +41,15 @@ export function kenntAufwand(modell: string): boolean {
  * warum die Oberflaeche ueberhaupt Checklisten und Spezialisten-Karten zeigen
  * kann -- ohne sie nutzt das Modell beides nur selten.
  */
-export function chatSystemZusatz(vault: string | null, spezialisten: boolean, gedaechtnis: string | null = null): string {
+export function chatSystemZusatz(
+  vault: string | null,
+  spezialisten: boolean,
+  gedaechtnis: string | null = null,
+  anweisungen: string | null = null,
+): string {
+  // Eine Variante (src/variante.ts) bringt ihre eigene Einleitung mit -- die
+  // des Haupt-Cockpits spricht von Can und gilt dort nicht.
+  if (anweisungen) return variantenZusatz(anweisungen, spezialisten, gedaechtnis, vault)
   const teile = [
     'Du arbeitest im Cockpit, Cans Oberflaeche fuer Claude Code. Antworte auf Deutsch, ' +
       'wenn Can Deutsch schreibt.',
@@ -85,12 +93,53 @@ export function chatSystemZusatz(vault: string | null, spezialisten: boolean, ge
   return teile.join('\n\n')
 }
 
+/**
+ * Systemprompt-Zusatz einer Variante: deren anweisungen.md, dazu dieselben
+ * Hinweise zu Spezialisten und deren Gedaechtnis wie im Haupt-Cockpit, nur
+ * ohne Namen -- eine Variante kann mehrere Leute haben. Einen Vault gibt es
+ * dort nicht.
+ */
+function variantenZusatz(anweisungen: string, spezialisten: boolean, gedaechtnis: string | null, vault: string | null): string {
+  const teile = [anweisungen]
+  if (vault) {
+    // Der eigene Vault einer Variante ist kein Spiegel: hier gehoert alles hin.
+    teile.push(
+      `Euer gemeinsamer Obsidian-Vault liegt unter ${vault}. Halte dort alles fest, was ueber ` +
+        'diesen Chat hinaus wichtig ist: je Spiel eine Notiz (Idee, Stand, Systeme, offene Punkte), ' +
+        'Entscheidungen mit Begruendung, Anleitungen fuer Studio. Obsidian-Markdown mit [[Verweisen]]; ' +
+        'erst nachsehen, ob es die Notiz schon gibt, dann ergaenzen statt doppelt anlegen. ' +
+        'Lesen und Schreiben dort braucht keine Freigabe. Die Nutzer sehen den Vault im Cockpit und in Obsidian.',
+    )
+  }
+  if (spezialisten) {
+    teile.push(
+      'Du kannst Spezialisten (Subagenten) mit dem Agent-Werkzeug beauftragen, wenn ihre ' +
+        'Beschreibung zur Aufgabe passt. Rufe sie immer im Vordergrund auf ' +
+        '(run_in_background: false), damit ihr Ergebnis in diesem Zug zurueckkommt. ' +
+        'Den Planer nur bei komplexen Vorhaben mit vielen Schritten -- einfache Aufgaben ' +
+        'erledigst du selbst.',
+    )
+    if (gedaechtnis) {
+      teile.push(
+        `Jeder Spezialist hat ein eigenes Gedaechtnis unter ${gedaechtnis}/<name>/ ` +
+          '(MEMORY.md als Index, eine Datei je Erkenntnis) und pflegt es selbst. Die ' +
+          'Rueckmeldung des Nutzers zu seinem Ergebnis sieht er aber nie. Die traegst du dort ' +
+          'ein: verwirft der Nutzer einen Entwurf eines Spezialisten oder macht ihm eine ' +
+          'Vorgabe, gehoert das in dessen Gedaechtnis, damit er es beim naechsten Auftrag ' +
+          'schon weiss. Lesen und Schreiben dort braucht keine Freigabe.',
+      )
+    }
+  }
+  return teile.join('\n\n')
+}
+
 export function chatOptionenBauen(
   e: Einstellungen,
   wunsch: Record<string, unknown> | null,
   agents: () => Record<string, AgentDefinition>,
   vault: string | null,
   gedaechtnis: string | null = null,
+  anweisungen: string | null = null,
 ): { fehler: string } | { optionen: ChatOptionen } {
   const modell = wunsch?.modell ?? e.modell
   if (!modellGueltig(modell)) return { fehler: `Unbekanntes Modell: ${String(modell)}` }
@@ -109,7 +158,7 @@ export function chatOptionenBauen(
       settingSources: e.claudeMdLaden ? ['user', 'project', 'local'] : [],
       ...(Object.keys(definitionen).length ? { agents: definitionen } : {}),
       liveText: e.liveText,
-      systemPromptZusatz: chatSystemZusatz(vault, Object.keys(definitionen).length > 0, gedaechtnis),
+      systemPromptZusatz: chatSystemZusatz(vault, Object.keys(definitionen).length > 0, gedaechtnis, anweisungen),
     },
   }
 }

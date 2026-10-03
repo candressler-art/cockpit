@@ -25,7 +25,14 @@ export interface Konto {
   email: string | null
   /** subscriptionType aus .credentials.json, z.B. 'pro' oder 'max'. */
   abo: string | null
+  /** Konto wird mit jemandem geteilt (Datei GETEILT_MARKE im Kontoverzeichnis,
+   *  z.B. Konto 2 fuers Roblox-Cockpit): das Cockpit nimmt es dann nur, wenn
+   *  sein Schalter ausdruecklich an ist. */
+  geteilt: boolean
 }
+
+/** Liegt diese Datei im Kontoverzeichnis, ist das Konto geteilt (siehe Konto.geteilt). */
+export const GETEILT_MARKE = 'cockpit-geteilt'
 
 /** Konto, angereichert um den Laufzeitzustand fuer die Oberflaeche. */
 export interface KontoMitZustand extends Konto {
@@ -35,6 +42,9 @@ export interface KontoMitZustand extends Konto {
   sperrGrund: SperrGrund | null
   /** Manuell als Vorzug gesetzt (Uebersteuerung, siehe Uebersicht.modus). */
   bevorzugt: boolean
+  /** Schalter "im Cockpit nutzen": nur aktive Konten kommen in die Wahl.
+   *  Vorgabe: an, bei einem geteilten Konto aus. 'haupt' ist immer an. */
+  aktiv: boolean
   /** Anteil 0..1 am 5h-Fenster, oder null, wenn nie gemessen. */
   fuenfStundenAnteil: number | null
   /** Anteil 0..1 am Wochenfenster, oder null, wenn nie gemessen. */
@@ -185,6 +195,7 @@ function kontoLesen(name: string, configDir: string, istHaupt: boolean): Konto {
     angemeldet: stand.angemeldet,
     email: emailLesen(configDir, istHaupt),
     abo: stand.abo,
+    geteilt: !istHaupt && existsSync(join(configDir, GETEILT_MARKE)),
   }
 }
 
@@ -311,6 +322,9 @@ export interface KontenPersistenz {
   kontoSperrGruendeLesen?(): Record<string, SperrGrund>
   kontoVorzugLesen(): string | null
   kontoVorzugSetzen(name: string | null): void
+  /** Optional wie kontoSperrGruendeLesen: ohne Eintrag gilt die Vorgabe (siehe kontoAktiv). */
+  kontoSchalterLesen?(): Record<string, boolean>
+  kontoSchalterSetzen?(name: string, an: boolean): void
   kontoNutzungLesen(): Record<string, { stand: LimitStand; quelle: 'usage_api' | 'rate_limit_event' }>
   kontoNutzungSpeichern(name: string, stand: LimitStand, quelle: 'usage_api' | 'rate_limit_event'): void
 }
@@ -374,8 +388,20 @@ export function fensterNachReset(stand: LimitStand, jetzt: number): LimitStand {
  */
 export type SperrGrund = 'limit' | 'anmeldung'
 
+/**
+ * Kommt ein Konto in die Wahl? Ein ausdruecklich gesetzter Schalter gilt,
+ * sonst die Vorgabe: an, ausser das Konto ist geteilt. Das Hauptkonto ist
+ * immer an -- ohne es gaebe es im Zweifel gar kein Konto mehr.
+ */
+export function kontoAktiv(konto: Pick<Konto, 'name' | 'geteilt'>, schalter: ReadonlyMap<string, boolean>): boolean {
+  if (konto.name === HAUPT_KONTO) return true
+  return schalter.get(konto.name) ?? !konto.geteilt
+}
+
 export class KontenVerwaltung {
   private bevorzugt: string | null = null
+  /** Schalter "im Cockpit nutzen" je Konto, nur die ausdruecklich gesetzten. */
+  private schalter = new Map<string, boolean>()
   private gesperrtBis = new Map<string, number>()
   private sperrGrund = new Map<string, SperrGrund>()
   /**
@@ -418,6 +444,7 @@ export class KontenVerwaltung {
       }
     }
     this.bevorzugt = persistenz.kontoVorzugLesen()
+    for (const [name, an] of Object.entries(persistenz.kontoSchalterLesen?.() ?? {})) this.schalter.set(name, an)
     for (const [name, { stand, quelle }] of Object.entries(persistenz.kontoNutzungLesen())) {
       const gefiltert = nutzungBeimLadenFiltern(stand, jetzt)
       if (gefiltert) this.nutzung.set(name, { stand: gefiltert, quelle })
@@ -431,6 +458,19 @@ export class KontenVerwaltung {
 
   bevorzugtesKontoLesen(): string | null {
     return this.bevorzugt
+  }
+
+  /** Schalter "im Cockpit nutzen" setzen. Das Hauptkonto laesst sich nicht abschalten. */
+  schalterSetzen(name: string, an: boolean): boolean {
+    if (name === HAUPT_KONTO) return false
+    this.schalter.set(name, an)
+    this.persistenz?.kontoSchalterSetzen?.(name, an)
+    return true
+  }
+
+  /** Angemeldet und eingeschaltet -- nur diese Konten kommen in die Wahl. */
+  private waehlbar(konten: readonly Konto[]): Konto[] {
+    return konten.filter((k) => k.angemeldet && kontoAktiv(k, this.schalter))
   }
 
   /** Merkt ein Konto als gesperrt bis zum angegebenen Zeitpunkt. */
@@ -500,7 +540,7 @@ export class KontenVerwaltung {
    * Konten durchprobiert hat.
    */
   waehlen(ausgeschlossen?: ReadonlySet<string>): Konto | null {
-    const nutzbar = kontenLesen().filter((k) => k.angemeldet)
+    const nutzbar = this.waehlbar(kontenLesen())
     if (nutzbar.length === 0) return null
     const name = kontoWaehlen(
       this.balancingListe(nutzbar), this.gesperrtBisMap(), this.bevorzugt,
@@ -526,6 +566,7 @@ export class KontenVerwaltung {
         gesperrtBis: bis !== null && bis > jetzt ? bis : null,
         sperrGrund: bis !== null && bis > jetzt ? (this.sperrGrund.get(k.name) ?? 'limit') : null,
         bevorzugt: k.name === this.bevorzugt,
+        aktiv: kontoAktiv(k, this.schalter),
         fuenfStundenAnteil: n?.stand.fuenfStundenAnteil ?? null,
         siebenTageAnteil: n?.stand.siebenTageAnteil ?? null,
         gemessenAm: n?.stand.gemessenAm ?? null,
@@ -544,7 +585,8 @@ export class KontenVerwaltung {
    */
   uebersicht(): KontenUebersicht {
     const konten = this.alleMitZustand()
-    const angemeldet = konten.filter((k) => k.angemeldet)
+    // Abgeschaltete Konten zaehlen weder beim Abstand noch bei der Wahl mit.
+    const angemeldet = konten.filter((k) => k.angemeldet && k.aktiv)
 
     // Nur gemessene Konten: ein nie gemessenes als 0 zu zaehlen (wie es das
     // Balancing tut) wuerde hier einen Abstand anzeigen, den es nicht gibt --
@@ -560,7 +602,7 @@ export class KontenVerwaltung {
     // Dieselbe Wahl wie waehlen(), aber OHNE zuletztGenutzt zu veraendern --
     // eine reine Anzeige darf den echten Zustand nicht durch blosses
     // Ansehen verschieben.
-    const nutzbar = konten.filter((k) => k.angemeldet)
+    const nutzbar = angemeldet
     const naechstesKonto = kontoWaehlen(
       this.balancingListe(nutzbar), this.gesperrtBisMap(), this.bevorzugt,
       this.zuletztGenutzt, Date.now(),

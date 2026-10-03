@@ -1,0 +1,33 @@
+# Syncthing fuer den Roblox-Vault (/home/roblox/vault): bringt ihn in Obsidian
+# auf euren PCs und Handys. Eingerichtet von deploy/roblox/einrichten.sh,
+# Geraete freigeben mit varianten/roblox/bin/vault-teilen.
+#
+# Eigene Instanz als 'roblox', getrennt vom Syncthing-Container des
+# Haupt-Cockpits (der als 'claude' den Desktop-Vault spiegelt): Oberflaeche auf
+# 127.0.0.1:8385 statt 8384, Port 22001 statt 22000. Verbindungen laufen ueber
+# die Syncthing-Relays im Internet -- die Netzsperre laesst 'roblox' nicht ins
+# Heimnetz oder Tailnet, und Relays brauchen beides nicht.
+
+[Unit]
+Description=Syncthing fuer den Roblox-Vault
+After=network-online.target cockpit-roblox-netz.service
+Wants=network-online.target
+Requires=cockpit-roblox-netz.service
+
+[Service]
+User=roblox
+Group=roblox
+Environment=HOME=/home/roblox
+Environment=STNORESTART=1
+ExecStart=/usr/bin/syncthing serve --no-browser --no-restart --home=/home/roblox/.config/syncthing
+Restart=on-failure
+RestartSec=10
+MemoryMax=256M
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=tmpfs
+BindPaths=/home/roblox
+
+[Install]
+WantedBy=multi-user.target

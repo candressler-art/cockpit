@@ -61,6 +61,9 @@ ProtectKernelModules=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true
 StateDirectory=cockpit
+# 0750 statt der Vorgabe 0755: hier liegen Vault-Spiegel, Desktop-Sessions und
+# Datenbank, und auf dem Server gibt es einen zweiten Benutzer (deploy/roblox/).
+StateDirectoryMode=0750
 
 StandardOutput=journal
 StandardError=journal

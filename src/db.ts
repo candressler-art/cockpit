@@ -91,6 +91,13 @@ CREATE TABLE IF NOT EXISTS konten_vorzug (
   name TEXT
 );
 
+-- Schalter "im Cockpit nutzen" je Konto (konten.ts kontoAktiv). Nur
+-- ausdruecklich gesetzte; ohne Zeile gilt die Vorgabe.
+CREATE TABLE IF NOT EXISTS konten_schalter (
+  name TEXT PRIMARY KEY,
+  an   INTEGER NOT NULL
+);
+
 -- Letzter bekannter Nutzungsstand je Konto (siehe kontenNutzung.ts, konten.ts
 -- nutzungMelden). Bisher reiner In-Memory-Zustand: ein Daemon-Neustart liess
 -- jedes Konto ohne jede Messung dastehen -- balanciert wie ein nie genutztes
@@ -467,6 +474,23 @@ export class CockpitDb {
          ON CONFLICT (id) DO UPDATE SET name = excluded.name`,
       )
       .run(name)
+  }
+
+  /** Ausdruecklich gesetzte Schalter "im Cockpit nutzen" je Konto. */
+  kontoSchalterLesen(): Record<string, boolean> {
+    const rows = this.db.prepare(`SELECT name, an FROM konten_schalter`).all() as { name: string; an: number }[]
+    const out: Record<string, boolean> = {}
+    for (const r of rows) out[r.name] = r.an === 1
+    return out
+  }
+
+  kontoSchalterSetzen(name: string, an: boolean): void {
+    this.db
+      .prepare(
+        `INSERT INTO konten_schalter (name, an) VALUES (?, ?)
+         ON CONFLICT (name) DO UPDATE SET an = excluded.an`,
+      )
+      .run(name, an ? 1 : 0)
   }
 
   /** Gespeicherte Einstellungen als rohes Objekt, oder null, wenn nie gespeichert (oder unlesbar). */

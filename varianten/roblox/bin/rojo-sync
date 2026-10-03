@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# rojo-sync -- Live-Sync eines Roblox-Spiels nach Roblox Studio (Roblox-Cockpit).
+#
+#   rojo-sync <ordner>   Sync fuer dieses Spiel starten (beendet einen laufenden)
+#   rojo-sync --status   welches Spiel gerade verbunden ist
+#   rojo-sync --stop     Sync beenden
+#
+# Rojo hoert nur auf 127.0.0.1:34873. Ins Tailnet kommt er ueber
+# `tailscale serve --tcp` auf ROJO_PORT (deploy/roblox/einrichten.sh) -- so ist
+# nichts im LAN offen und nur, wer im Tailnet auf diesen Port darf, kommt dran.
+
+ROJO_LOKAL_PORT="${ROJO_LOKAL_PORT:-34873}"
+ROJO_PORT="${ROJO_PORT:-34872}"
+ROJO_HOST="${ROJO_HOST:-$(cat "$HOME/.rojo-host" 2>/dev/null || echo servertwo)}"
+PIDDATEI="$HOME/.rojo-sync.pid"
+PROJEKTDATEI="$HOME/.rojo-sync.projekt"
+LOG="$HOME/.rojo-sync.log"
+
+laeuft() { [ -f "$PIDDATEI" ] && kill -0 "$(cat "$PIDDATEI")" 2>/dev/null; }
+
+stoppen() {
+  if laeuft; then
+    kill "$(cat "$PIDDATEI")" 2>/dev/null
+    for _ in 1 2 3 4 5 6 7 8 9 10; do laeuft || break; sleep 0.3; done
+  fi
+  rm -f "$PIDDATEI" "$PROJEKTDATEI"
+}
+
+case "${1:-}" in
+  --status)
+    if laeuft; then echo "Sync laeuft fuer: $(cat "$PROJEKTDATEI" 2>/dev/null)"; echo "In Studio verbinden mit: $ROJO_HOST  Port $ROJO_PORT"
+    else echo "Kein Sync aktiv."; fi
+    exit 0 ;;
+  --stop)
+    stoppen; echo "Sync beendet."; exit 0 ;;
+  ''|-h|--help)
+    sed -n 2,7p "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+esac
+
+ORDNER="$(realpath -e "$1" 2>/dev/null)" || { echo "Ordner gibt es nicht: $1"; exit 1; }
+case "$ORDNER/" in
+  "$HOME/spiele/"?*) ;;
+  *) echo "Nur Spiele unter $HOME/spiele/ werden synchronisiert."; exit 1 ;;
+esac
+PROJEKT="$ORDNER/default.project.json"
+[ -f "$PROJEKT" ] || { echo "Kein Rojo-Projekt: $PROJEKT fehlt (erst 'rojo init $ORDNER')."; exit 1; }
+command -v rojo >/dev/null || { echo "rojo ist nicht installiert."; exit 1; }
+
+stoppen
+setsid nohup rojo serve --address 127.0.0.1 --port "$ROJO_LOKAL_PORT" "$PROJEKT" >"$LOG" 2>&1 < /dev/null &
+echo $! > "$PIDDATEI"
+echo "$ORDNER" > "$PROJEKTDATEI"
+sleep 2
+if laeuft; then
+  echo "Sync laeuft fuer: $ORDNER"
+  echo "In Roblox Studio im Rojo-Plugin verbinden mit: $ROJO_HOST  Port $ROJO_PORT"
+else
+  echo "Rojo ist sofort wieder ausgestiegen:"; tail -20 "$LOG"; rm -f "$PIDDATEI" "$PROJEKTDATEI"; exit 1
+fi
