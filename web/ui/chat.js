@@ -18,6 +18,8 @@ import { werkzeugZeichnen, rollenSetzen, todoListe, kopfDaten } from './werkzeug
 import { aktuelleTodos } from './taskliste.js'
 import { eingabeBauen, einstellungenHolen, NUR_ANHANG_TEXT } from './eingabe.js'
 import { AKZENTE, akzentLesen, akzentSetzen } from '../akzent.js'
+import { DESIGNS, designLesen, designSetzen } from '../design.js'
+import { designProbe } from './einstellungen.js'
 import { anhaengeTrennen, mitAnhaengen, istBild } from './anhangtext.js'
 import { freigabeKarteBauen, freigabeNormalisieren } from './freigabekarten.js'
 import { vorschauBauen } from './vorschau.js'
@@ -484,14 +486,26 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
         style: { '--a': x.a, '--b': x.b }, onclick: () => { akzentSetzen(x.id); farbenZeichnen() },
       })))
     }
+    // Daneben die Designs als kleine Vorschau-Kacheln (gleiche wie in den Einstellungen).
+    const designs = h('div.fetch-designs', { role: 'group', 'aria-label': 'Design' })
+    const designsZeichnen = () => {
+      const jetzt = designLesen()
+      leeren(designs, DESIGNS.map((x) => h('button.fetch-design', {
+        type: 'button', title: `${x.name}: ${x.hinweis}`, 'aria-label': `Design ${x.name}`, 'aria-pressed': String(x.id === jetzt),
+        onclick: () => { designSetzen(x.id); designsZeichnen() },
+      }, designProbe(x.id), h('span', {}, x.name.toLowerCase()))))
+    }
     farbenZeichnen()
+    designsZeichnen()
+    // Akzent gewechselt: die Vorschauen faerben sich mit.
+    farben.addEventListener('click', designsZeichnen)
     fetchLaden(zeilen)
     return h('div.willkommen', {},
       h('div.willkommen-titel', {}, 'Womit fangen wir an?'),
       h('div.fetch', {},
         logoBauen(),
         h('div.fetch-kopf', {}, variante.nutzer, h('span', {}, '@'), variante.id === 'haupt' ? 'cockpit' : variante.id),
-        zeilen, farben),
+        zeilen, farben, designs),
       h('div.vorschlaege', {}, vorschlaege.map((v) =>
         h('button.vorschlag', { type: 'button', onclick: () => { eingabe.textSetzen(v); eingabe.fokus() } }, v))))
   }

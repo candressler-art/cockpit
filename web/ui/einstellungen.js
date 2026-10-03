@@ -17,6 +17,8 @@ import * as bus from '../bus.js'
 import * as stimme from '../stimme.js'
 import * as benachrichtigen from '../benachrichtigen.js'
 import { AKZENTE, akzentLesen, akzentSetzen } from '../akzent.js'
+import { DESIGNS, designLesen, designSetzen } from '../design.js'
+import { tapeteUrl } from '../wallpaper.js'
 
 const STIMM_STUFEN = [
   { id: 'aus', name: 'Aus', hinweis: 'Dieses Gerät spricht nie' },
@@ -103,6 +105,10 @@ export function einstellungenBauen() {
           zahlFeld(w.team.parallel, 1, 4, (v) => speichern({ team: { parallel: v } }), 'Gleichzeitig'))),
 
       gruppe('Darstellung', 'Gilt nur für dieses Gerät.',
+        h('div.einst-zeile.senkrecht', {},
+          h('div.einst-text', {}, h('div.einst-name', {}, 'Design'),
+            h('div.einst-hinweis', {}, 'Form und Charakter: Ecken, Rahmen, Schrift, Flächen und Wallpaper. Die Farbe kommt aus dem Akzent.')),
+          designWahl()),
         h('div.einst-zeile.senkrecht', {},
           h('div.einst-text', {}, h('div.einst-name', {}, 'Akzentfarbe'),
             h('div.einst-hinweis', {}, 'Wie ein HyDE-Theme: färbt Knöpfe, Auswahl und den Rand der aktiven Kachel.')),
@@ -204,6 +210,29 @@ function akzentWahl() {
     }, h('span.akzent-probe'), h('span', {}, x.name), x.id === jetzt ? symbol('haken', 15) : null)))
   }
   zeichnen()
+  return box
+}
+
+/** Je Design eine kleine Vorschau-Kachel (Leiste, Liste, Fenster) im eigenen Stil -- designs.css .design-probe. */
+export function designProbe(id, akzentId = akzentLesen()) {
+  return h('span.design-probe', { dataset: { probe: id }, style: { '--probe-tapete': tapeteUrl(id, akzentId) }, 'aria-hidden': 'true' },
+    h('span.dp-leiste'), h('span.dp-seite'), h('span.dp-haupt', {}, h('span.dp-zeile'), h('span.dp-zeile.kurz'), h('span.dp-knopf')))
+}
+
+function designWahl() {
+  const box = h('div.designs', { role: 'group', 'aria-label': 'Design' })
+  const zeichnen = () => {
+    const jetzt = designLesen()
+    leeren(box, DESIGNS.map((x) => h('button.design-wahl', {
+      type: 'button', 'aria-pressed': String(x.id === jetzt), title: x.hinweis,
+      onclick: () => { designSetzen(x.id); zeichnen() },
+    }, designProbe(x.id), h('span.design-name', {}, x.name, x.id === jetzt ? symbol('haken', 15) : null), h('span.design-hinweis', {}, x.hinweis))))
+  }
+  zeichnen()
+  // Neuer Akzent: die Vorschauen faerben sich mit. Ist die Seite neu gezeichnet,
+  // haengt der alte Kasten nicht mehr im Baum -- dann meldet er sich ab.
+  const neuFaerben = () => { if (box.isConnected) zeichnen(); else removeEventListener('akzent-geaendert', neuFaerben) }
+  addEventListener('akzent-geaendert', neuFaerben)
   return box
 }
 
