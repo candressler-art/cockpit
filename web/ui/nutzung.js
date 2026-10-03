@@ -12,6 +12,7 @@
  */
 import { h, symbol, api, leeren, kurzZahl, zahl, uhrzeit, wann, modellName, melden, fehlerText } from './dom.js'
 import * as bus from '../bus.js'
+import { schalter } from './einstellungen.js'
 
 const WOCHENTAGE = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So']
 
@@ -281,6 +282,16 @@ export function nutzungBauen() {
     }
   }
 
+  async function schalterSetzen(name, an) {
+    try {
+      await api('/api/konten/schalter', { body: { name, an } })
+      dispatchEvent(new Event('konten-geaendert'))
+    } catch (e) {
+      melden(`Konto nicht umgeschaltet: ${fehlerText(e)}`, 'fehler')
+    }
+    await kontenLaden()
+  }
+
   function kontenInhalt(d) {
     const modus = d.modus === 'manuell'
       ? h('div.konten-modus', {}, symbol('stern', 14), h('span', {}, `Vorzug: ${d.konten.find((k) => k.bevorzugt)?.name}. Das Cockpit nimmt dieses Konto, solange es nicht im Limit ist.`),
@@ -299,6 +310,8 @@ export function nutzungBauen() {
       k.sperrGrund === 'anmeldung' ? 'Anmeldung prüfen' : `im Limit bis ${resetText(k.gesperrtBis)}`))
     if (k.name === d.naechstesKonto) marken.push(h('span.marke-klein.an', {}, 'als Nächstes'))
     if (k.bevorzugt) marken.push(h('span.marke-klein.stern', {}, 'Vorzug'))
+    if (k.geteilt) marken.push(h('span.marke-klein', { title: 'Wird mit jemandem geteilt (z.B. im Roblox-Cockpit). Ohne Schalter nimmt dieses Cockpit es nicht.' }, 'geteilt'))
+    if (!k.aktiv) marken.push(h('span.marke-klein.aus', {}, 'aus'))
 
     const zeilen = []
     if (k.angemeldet) {
@@ -320,11 +333,18 @@ export function nutzungBauen() {
       zeilen.push(h('div.leise.klein', {}, 'Auf dem Server mit ', h('code', {}, `CLAUDE_CONFIG_DIR=${k.configDir} claude /login`), ' anmelden.'))
     }
 
-    const knopf = k.angemeldet && !k.bevorzugt
+    // Schalter "im Cockpit nutzen" fuer jedes Zusatzkonto; das Hauptkonto ist immer an.
+    if (k.name !== 'haupt' && k.aktiv !== undefined) {
+      zeilen.push(h('div.konto-schalter', {},
+        h('span', {}, k.geteilt ? 'Auch in diesem Cockpit nutzen' : 'In diesem Cockpit nutzen'),
+        schalter(k.aktiv, (an) => schalterSetzen(k.name, an), `Konto ${k.name} in diesem Cockpit nutzen`)))
+    }
+
+    const knopf = k.angemeldet && k.aktiv !== false && !k.bevorzugt
       ? h('button.knopf.knopf-schmal', { type: 'button', onclick: () => vorzugSetzen(k.name), title: 'Neue Chats bevorzugt mit diesem Konto starten' }, 'Bevorzugen')
       : k.bevorzugt ? h('button.knopf.knopf-schmal', { type: 'button', onclick: () => vorzugSetzen(null) }, 'Vorzug aufheben') : null
 
-    return h(`div.konto${gesperrt ? '.gesperrt' : ''}`, {},
+    return h(`div.konto${gesperrt ? '.gesperrt' : ''}${k.aktiv === false ? '.abgeschaltet' : ''}`, {},
       h('div.konto-kopf', {},
         h('div.konto-name', {}, h('strong', {}, k.name), k.abo && h('span.abo', {}, k.abo.toUpperCase()), marken),
         knopf),

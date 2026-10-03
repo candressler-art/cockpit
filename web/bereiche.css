@@ -138,6 +138,8 @@ a.tag-eintrag:hover { background: var(--surface0); }
 .konten { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
 .konto { border: 1px solid var(--surface0); border-radius: 11px; padding: 13px; background: var(--base); display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .konto.gesperrt { border-color: color-mix(in srgb, var(--orange) 45%, var(--surface0)); }
+.konto.abgeschaltet > :not(.konto-schalter):not(.konto-kopf) { opacity: .55; }
+.konto-schalter { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; color: var(--subtext); padding-top: 4px; border-top: 1px solid var(--surface0); margin-top: 2px; }
 .konto-kopf { display: flex; align-items: flex-start; gap: 8px; }
 .konto-name { flex: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
 .konto-mail { font-size: 12px; color: var(--overlay); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: -4px; }

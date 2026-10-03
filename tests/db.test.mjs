@@ -87,6 +87,12 @@ const dbPfad = join(verzeichnis, 'test.db')
 
   db.kontoVorzugSetzen('dritt')
   pruefe('Vorzug geaendert (kein zweiter Eintrag)', db.kontoVorzugLesen() === 'dritt')
+  pruefe('frisch: kein Schalter gespeichert', Object.keys(db.kontoSchalterLesen()).length === 0)
+  db.kontoSchalterSetzen('zweit', true)
+  db.kontoSchalterSetzen('zweit', false)
+  db.kontoSchalterSetzen('dritt', true)
+  const sch = db.kontoSchalterLesen()
+  pruefe('Schalter gespeichert und ueberschrieben', sch.zweit === false && sch.dritt === true)
 
   db.kontoVorzugSetzen(null)
   pruefe('Vorzug aufgehoben', db.kontoVorzugLesen() === null)

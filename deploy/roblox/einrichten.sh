@@ -7,8 +7,9 @@
 #
 #   ./deploy/server-einrichten.sh            # zuerst: aktueller Code nach /opt/cockpit
 #   ./deploy/roblox/einrichten.sh            # dann das hier
-#   ./deploy/roblox/einrichten.sh --aus-haupt zweit
-#                                            # ... und Konto 'zweit' im Haupt-Cockpit abschalten
+#
+# Nutzt das Haupt-Cockpit Konto 2 bisher als Zusatzkonto, wird es dort als
+# geteilt markiert: aus, bis du im Bereich Nutzung den Schalter umlegst.
 #
 # Wiederholbar: jeder Schritt prueft, ob er schon erledigt ist.
 #
@@ -18,17 +19,11 @@
 
 set -u
 
-AUS_HAUPT=""
-while [ $# -gt 0 ]; do
-  case "$1" in
-    --aus-haupt) AUS_HAUPT="${2:-}"; shift 2 ;;
-    -h|--help) sed -n 2,14p "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) echo "Unbekannte Angabe: $1 (siehe --help)"; exit 2 ;;
-  esac
-done
-if [ -n "$AUS_HAUPT" ] && ! printf '%s' "$AUS_HAUPT" | grep -qE '^[a-z0-9][a-z0-9_-]*$'; then
-  echo "Ungueltiger Kontoname '$AUS_HAUPT'"; exit 2
-fi
+case "${1:-}" in
+  '') ;;
+  -h|--help) sed -n 2,13p "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  *) echo "Unbekannte Angabe: $1 (siehe --help)"; exit 2 ;;
+esac
 
 SERVER="${COCKPIT_SERVER:-192.168.2.193}"
 KEY="${COCKPIT_SSH_KEY:-$HOME/.ssh/id_ed25519_claude}"
@@ -161,33 +156,25 @@ if [ -n "$R_EMAIL" ] && [ "$R_EMAIL" = "$H_EMAIL" ]; then
 fi
 ok "Roblox-Cockpit nutzt ${R_EMAIL:-(E-Mail unbekannt)}"
 
-# --- 6. Konto 2 im Haupt-Cockpit abschalten (optional) -----------------------
+# --- 6. Konto 2 im Haupt-Cockpit als geteilt markieren -----------------------
 schritt "6/9  Konto 2 im Haupt-Cockpit"
-if [ -z "$AUS_HAUPT" ]; then
-  ok "unveraendert (mit --aus-haupt <name> abschalten)"
-else
-  ALT="/home/claude/.claude-konten/$AUS_HAUPT"
-  if ! "${SSH[@]}" "test -d '$ALT'"; then
-    ok "'$AUS_HAUPT' gibt es im Haupt-Cockpit nicht (mehr)"
-  else
-    A_EMAIL=$("${SSH[@]}" "CLAUDE_CONFIG_DIR='$ALT' claude auth status 2>/dev/null" | grep -oP '"email":\s*"\K[^"]+')
-    echo "   Konto '$AUS_HAUPT' im Haupt-Cockpit: ${A_EMAIL:-unbekannt}"
-    if [ -n "$R_EMAIL" ] && [ "$A_EMAIL" != "$R_EMAIL" ]; then
-      warn "das ist NICHT das Konto des Roblox-Cockpits ($R_EMAIL) -- nichts geaendert"
+# Hat das Haupt-Cockpit dasselbe Konto als Zusatzkonto, bekommt es die Marke
+# 'cockpit-geteilt' (src/konten.ts GETEILT_MARKE): dann nimmt das Haupt-Cockpit
+# es nur noch, wenn im Bereich Nutzung der Schalter dafuer an ist. Die
+# Anmeldung bleibt, ein Umlegen des Schalters reicht.
+GEFUNDEN=0
+for VERZ in $("${SSH[@]}" "ls -1 /home/claude/.claude-konten 2>/dev/null"); do
+  A_EMAIL=$("${SSH[@]}" "CLAUDE_CONFIG_DIR='/home/claude/.claude-konten/$VERZ' claude auth status 2>/dev/null" | grep -oP '"email":\s*"\K[^"]+')
+  if [ -n "$R_EMAIL" ] && [ "$A_EMAIL" = "$R_EMAIL" ]; then
+    GEFUNDEN=1
+    if "${SSH[@]}" "touch '/home/claude/.claude-konten/$VERZ/cockpit-geteilt'"; then
+      ok "'$VERZ' ($A_EMAIL) ist im Haupt-Cockpit jetzt geteilt: aus, bis du den Schalter unter Nutzung umlegst"
     else
-      # Verschieben statt loeschen: konten.ts sieht nur ~/.claude-konten/, das
-      # Konto ist damit aus dem Balancing. Die Anmeldung selbst wird entfernt,
-      # damit kein unbenutztes Token herumliegt. projects/ und agent-memory/
-      # sind dort nur Symlinks auf das Hauptkonto -- mv nimmt die Links mit,
-      # nicht deren Ziel.
-      if "${SSH[@]}" "mkdir -p /home/claude/.claude-konten-aus && mv '$ALT' /home/claude/.claude-konten-aus/ && rm -f '/home/claude/.claude-konten-aus/$AUS_HAUPT/.credentials.json'"; then
-        ok "'$AUS_HAUPT' abgeschaltet (liegt jetzt in ~/.claude-konten-aus/, ohne Anmeldung)"
-      else
-        fehlt "Verschieben fehlgeschlagen"
-      fi
+      fehlt "Marke fuer '$VERZ' nicht gesetzt"
     fi
   fi
-fi
+done
+[ "$GEFUNDEN" -eq 0 ] && ok "Haupt-Cockpit hat Konto 2 nicht als Zusatzkonto -- nichts zu tun"
 
 # --- 7. Rojo -----------------------------------------------------------------
 schritt "7/9  Rojo und rojo-sync"

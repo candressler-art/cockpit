@@ -1477,6 +1477,16 @@ const server = createServer(async (req, res) => {
       return json(200, { ...supervisor.kontenUebersicht(), ...guthabenUebersicht() })
     }
 
+    if (pfad === '/api/konten/schalter' && req.method === 'POST') {
+      // Schalter "im Cockpit nutzen" (konten.ts kontoAktiv), z.B. fuer ein
+      // geteiltes Konto, das sonst aus ist.
+      const k = (await koerperLesen(req)) as Record<string, unknown> | null
+      const name = textFeld(k, 'name') ?? ''
+      if (typeof k?.an !== 'boolean') return json(400, { fehler: 'an muss true oder false sein' })
+      const ok = supervisor.kontoSchalterSetzen(name, k.an)
+      return json(ok ? 200 : 404, { ok, ...supervisor.kontenUebersicht() })
+    }
+
     if (pfad === '/api/konten' && req.method === 'POST') {
       const k = (await koerperLesen(req)) as Record<string, unknown> | null
       // Leerstring oder fehlendes Feld heben die Bevorzugung auf.

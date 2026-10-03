@@ -227,7 +227,8 @@ function auswahl(liste, wert, aendern, label) {
   return s
 }
 
-function schalter(an, aendern, label, gesperrt = false) {
+/** Ein/Aus-Schalter; auch im Bereich Nutzung (Konto im Cockpit nutzen). */
+export function schalter(an, aendern, label, gesperrt = false) {
   const b = h('button.schalter', { type: 'button', role: 'switch', 'aria-checked': String(an), 'aria-label': label, disabled: gesperrt,
     onclick: () => { b.disabled = true; aendern(!an) } }, h('span.schalter-knopf'))
   return b

@@ -52,19 +52,18 @@ Bei der Anmeldung (Schritt 5) **mit Konto 2 anmelden**, nicht mit dem
 Hauptkonto. Das Skript bricht ab, wenn es dieselbe E-Mail wie das Hauptkonto
 sieht.
 
-### Konto 2 im Haupt-Cockpit abschalten?
+### Konto 2 im Haupt-Cockpit: nur per Schalter
 
-Bisher nutzt das Haupt-Cockpit Konto 2 als Zusatzkonto (Balancing). Die
-Anmeldung im Roblox-Cockpit ist eine eigene, beide funktionieren nebeneinander.
-Das Haupt-Cockpit würde Konto 2 aber weiter mitbenutzen und damit euer
-gemeinsames Kontingent verbrauchen, ohne dass dein Freund es sieht. Abschalten:
+Bisher nutzt das Haupt-Cockpit Konto 2 als Zusatzkonto (Balancing). Findet
+das Skript Konto 2 dort (gleiche E-Mail), markiert es das Konto als
+**geteilt** (Datei `cockpit-geteilt` im Kontoverzeichnis). Ab dann nimmt das
+Haupt-Cockpit Konto 2 **standardmäßig nicht mehr**, auch nicht, wenn das
+Hauptkonto im Limit ist, und auch nicht über „Bevorzugen“.
 
-```bash
-./deploy/roblox/einrichten.sh --aus-haupt <name>   # <name> wie unter ~/.claude-konten/
-```
-
-Das verschiebt das Konto nach `~/.claude-konten-aus/` und löscht dort nur die
-Anmeldung. Zurück geht es mit `deploy/konto-hinzufuegen.sh <name>`.
+Brauchst du Konto 2 doch einmal im Haupt-Cockpit: **Nutzung → Karte des
+Kontos → „Auch in diesem Cockpit nutzen“** einschalten. Zurück geht es mit
+demselben Schalter. Die Anmeldung bleibt dabei bestehen; die beiden
+Anmeldungen (Haupt-Cockpit und Roblox-Cockpit) sind unabhängig voneinander.
 
 ## 2. Tailscale: Freund nur auf zwei Ports
 

@@ -222,6 +222,13 @@ sind, gilt das alte Warteverhalten. `GET /api/konten` und `POST /api/konten`
 lesen bzw. setzen den Vorzug; der Bereich Nutzung zeigt je Konto Woche und
 5 Stunden, den Modus (ausgeglichen/manuell) und wer als naechstes drankaeme.
 
+Jedes Zusatzkonto hat dort einen Schalter "In diesem Cockpit nutzen". Ein
+abgeschaltetes Konto kommt nie in die Wahl, auch nicht als Vorzug oder beim
+Wechsel nach einem Limit. Vorgabe ist an -- ausser bei einem **geteilten**
+Konto (Datei `cockpit-geteilt` im Kontoverzeichnis, gesetzt von
+`deploy/roblox/einrichten.sh` fuer Konto 2): das ist aus, bis der Schalter
+ausdruecklich umgelegt wird. Das Hauptkonto ist immer an.
+
 ## Varianten
 
 Dieselbe Software laesst sich als zweite Instanz fuer einen anderen Zweck
@@ -365,6 +372,7 @@ kein Profil.
 | `/api/rollen` | GET | Fachrollen und Spezialisten |
 | `/api/konten` | GET | Konten mit Anmelde-, Sperr-, Vorzugs- und Nutzungsstand, Guthaben, Prognose |
 | `/api/konten` | POST | bevorzugtes Konto setzen (`name`, `null` hebt es auf) |
+| `/api/konten/schalter` | POST | Konto in diesem Cockpit nutzen oder nicht (`name`, `an`) |
 | `/api/nutzung` | GET | Tokens je Tag und Kennzahlen |
 | `/api/nutzung/tag?tag=` | GET | Sitzungen eines Tages mit Chat |
 | `/api/system` | GET | Auslastung beider Server, Verlauf 1 h |

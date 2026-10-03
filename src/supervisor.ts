@@ -206,6 +206,12 @@ export class Supervisor extends EventEmitter {
     }
   }
 
+  /** Schalter "im Cockpit nutzen". false bei unbekanntem Konto oder 'haupt'. */
+  kontoSchalterSetzen(name: string, an: boolean): boolean {
+    if (!this.konten.konto(name)) return false
+    return this.konten.schalterSetzen(name, an)
+  }
+
   /** Setzt das bevorzugte Konto. null hebt die Bevorzugung auf. */
   bevorzugtesKontoSetzen(name: string | null): boolean {
     if (name !== null && !this.konten.konto(name)) return false
