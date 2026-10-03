@@ -83,15 +83,15 @@ pruefe('unbekannte Variante ist ein Startfehler', wirft(() => varianteLaden('gib
   pruefe('Haupt-Cockpit: Einleitung mit Can wie bisher', haupt.startsWith('Du arbeitest im Cockpit, Cans Oberflaeche'))
   pruefe('Variante beginnt mit ihren Anweisungen', variante.startsWith('ROBLOX-ANWEISUNGEN'))
   pruefe('Variante: kein Can', !/\bCans?\b/.test(variante))
-  pruefe('Variante: kein Vault, auch wenn einer uebergeben wird', !variante.includes('/vault'))
+  pruefe('Variante: eigener Vault zum Beschreiben, nicht als Spiegel', variante.includes('/vault') && variante.includes('Halte dort alles fest') && !variante.includes('nur lesend'))
+  pruefe('Variante ohne Vault: kein Vault-Absatz', !chatSystemZusatz(null, true, '/g', 'R').includes('Vault'))
   pruefe('Variante: Spezialisten und Gedaechtnis bleiben', variante.includes('Agent-Werkzeug') && variante.includes('/g/<name>/'))
   pruefe('Variante ohne Spezialisten: nur die Anweisungen', chatSystemZusatz(null, false, '/g', 'A') === 'A')
 }
 
 // --- Die mitgelieferte Roblox-Variante -----------------------------------------------
 pruefe('COCKPIT_VARIANTE=roblox wird geladen', VARIANTE.id === 'roblox' && VARIANTE.name === 'Roblox-Cockpit')
-pruefe('Roblox: Notizen, Terminal, Server aus',
-  ['notizen', 'terminal', 'server'].every((b) => !bereichAn(b)))
+pruefe('Roblox: Terminal und Server aus', ['terminal', 'server'].every((b) => !bereichAn(b)))
 pruefe('Roblox: keine Desktop-Sessions', VARIANTE.sessionSpiegel === false)
 pruefe('Roblox: Arbeitswurzel ~/spiele', VARIANTE.arbeitsWurzel === join(process.env.HOME, 'spiele'))
 pruefe('Roblox: Anweisungen nennen Rojo', (VARIANTE.anweisungen ?? '').includes('rojo-sync'))
@@ -103,12 +103,18 @@ pruefe('Haupt-Cockpit: Absender can, eigene Vorschlaege', HAUPT_VARIANTE.nutzer 
 pruefe('nutzer mit Leerzeichen ist ein Startfehler', wirft(kaputt('{"name":"x","nutzer":"a b"}'), /nutzer/))
 pruefe('vorschlaege ohne Text sind ein Startfehler', wirft(kaputt('{"name":"x","vorschlaege":[""]}'), /vorschlaege/))
 pruefe('Variante ohne nutzer: du', varianteLaden(eigen, repo, '/h').nutzer === 'du')
+pruefe('relativer Vault ist ein Startfehler', wirft(kaputt('{"name":"x","vault":"vault"}'), /vault muss absolut/))
 
 await rollenLaden()
 const ids = rollenListe().map((r) => r.id)
 pruefe('Roblox-Rollen laden (Startpruefung inklusive)', ids.includes('coder') && ids.includes('orchestrator'))
 pruefe('Roblox-Rollen: kein Server-Admin, kein Gestalter mit Browser', !ids.includes('admin') && !ids.includes('gestalter'))
-pruefe('Roblox-Rollen: kein Browser-MCP (braeuchte docker)', rollenListe().every((r) => !r.mcp?.length))
+pruefe('Roblox-Rollen: kein Browser-MCP (braeuchte docker)', rollenListe().every((r) => !r.mcp?.includes('browser')))
+pruefe('Roblox-Rollen: 3D-Modellierer mit Blender', rollenListe().find((r) => r.id === 'modellierer')?.mcp?.includes('blender'))
+pruefe('Roblox: eigener Vault ~/vault, beschreibbar, Notizen an',
+  VARIANTE.vault === join(process.env.HOME, 'vault') && VARIANTE.vaultSchreiben && bereichAn('notizen'))
+pruefe('Haupt-Cockpit: Vault nur lesend', HAUPT_VARIANTE.vault === null && HAUPT_VARIANTE.vaultSchreiben === false)
+pruefe('vaultSchreiben ohne eigenen Vault zaehlt nicht', varianteLaden(eigen, repo, '/h').vaultSchreiben === false)
 pruefe('Roblox-Rollen: keine Skills (die liegen beim Hauptkonto)', rollenListe().every((r) => !r.skills?.length))
 
 rmSync(wurzel, { recursive: true, force: true })

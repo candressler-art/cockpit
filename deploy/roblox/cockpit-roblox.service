@@ -37,6 +37,9 @@ Environment=COCKPIT_DB=/var/lib/cockpit-roblox/cockpit.db
 # Kein Zusatzkonto: dieses Cockpit kennt nur die Anmeldung unter ~/.claude.
 Environment=COCKPIT_KONTEN_DIR=/home/roblox/.keine-zusatzkonten
 Environment=COCKPIT_CLAUDE_CLI=/home/roblox/.local/bin/claude
+# PC zum Wecken/Herunterfahren (COCKPIT_PC_MAC, _HOST, _NUTZER), geschrieben
+# von deploy/roblox/pc-einrichten.sh. Fehlt sie, gibt es den Bereich PC nicht.
+EnvironmentFile=-/etc/cockpit-roblox/umgebung
 
 Restart=on-failure
 RestartSec=5

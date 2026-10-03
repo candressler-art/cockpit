@@ -1,8 +1,10 @@
 {
   "name": "Roblox-Cockpit",
-  "bereicheAus": ["notizen", "terminal", "server"],
+  "bereicheAus": ["terminal", "server"],
   "sessionSpiegel": false,
   "arbeitsWurzel": "~/spiele",
+  "vault": "~/vault",
+  "vaultSchreiben": true,
   "nutzer": "spieler",
   "vorschlaege": [
     "Lass uns ein neues Spiel anfangen. Frag mich erst nach meiner Idee.",

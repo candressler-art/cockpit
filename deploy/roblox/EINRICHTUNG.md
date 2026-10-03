@@ -10,10 +10,25 @@ Spezialisten, Team-Aufträge, Nutzung, Sprache), mit diesen Unterschieden:
 | Adresse | `https://servertwo.tail9c8a2b.ts.net:8443` | `https://servertwo.tail9c8a2b.ts.net:10000` |
 | Linux-Benutzer | `claude` | `roblox` |
 | Konto | Hauptkonto (+ Zusatzkonten) | nur Konto 2 |
-| Bereiche | alle | ohne Notizen, Terminal, Server |
+| Bereiche | alle | ohne Terminal und Server, dafür **PC** (aufwecken/herunterfahren) |
 | Arbeitsordner | überall | nur `~/spiele/` (je Spiel ein Rojo-Projekt) |
-| Spezialisten | `rollen/` | `varianten/roblox/rollen/` (Luau, Rojo, Exploit-Prüfung) |
-| Desktop-Sessions, Vault | sichtbar | nicht vorhanden |
+| Spezialisten | `rollen/` | `varianten/roblox/rollen/` (Luau, Rojo, Exploit-Prüfung, 3D-Modellierer mit Blender) |
+| Vault | dein Vault, nur lesend | eigener **Roblox-Vault**, Claude schreibt hinein; per Syncthing in Obsidian |
+| Desktop-Sessions | sichtbar | nicht vorhanden |
+
+## Worauf Konto 2 Zugriff hat
+
+| Darf | Darf nicht |
+|---|---|
+| Spiele unter `/home/roblox/spiele`, den Roblox-Vault `/home/roblox/vault` | `/home/claude`, deine SSH-Schlüssel, die Anmeldung deines Hauptkontos |
+| das Internet (Anthropic, Roblox-Doku, Pakete, Syncthing-Relays) | dein Vault, deine Chats, dein Haupt-Cockpit (auch nicht über `127.0.0.1:8765`) |
+| Sprache (Piper, Whisper, Vosk) auf dem Server | Heimnetz, andere Geräte im Tailnet, Docker, sudo |
+| auf deinem PC: **nur** Herunterfahren und den Blender-Tunnel (je ein eigener, eingeschränkter Schlüssel) | auf deinem PC eine Shell, Dateien, andere Ports |
+| Blender auf deinem PC, **solange es verbunden ist** (siehe unten) | die eigene Cockpit-API (sonst könnte ein Agent den PC ausschalten) |
+
+Dein Freund bekommt nie Passwort oder Zugangsschlüssel von Konto 2, er arbeitet
+nur über das Cockpit. Dein Haupt-Cockpit nutzt Konto 2 nur, wenn du den
+Schalter umlegst (siehe unten).
 
 Gesteuert wird das über `COCKPIT_VARIANTE=roblox` (`src/variante.ts`,
 `varianten/roblox/`). Ohne die Variable bleibt alles wie bisher.
@@ -35,7 +50,9 @@ Deshalb drei Schichten:
    System schreibgeschützt.
 3. **Netzsperre** (`netz.nft`): `roblox` darf ins Internet, aber nicht ins
    Heimnetz, nicht ins Tailnet und auf dem Server nur an Sprache (Piper,
-   Whisper, Vosk), das eigene Cockpit und den eigenen Rojo.
+   Whisper, Vosk), den eigenen Rojo, das eigene Syncthing und den
+   Blender-Tunnel. Einzige Ausnahme im Heimnetz: SSH zu deinem PC (für
+   Herunterfahren und Blender) und das Wake-on-LAN-Paket.
 
 Das Einrichtungsskript prüft am Ende, dass all das wirklich gesperrt ist.
 
@@ -96,7 +113,99 @@ einladen. Er installiert Tailscale, nimmt die Einladung an und öffnet
 Gegenprobe von seinem Rechner: `https://servertwo.tail9c8a2b.ts.net:8443`
 darf **nicht** laden.
 
-## 3. Roblox Studio verbinden (Rojo)
+## 3. So kommt ihr ins Roblox-Cockpit
+
+Auf jedem Gerät muss Tailscale laufen (beim Freund: mit angenommener Freigabe).
+
+- **Browser** (PC und Handy): `https://servertwo.tail9c8a2b.ts.net:10000`
+- **Als App aufs Handy**: Seite öffnen → „Zum Startbildschirm hinzufügen“
+  (iPhone: Teilen-Knopf → „Zum Home-Bildschirm“). Sie heißt „Roblox-Cockpit“.
+- **Deine Desktop-App**: `COCKPIT_DAEMON=servertwo.tail9c8a2b.ts.net:10000 cockpit-start`
+
+### Benachrichtigungen aufs Handy
+
+Das Cockpit meldet sich, wenn Claude fertig ist, eine Freigabe oder Frage
+wartet, ein Team-Auftrag endet, und wenn jemand den PC weckt oder
+herunterfährt, auch wenn die App zu ist (z.B. in der Schule):
+
+1. Roblox-Cockpit als App auf den Startbildschirm (beim iPhone geht Push
+   nur so).
+2. In der App: **Einstellungen → Benachrichtigungen** einschalten und
+   erlauben.
+
+Die Meldungen laufen über Apple bzw. Google, also auch ohne Heimnetz. Antippen
+öffnet das Cockpit, dafür muss Tailscale auf dem Handy an sein. Alle, die
+Benachrichtigungen eingeschaltet haben, bekommen alle Meldungen des
+Roblox-Cockpits.
+
+## 4. Deinen PC einrichten (Aufwecken, Herunterfahren, Blender, Vault)
+
+Auf deinem PC, nachdem `einrichten.sh` durch ist:
+
+```bash
+./deploy/roblox/pc-einrichten.sh
+```
+
+Das Skript:
+
+- schaltet **Wake-on-LAN** an. Im BIOS/UEFI muss es zusätzlich an sein, und
+  der PC muss per Kabel im selben Heimnetz hängen wie servertwo.
+- trägt zwei **eingeschränkte Schlüssel** des Servers in
+  `~/.ssh/authorized_keys` ein: einer darf nur `systemctl poweroff`, der
+  andere nur die Weiterleitung zu Blender (keine Shell). Beide nur von
+  servertwo aus. Dazu kommt eine sudo-Regel, die genau `systemctl poweroff`
+  ohne Passwort erlaubt.
+- meldet den PC beim Server an. Danach erscheint im Roblox-Cockpit der
+  Bereich **PC** mit „Aufwecken“ und „Herunterfahren“, für dich und deinen
+  Freund. Wer schaltet, löst beim anderen eine Benachrichtigung aus.
+- richtet Blender mit dem **blender-mcp**-Addon ein (siehe unten).
+- teilt den **Roblox-Vault** per Syncthing nach `~/Roblox-Vault`.
+
+Rückgängig: die zwei Zeilen mit `cockpit-roblox-` aus
+`~/.ssh/authorized_keys` löschen, `/etc/sudoers.d/cockpit-pc-aus` entfernen.
+
+### Blender (3D-Modellierer)
+
+Der Spezialist **3D-Modellierer** steuert Blender live auf deinem PC: Szene
+ansehen, Python in Blender ausführen, Viewport-Bildschirmfoto. Fertige
+Objekte exportiert er als FBX nach `~/Roblox-Vault/Modelle/<spiel>/`. Über den
+Vault landen sie auch beim Freund; in Studio: **Datei → Import 3D**.
+
+Zum Arbeiten: PC an (notfalls im Cockpit aufwecken), Blender öffnen, Taste
+**N** → Reiter **BlenderMCP** → **Connect to Claude**.
+
+**Wichtig:** Solange Blender verbunden ist, kann Claude dort beliebigen
+Python-Code ausführen, also auf deinem PC mit den Rechten von Blender. Wer
+im Roblox-Cockpit schreibt, also auch dein Freund, kann Claude dazu bringen.
+Deshalb bietet `pc-einrichten.sh` Blender als **Flatpak** an, das nur
+`~/Roblox-Vault` sieht und nicht dein Home mit SSH-Schlüsseln und Vault.
+Verbinde Blender nur, wenn ihr gerade modelliert, und trenne danach.
+
+Roblox Studio unter Linux läuft über [Vinegar](https://vinegarhq.org)
+(Flatpak `org.vinegarhq.Vinegar`).
+
+### Roblox-Vault in Obsidian
+
+Claude hält im Roblox-Vault alles fest: je Spiel eine Notiz mit Idee, Stand
+und offenen Punkten, Entscheidungen, Anleitungen. Ihr seht ihn
+
+- im Cockpit unter **Notizen**,
+- in Obsidian: **Ordner als Vault öffnen → `~/Roblox-Vault`**.
+
+Für den PC und das Handy deines Freundes: Er installiert Syncthing (Android:
+„Syncthing-Fork“; iPhone: „Möbius Sync“), schickt dir seine Geräte-ID, und
+du gibst den Vault frei, oder er bittet Claude im Roblox-Cockpit darum:
+
+```bash
+ssh -i ~/.ssh/id_ed25519_claude claude@192.168.2.193 \
+  'sudo -u roblox -H /home/roblox/.local/bin/vault-teilen <GERÄTE-ID> freund-handy'
+```
+
+Er nimmt dann in Syncthing das Gerät „servertwo-roblox“ und den Ordner
+„Roblox-Vault“ an. Die Verbindung läuft über die Syncthing-Relays, verschlüsselt,
+ohne Heimnetz oder Tailnet.
+
+## 5. Roblox Studio verbinden (Rojo)
 
 Einmalig je PC:
 
@@ -127,6 +236,8 @@ gehört es nicht in die Ordner, die Rojo verwaltet.
 ```bash
 ssh -i ~/.ssh/id_ed25519_claude claude@192.168.2.193 'journalctl -u cockpit-roblox -f'   # Logs
 ssh -i ~/.ssh/id_ed25519_claude claude@192.168.2.193 'sudo systemctl restart cockpit-roblox'
+# Blender-Tunnel und Vault-Syncthing:
+ssh -i ~/.ssh/id_ed25519_claude claude@192.168.2.193 'journalctl -u cockpit-roblox-blender -u cockpit-roblox-syncthing -n 30'
 ```
 
 Nach jedem `./deploy/server-einrichten.sh` läuft das Roblox-Cockpit noch mit

@@ -25,6 +25,7 @@ import { aufgabenBauen } from './ui/aufgaben.js'
 import { serverBauen } from './ui/server.js'
 import { notizenBauen } from './ui/notizen.js'
 import { terminalBauen } from './ui/terminal.js'
+import { pcBauen } from './ui/pc.js'
 import { wallpaperSetzen } from './wallpaper.js'
 import { variante } from './variante.js'
 
@@ -59,6 +60,8 @@ const BEREICHE = [
   { id: 'server', titel: 'Server', symbol: 'server', bauen: serverBauen },
   { id: 'notizen', titel: 'Notizen', symbol: 'notizen', bauen: notizenBauen },
   { id: 'terminal', titel: 'Terminal', symbol: 'terminal', bauen: terminalBauen },
+  // Nur, wenn der Daemon einen PC kennt (src/pc.ts).
+  ...(variante.pc ? [{ id: 'pc', titel: 'PC', symbol: 'pc', bauen: pcBauen }] : []),
   { id: 'einstellungen', titel: 'Einstellungen', symbol: 'einstellungen', bauen: einstellungenBauen },
 ].filter((b) => !variante.bereicheAus?.includes(b.id))
 const bereichNach = new Map(BEREICHE.map((b) => [b.id, b]))
@@ -252,7 +255,7 @@ bus.abonnieren('lauf_ende', (d) => {
 
 // --- Benachrichtigungen --------------------------------------------------------------
 // Nur wenn man nicht hinsieht; was gemeldet wird, steht in ui/meldungen.js.
-for (const typ of ['agent', 'freigabe', 'lauf_ende']) {
+for (const typ of ['agent', 'freigabe', 'lauf_ende', 'pc']) {
   bus.abonnieren(typ, (d) => benachrichtigen.pruefen(typ, d, { titelVon: chatliste.titelVon }))
 }
 

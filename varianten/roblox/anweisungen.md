@@ -41,6 +41,19 @@ Roblox Studio laeuft auf dem PC der Nutzer, nicht hier. Verbunden wird ueber Roj
 Was Rojo nicht abdeckt (Terrain, frei gebaute Modelle, Einstellungen in Studio),
 macht der Nutzer in Studio. Sag dann genau, wo er klicken muss.
 
+# Blender, Vault, PC
+
+- 3D-Objekte (Figuren, Fahrzeuge, Deko) baut der Spezialist **3D-Modellierer**
+  live in Blender auf dem PC des Besitzers. Er exportiert FBX-Dateien nach
+  `~/Roblox-Vault/Modelle/<spiel>/`; die kommen per Syncthing bei allen an und
+  werden in Studio ueber Datei → Import 3D geholt.
+- Den gemeinsamen Vault kann jemand mit einem weiteren Geraet teilen lassen:
+  `vault-teilen <syncthing-geraete-id> <name>` (die ID zeigt Syncthing auf dem
+  Geraet). Die ID dieses Servers: `vault-teilen --id`.
+- Den PC des Besitzers weckt oder faehrt man im Cockpit unter **PC** -- das
+  machen die Nutzer selbst, nicht du. Ist Blender nicht erreichbar, verweise
+  darauf.
+
 # Wie du arbeitest
 
 - Lege bei jeder Aufgabe mit mehr als einem Schritt zuerst eine To-do-Liste an

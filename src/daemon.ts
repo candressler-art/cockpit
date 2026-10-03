@@ -32,7 +32,7 @@ import { AufgabenSammler, AUFGABEN_FENSTER_MS, agentAusZeile } from './aufgaben.
 import { vaultDa, VAULT } from './vault.js'
 import { notizenLaden, notizenSuchen, notizLesen } from './notizen.js'
 import { vaultZugriffErlaubt } from './vaultZugriff.js'
-import { gedaechtnisOrdnerAnlegen, gedaechtnisWurzel, gedaechtnisZugriffErlaubt } from './gedaechtnis.js'
+import { gedaechtnisOrdnerAnlegen, gedaechtnisWurzel, gedaechtnisZugriffErlaubt, ordnerZugriffErlaubt } from './gedaechtnis.js'
 import { anhangSpeichern, anhaengePruefen, promptMitAnhaengen, alteAnhaengeLoeschen, MAX_ANHANG_BYTES } from './anhaenge.js'
 import { konsoleBefehl, verlaufAufnehmen, type KonsoleEintrag } from './konsole.js'
 import { cwdPruefen, folgenLesen, zahlLesen } from './eingaben.js'
@@ -55,6 +55,7 @@ import {
 } from './nutzung.js'
 import { kontenLesen } from './konten.js'
 import { VARIANTE, bereichAn, cwdInWurzel, varianteFuerOberflaeche } from './variante.js'
+import { pcKonfigLesen, wecken, herunterfahren, pcErreichbar } from './pc.js'
 
 const PORT = Number(process.env.COCKPIT_PORT ?? 8765)
 const HOST = process.env.COCKPIT_HOST ?? '127.0.0.1'
@@ -87,10 +88,20 @@ if (VARIANTE.id !== 'haupt') {
     (VARIANTE.arbeitsWurzel ? `, Arbeitswurzel ${VARIANTE.arbeitsWurzel}` : ''))
 }
 if (VARIANTE.arbeitsWurzel) mkdirSync(VARIANTE.arbeitsWurzel, { recursive: true })
-/** Vault nur, wenn der Bereich Notizen zu dieser Variante gehoert UND der Spiegel da ist. */
-const vaultNutzbar = (): boolean => bereichAn('notizen') && existsSync(VAULT)
+if (VARIANTE.vault) mkdirSync(VARIANTE.vault, { recursive: true })
+/**
+ * Vault nur, wenn der Bereich Notizen zu dieser Variante gehoert UND er da ist.
+ * Eine Variante bekommt nur ihren eigenen Vault, nie den Spiegel des Haupt-Cockpits.
+ */
+const vaultNutzbar = (): boolean =>
+  bereichAn('notizen') && (VARIANTE.id === 'haupt' || VARIANTE.vault !== null) && existsSync(VAULT)
 /** Wohin ein Chat ohne eigenes (vorhandenes) Arbeitsverzeichnis faellt. */
 const ERSATZ_CWD = VARIANTE.arbeitsWurzel ?? process.env.HOME ?? '/opt/cockpit'
+
+/** PC im Heimnetz (src/pc.ts) -- null, wenn nicht eingerichtet. */
+const PC = pcKonfigLesen()
+/** Wann zuletzt geweckt bzw. heruntergefahren wurde -- gegen Doppelklicks von zwei Leuten. */
+let pcZuletzt = 0
 
 const supervisor = new Supervisor(db)
 const einstellungen = new EinstellungsSpeicher(db, VARIANTE.arbeitsWurzel ?? homedir())
@@ -395,9 +406,11 @@ function chatZugStarten(
         ...(vaultNutzbar() ? { zusatzVerzeichnisse: [VAULT] } : {}),
         systemPromptZusatz: opt.systemPromptZusatz,
         // Vault und Anhaenge nur lesen, das Gedaechtnis (eigenes und das der
-        // Spezialisten) lesen und schreiben -- dafuer keine Freigabe.
+        // Spezialisten) lesen und schreiben -- dafuer keine Freigabe. Den
+        // eigenen Vault einer Variante (vaultSchreiben) auch beschreiben.
         autoErlauben: (toolName, input) =>
           (vaultNutzbar() && vaultZugriffErlaubt(toolName, input, VAULT)) || vaultZugriffErlaubt(toolName, input, ANHAENGE) ||
+          (vaultNutzbar() && VARIANTE.vaultSchreiben && ordnerZugriffErlaubt(toolName, input, VAULT)) ||
           gedaechtnisZugriffErlaubt(toolName, input),
       })
       const neueSession = supervisor.agentenListe(f.laufId).find((a) => a.agentId === 'chat')?.sessionId
@@ -1080,7 +1093,29 @@ const server = createServer(async (req, res) => {
     }
 
     if (pfad === '/api/variante' && req.method === 'GET') {
-      return json(200, varianteFuerOberflaeche())
+      return json(200, { ...varianteFuerOberflaeche(), pc: PC !== null })
+    }
+
+    // --- PC wecken / herunterfahren (src/pc.ts) ---
+    if (pfad.startsWith('/api/pc')) {
+      if (!PC) return json(404, { fehler: 'Kein PC eingerichtet' })
+      if (pfad === '/api/pc' && req.method === 'GET') {
+        return json(200, { an: await pcErreichbar(PC), host: PC.host })
+      }
+      const aktion = pfad === '/api/pc/wecken' ? 'wecken' : pfad === '/api/pc/aus' ? 'aus' : null
+      if (!aktion || req.method !== 'POST') return json(404, { fehler: 'nicht gefunden' })
+      if (Date.now() - pcZuletzt < 20_000) return json(429, { fehler: 'Eben erst geschaltet -- kurz warten' })
+      pcZuletzt = Date.now()
+      if (aktion === 'wecken') {
+        await wecken(PC)
+      } else {
+        const r = await herunterfahren(PC)
+        if (!r.ok) { pcZuletzt = 0; return json(502, { fehler: r.meldung }) }
+      }
+      console.log(`[pc] ${aktion === 'wecken' ? 'Geweckt' : 'Heruntergefahren'}: ${PC.host}`)
+      verteilen('pc', { aktion })
+      melden('pc', { aktion })
+      return json(200, { ok: true })
     }
 
     // Bereiche, die die Variante abschaltet, gibt es auch in der API nicht --

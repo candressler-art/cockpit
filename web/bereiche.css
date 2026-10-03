@@ -375,3 +375,11 @@ details[open] > summary .a-pfeil { transform: rotate(90deg); }
   .akzente { grid-template-columns: 1fr 1fr; }
   .akzent-wahl { min-height: 46px; }
 }
+
+/* Bereich PC (ui/pc.js) */
+.pc-karte { max-width: 520px; border: 1px solid var(--surface0); border-radius: 11px; padding: 16px; background: var(--base); display: flex; flex-direction: column; gap: 10px; }
+.pc-status { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 15px; }
+.pc-punkt { width: 10px; height: 10px; border-radius: 50%; background: var(--overlay); flex: none; }
+.pc-punkt.an { background: var(--gruen, #a6e3a1); }
+.pc-knoepfe { display: flex; gap: 10px; flex-wrap: wrap; }
+.pc-karte p { margin: 0; font-size: 13px; }

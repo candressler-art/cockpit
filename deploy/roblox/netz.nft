@@ -31,10 +31,19 @@ table inet cockpit_roblox {
     tcp dport 53 accept
 
     # Auf dem Server selbst nur, was das Roblox-Cockpit braucht:
-    #   8766 eigener Daemon, 34873 eigener Rojo,
-    #   10200 Piper, 10300 Whisper, 2700 Vosk (Sprache).
-    oifname "lo" tcp dport { 8766, 34873, 10200, 10300, 2700 } accept
+    #   34873 eigener Rojo, 8385 eigenes Syncthing (Oberflaeche),
+    #   9876 Blender-Tunnel zum PC, 10200 Piper, 10300 Whisper, 2700 Vosk.
+    # Der eigene Daemon (8766) bewusst NICHT: sonst koennte ein Agent ueber
+    # dessen API den PC herunterfahren.
+    oifname "lo" tcp dport { 34873, 8385, 9876, 10200, 10300, 2700 } accept
     oifname "lo" reject
+
+    # PC im Heimnetz: nur SSH (Herunterfahren und Blender-Tunnel, beide mit
+    # Schluesseln, die auf dem PC je genau eine Sache duerfen) und das
+    # Wake-on-LAN-Paket. Die Zeile darunter setzt einrichten.sh ein.
+    # PC-AUSNAHME
+    ip daddr 255.255.255.255 udp dport 9 accept
+    ip daddr 255.255.255.255 reject
 
     # Heimnetz, Tailnet und sonstige private Netze: gesperrt.
     ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16 } reject

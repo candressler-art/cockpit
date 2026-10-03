@@ -49,7 +49,7 @@ export function chatSystemZusatz(
 ): string {
   // Eine Variante (src/variante.ts) bringt ihre eigene Einleitung mit -- die
   // des Haupt-Cockpits spricht von Can und gilt dort nicht.
-  if (anweisungen) return variantenZusatz(anweisungen, spezialisten, gedaechtnis)
+  if (anweisungen) return variantenZusatz(anweisungen, spezialisten, gedaechtnis, vault)
   const teile = [
     'Du arbeitest im Cockpit, Cans Oberflaeche fuer Claude Code. Antworte auf Deutsch, ' +
       'wenn Can Deutsch schreibt.',
@@ -99,8 +99,18 @@ export function chatSystemZusatz(
  * ohne Namen -- eine Variante kann mehrere Leute haben. Einen Vault gibt es
  * dort nicht.
  */
-function variantenZusatz(anweisungen: string, spezialisten: boolean, gedaechtnis: string | null): string {
+function variantenZusatz(anweisungen: string, spezialisten: boolean, gedaechtnis: string | null, vault: string | null): string {
   const teile = [anweisungen]
+  if (vault) {
+    // Der eigene Vault einer Variante ist kein Spiegel: hier gehoert alles hin.
+    teile.push(
+      `Euer gemeinsamer Obsidian-Vault liegt unter ${vault}. Halte dort alles fest, was ueber ` +
+        'diesen Chat hinaus wichtig ist: je Spiel eine Notiz (Idee, Stand, Systeme, offene Punkte), ' +
+        'Entscheidungen mit Begruendung, Anleitungen fuer Studio. Obsidian-Markdown mit [[Verweisen]]; ' +
+        'erst nachsehen, ob es die Notiz schon gibt, dann ergaenzen statt doppelt anlegen. ' +
+        'Lesen und Schreiben dort braucht keine Freigabe. Die Nutzer sehen den Vault im Cockpit und in Obsidian.',
+    )
+  }
   if (spezialisten) {
     teile.push(
       'Du kannst Spezialisten (Subagenten) mit dem Agent-Werkzeug beauftragen, wenn ihre ' +

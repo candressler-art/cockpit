@@ -177,7 +177,7 @@ done
 [ "$GEFUNDEN" -eq 0 ] && ok "Haupt-Cockpit hat Konto 2 nicht als Zusatzkonto -- nichts zu tun"
 
 # --- 7. Rojo -----------------------------------------------------------------
-schritt "7/9  Rojo und rojo-sync"
+schritt "7/9  Werkzeuge: Rojo, uv (Blender), Syncthing (Vault), Schluessel fuer den PC"
 if "${SSH[@]}" "$ALS_ROBLOX test -x /home/roblox/.local/bin/rojo"; then
   ok "rojo schon installiert ($("${SSH[@]}" "$ALS_ROBLOX /home/roblox/.local/bin/rojo --version" 2>/dev/null))"
 else
@@ -194,20 +194,47 @@ else
 fi
 TS_NAME=$("${SSH[@]}" 'tailscale status --json 2>/dev/null | grep -oP "\"DNSName\":\s*\"\K[^\"]+" | head -1' 2>/dev/null | sed 's/\.$//')
 TS_IP=$("${SSH[@]}" 'tailscale ip -4 2>/dev/null | head -1')
-if "${SSH[@]}" "sudo install -m 755 -o roblox -g roblox /opt/cockpit/varianten/roblox/bin/rojo-sync /home/roblox/.local/bin/rojo-sync && echo '${TS_NAME:-servertwo}' | sudo -u roblox tee /home/roblox/.rojo-host >/dev/null"; then
-  ok "rojo-sync installiert (Studio verbindet mit ${TS_NAME:-servertwo}:$ROJO_TS_PORT)"
+if "${SSH[@]}" "for h in rojo-sync vault-teilen; do sudo install -m 755 -o roblox -g roblox /opt/cockpit/varianten/roblox/bin/\$h /home/roblox/.local/bin/\$h || exit 1; done && echo '${TS_NAME:-servertwo}' | sudo -u roblox tee /home/roblox/.rojo-host >/dev/null"; then
+  ok "rojo-sync und vault-teilen installiert (Studio verbindet mit ${TS_NAME:-servertwo}:$ROJO_TS_PORT)"
 else
-  fehlt "rojo-sync nicht installiert"
+  fehlt "Helfer nicht installiert"
+fi
+# uv/uvx startet den Blender-MCP-Server (src/mcp.ts 'blender').
+if "${SSH[@]}" "$ALS_ROBLOX test -x /home/roblox/.local/bin/uvx"; then
+  ok "uv schon installiert"
+elif "${SSH[@]}" "$ALS_ROBLOX bash -c 'curl -LsSf https://astral.sh/uv/install.sh | UV_NO_MODIFY_PATH=1 sh' >/dev/null 2>&1"; then
+  ok "uv installiert"
+else
+  fehlt "uv-Installation fehlgeschlagen (ohne uv kein Blender)"
+fi
+if "${SSH[@]}" 'command -v syncthing >/dev/null || sudo apt-get install -y syncthing >/dev/null 2>&1'; then
+  ok "Syncthing vorhanden ($("${SSH[@]}" 'syncthing --version' 2>/dev/null | cut -d' ' -f2))"
+else
+  fehlt "Syncthing nicht installiert (sudo apt install syncthing)"
+fi
+# Zwei Schluessel, je fuer genau eine Sache auf dem PC (pc-einrichten.sh traegt
+# sie dort mit Einschraenkung ein): pc_aus faehrt herunter, pc_blender tunnelt.
+if "${SSH[@]}" "$ALS_ROBLOX bash -c 'install -d -m 700 ~/.ssh && for k in pc_aus pc_blender; do [ -f ~/.ssh/\$k ] || ssh-keygen -q -t ed25519 -N \"\" -C cockpit-roblox-\$k -f ~/.ssh/\$k || exit 1; done'"; then
+  ok "Schluessel fuer den PC bereit (~roblox/.ssh/pc_aus, pc_blender)"
+else
+  fehlt "Schluessel fuer den PC nicht erzeugt"
 fi
 
 # --- 8. Netzsperre und Dienst ---------------------------------------------------
 schritt "8/9  Netzsperre und systemd-Units"
-if "${SSH[@]}" 'sudo install -d -m 755 /etc/cockpit-roblox && sudo install -m 644 /opt/cockpit/deploy/roblox/netz.nft /etc/cockpit-roblox/netz.nft && sudo nft -c -f /etc/cockpit-roblox/netz.nft'; then
+# umgebung: PC-Angaben (pc-einrichten.sh). Anlegen, falls es sie noch nicht gibt.
+"${SSH[@]}" 'sudo install -d -m 755 /etc/cockpit-roblox && { [ -f /etc/cockpit-roblox/umgebung ] || sudo install -m 644 /dev/null /etc/cockpit-roblox/umgebung; }'
+if "${SSH[@]}" 'sudo bash /opt/cockpit/deploy/roblox/netz-anwenden.sh' | sed 's/^/        /'; then
   ok "Regeln geprueft"
 else
   fehlt "netz.nft laesst sich nicht laden"; exit 1
 fi
-if "${SSH[@]}" 'sudo cp /opt/cockpit/deploy/roblox/cockpit-roblox-netz.service /opt/cockpit/deploy/roblox/cockpit-roblox.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable cockpit-roblox-netz cockpit-roblox >/dev/null 2>&1 && sudo systemctl restart cockpit-roblox-netz && sudo systemctl restart cockpit-roblox' 2>/dev/null; then
+if "${SSH[@]}" "$ALS_ROBLOX bash /opt/cockpit/deploy/roblox/syncthing-einrichten.sh vorher"; then
+  ok "Syncthing-Konfiguration fuer den Vault"
+else
+  fehlt "Syncthing-Konfiguration fehlgeschlagen"
+fi
+if "${SSH[@]}" 'cd /opt/cockpit/deploy/roblox && sudo cp cockpit-roblox-netz.service cockpit-roblox.service cockpit-roblox-syncthing.service cockpit-roblox-blender.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable cockpit-roblox-netz cockpit-roblox cockpit-roblox-syncthing >/dev/null 2>&1 && sudo systemctl restart cockpit-roblox-netz && sudo systemctl restart cockpit-roblox cockpit-roblox-syncthing' 2>/dev/null; then
   sleep 3
   if "${SSH[@]}" 'systemctl is-active --quiet cockpit-roblox'; then
     ok "cockpit-roblox.service laeuft"
@@ -217,6 +244,18 @@ if "${SSH[@]}" 'sudo cp /opt/cockpit/deploy/roblox/cockpit-roblox-netz.service /
   fi
 else
   fehlt "Units konnten nicht eingerichtet werden"
+fi
+if "${SSH[@]}" "$ALS_ROBLOX bash /opt/cockpit/deploy/roblox/syncthing-einrichten.sh nachher" | sed 's/^/        /'; then
+  ok "Vault-Syncthing laeuft (Geraete-ID: $("${SSH[@]}" "$ALS_ROBLOX /home/roblox/.local/bin/vault-teilen --id" 2>/dev/null))"
+else
+  fehlt "Vault-Ordner in Syncthing nicht eingerichtet"
+fi
+# Blender-Tunnel nur, wenn ein PC eingetragen ist (pc-einrichten.sh).
+if "${SSH[@]}" 'grep -q "^COCKPIT_PC_HOST=" /etc/cockpit-roblox/umgebung'; then
+  "${SSH[@]}" 'sudo systemctl enable cockpit-roblox-blender >/dev/null 2>&1 && sudo systemctl restart cockpit-roblox-blender' &&
+    ok "Blender-Tunnel zum PC aktiv (wartet, bis PC und Blender an sind)" || fehlt "Blender-Tunnel nicht gestartet"
+else
+  ok "noch kein PC eingetragen -- danach ./deploy/roblox/pc-einrichten.sh auf dem PC"
 fi
 
 # --- 9. Tailscale ---------------------------------------------------------------
@@ -249,6 +288,7 @@ probe "Vault-Spiegel lesen" "ls /var/lib/cockpit/vault"
 probe "Heimnetz (Router)" "curl -s -m 3 -o /dev/null http://192.168.2.1"
 probe "sudo" "sudo -n true"
 probe "docker" "docker ps"
+probe "eigene Cockpit-API (z.B. PC ausschalten)" "curl -sf -m 3 http://127.0.0.1:8766/api/variante"
 # Ohne -f: jede HTTP-Antwort (auch 404) heisst, die Verbindung steht.
 if "${SSH[@]}" "$ALS_ROBLOX curl -s -m 5 -o /dev/null https://api.anthropic.com"; then
   ok "Internet geht (api.anthropic.com)"
@@ -272,7 +312,8 @@ cat <<WEITER
 Noch von Hand (siehe deploy/roblox/EINRICHTUNG.md):
   1. Tailscale-Policy: Freunde nur auf ${TS_IP:-<IP von servertwo>}:$COCKPIT_TS_PORT und :$ROJO_TS_PORT
   2. servertwo mit dem Freund teilen (Tailscale-Admin -> Machines -> servertwo -> Share)
-  3. In Roblox Studio das Rojo-Plugin installieren und mit ${TS_NAME:-servertwo} Port $ROJO_TS_PORT verbinden
+  3. Auf deinem PC: ./deploy/roblox/pc-einrichten.sh (Aufwecken, Herunterfahren, Blender, Vault)
+  4. In Roblox Studio das Rojo-Plugin installieren und mit ${TS_NAME:-servertwo} Port $ROJO_TS_PORT verbinden
 
 Roblox-Cockpit: https://${TS_NAME:-servertwo}:$COCKPIT_TS_PORT
 Logs:           ssh -i $KEY claude@$SERVER 'journalctl -u cockpit-roblox -f'

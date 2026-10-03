@@ -44,6 +44,10 @@ export interface Variante {
   nutzer: string
   /** Vorschlaege im leeren Chat, null = die des Haupt-Cockpits. */
   vorschlaege: string[] | null
+  /** Eigener Obsidian-Vault (absolut), null = COCKPIT_VAULT bzw. der Spiegel des Haupt-Cockpits. */
+  vault: string | null
+  /** Duerfen die Agenten in den Vault schreiben? Im Haupt-Cockpit nicht -- dort ist er nur ein Spiegel. */
+  vaultSchreiben: boolean
 }
 
 export const HAUPT_VARIANTE: Variante = {
@@ -56,6 +60,8 @@ export const HAUPT_VARIANTE: Variante = {
   rollenDir: null,
   nutzer: 'can',
   vorschlaege: null,
+  vault: null,
+  vaultSchreiben: false,
 }
 
 /**
@@ -90,13 +96,17 @@ export function varianteLaden(angabe: string | undefined, wurzel: string, heim: 
     throw new Error(`Variante ${dir}: bereicheAus darf nur ${ABSCHALTBARE_BEREICHE.join(', ')} enthalten`)
   }
 
-  let arbeitsWurzel: string | null = null
-  if (j.arbeitsWurzel !== undefined && j.arbeitsWurzel !== null) {
-    if (typeof j.arbeitsWurzel !== 'string') throw new Error(`Variante ${dir}: arbeitsWurzel muss ein Pfad sein`)
-    const p = j.arbeitsWurzel.startsWith('~/') ? join(heim, j.arbeitsWurzel.slice(2)) : j.arbeitsWurzel
-    if (!isAbsolute(p)) throw new Error(`Variante ${dir}: arbeitsWurzel muss absolut sein oder mit ~/ beginnen`)
-    arbeitsWurzel = p.replace(/(.)\/+$/, '$1')
+  /** Pfadfeld lesen: absolut oder ~/..., ohne Schraegstrich am Ende; fehlt es, null. */
+  const pfadFeld = (feld: string): string | null => {
+    const wert = j[feld]
+    if (wert === undefined || wert === null) return null
+    if (typeof wert !== 'string') throw new Error(`Variante ${dir}: ${feld} muss ein Pfad sein`)
+    const p = wert.startsWith('~/') ? join(heim, wert.slice(2)) : wert
+    if (!isAbsolute(p)) throw new Error(`Variante ${dir}: ${feld} muss absolut sein oder mit ~/ beginnen`)
+    return p.replace(/(.)\/+$/, '$1')
   }
+  const arbeitsWurzel = pfadFeld('arbeitsWurzel')
+  const vault = pfadFeld('vault')
 
   const nutzer = j.nutzer ?? 'du'
   if (typeof nutzer !== 'string' || !/^[\p{L}\p{N}_-]{1,20}$/u.test(nutzer)) {
@@ -124,6 +134,9 @@ export function varianteLaden(angabe: string | undefined, wurzel: string, heim: 
     rollenDir,
     nutzer,
     vorschlaege: vorschlaege ? (vorschlaege as string[]).slice(0, 6) : null,
+    vault,
+    // Schreiben nur in einen eigenen Vault -- nie in den Spiegel des Haupt-Cockpits.
+    vaultSchreiben: vault !== null && j.vaultSchreiben === true,
   }
 }
 

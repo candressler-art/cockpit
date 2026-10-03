@@ -13,4 +13,6 @@ export const variante = {
   nutzer: 'can',
   /** Vorschlaege im leeren Chat; null = die des Haupt-Cockpits. */
   vorschlaege: null,
+  /** Bereich PC (wecken/herunterfahren) -- nur, wenn der Daemon einen PC kennt. */
+  pc: false,
 }

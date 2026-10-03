@@ -107,6 +107,7 @@ von sich aus einen beschleunigten Kontext anzulegen (damals fuer die
 | `COCKPIT_MCP_BROWSER` | — | ueberschreibt den Browser-MCP-Server |
 | `COCKPIT_KONTEN_DIR` | `~/.claude-konten` | Verzeichnis der Zusatzkonten (siehe unten) |
 | `COCKPIT_VARIANTE` | — | Variante unter `varianten/<name>/`, z.B. `roblox` (siehe unten) |
+| `COCKPIT_PC_MAC/HOST/NUTZER` | — | PC im Heimnetz fuer den Bereich PC (wecken, herunterfahren); `src/pc.ts` |
 
 ## Aufbau
 
@@ -141,6 +142,7 @@ von sich aus einen beschleunigten Kontext anzulegen (damals fuer die
 | `src/wyoming.ts` | Wyoming-Rahmen schreiben/zerlegen, ohne Netzwerk -- von hoeren.ts genutzt |
 | `src/audio.ts` | PCM auf 16 kHz resampeln |
 | `src/konsole.ts` | Befehle mit Freigabepflicht |
+| `src/pc.ts` | PC wecken (Wake-on-LAN), herunterfahren (SSH mit Zwangsbefehl), Status |
 | `src/variante.ts` | Varianten: Name, abgeschaltete Bereiche, Arbeitswurzel, eigene Anweisungen und Rollen |
 | `src/konten.ts` | mehrere Claude-Code-Konten: Erkennung, Wahl, Sperrung bei Limit |
 | `src/kontenNutzung.ts` | Limits und Guthaben je Konto abfragen |
@@ -242,7 +244,9 @@ Team-Auftrag, und die Ordnerwahl zeigt nichts davon. Ohne die Variable bleibt
 alles wie bisher.
 
 Einzige Variante bisher: das **Roblox-Cockpit** (`varianten/roblox/`), das
-mit Konto 2 nur Roblox-Spiele baut und mitbenutzt wird. Es laeuft als eigener
+mit Konto 2 nur Roblox-Spiele baut und mitbenutzt wird -- mit eigenem,
+beschreibbarem Vault (`vault`, `vaultSchreiben`), Rojo-Sync nach Studio,
+Blender auf dem PC (3D-Modellierer, blender-mcp) und dem Bereich PC. Es laeuft als eigener
 Linux-Benutzer hinter einer Netzsperre, siehe `deploy/roblox/EINRICHTUNG.md`.
 
 ## Fachrollen
@@ -373,6 +377,8 @@ kein Profil.
 | `/api/konten` | GET | Konten mit Anmelde-, Sperr-, Vorzugs- und Nutzungsstand, Guthaben, Prognose |
 | `/api/konten` | POST | bevorzugtes Konto setzen (`name`, `null` hebt es auf) |
 | `/api/konten/schalter` | POST | Konto in diesem Cockpit nutzen oder nicht (`name`, `an`) |
+| `/api/pc` | GET | PC an oder aus (nur mit `COCKPIT_PC_*`) |
+| `/api/pc/wecken`, `/api/pc/aus` | POST | PC wecken bzw. herunterfahren |
 | `/api/nutzung` | GET | Tokens je Tag und Kennzahlen |
 | `/api/nutzung/tag?tag=` | GET | Sitzungen eines Tages mit Chat |
 | `/api/system` | GET | Auslastung beider Server, Verlauf 1 h |
