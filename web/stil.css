@@ -59,6 +59,13 @@
 :root[data-akzent="gruvbox"]    { --akzent: #fabd2f; --akzent-2: #b8bb26; }
 :root[data-akzent="dracula"]    { --akzent: #bd93f9; --akzent-2: #ff79c6; }
 :root[data-akzent="blau"]       { --akzent: #3b82f6; --akzent-2: #06b6d4; }
+:root[data-akzent="nord"] { --akzent: #88c0d0; --akzent-2: #81a1c1; }
+:root[data-akzent="everforest"] { --akzent: #a7c080; --akzent-2: #dbbc7f; }
+:root[data-akzent="kanagawa"] { --akzent: #7e9cd8; --akzent-2: #e6c384; }
+:root[data-akzent="synthwave"] { --akzent: #ff2e97; --akzent-2: #00e5ff; }
+:root[data-akzent="sonnenuntergang"] { --akzent: #ff7a59; --akzent-2: #ffc857; }
+:root[data-akzent="matrix"] { --akzent: #00ff66; --akzent-2: #00b3a4; }
+:root[data-akzent="blutmond"] { --akzent: #ff4d6d; --akzent-2: #c77dff; }
 
 * { box-sizing: border-box; }
 html, body { height: 100%; }
@@ -565,7 +572,7 @@ pre.diff { white-space: pre; overflow-wrap: normal; }
 .fetch-zeilen dd { margin: 0; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fetch-zeilen dd.dran { color: var(--orange); }
 .fetch-zeilen dd .leise { color: var(--overlay); }
-.fetch-farben { grid-column: 2; display: flex; gap: 6px; margin-top: 6px; }
+.fetch-farben { grid-column: 2; display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .farbblock {
   width: 26px; height: 16px; border-radius: 4px; border: 0; padding: 0;
   background: linear-gradient(135deg, var(--a) 50%, var(--b) 50%);
