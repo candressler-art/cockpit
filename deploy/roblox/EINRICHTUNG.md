@@ -70,7 +70,7 @@ Einmalig auf dem Mac:
 xcode-select --install                 # git, falls noch nicht da
 brew install node                      # Node 22 oder neuer (node --version)
 git clone https://github.com/candressler-art/cockpit.git ~/cockpit
-cd ~/cockpit && git checkout claude/nifty-wozniak-6o2fls
+cd ~/cockpit && git checkout live-diktat
 ```
 
 Der Mac braucht denselben SSH-Schlüssel wie der Desktop, um auf servertwo zu
@@ -174,7 +174,7 @@ Roblox-Cockpits.
 Am **Linux-Desktop** (nicht am Mac), nachdem `einrichten.sh` durch ist:
 
 ```bash
-cd ~/projekte/cockpit && git fetch && git checkout claude/nifty-wozniak-6o2fls
+cd ~/projekte/cockpit && git fetch && git checkout live-diktat
 ./deploy/roblox/pc-einrichten.sh
 ```
 
