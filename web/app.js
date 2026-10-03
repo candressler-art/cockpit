@@ -32,6 +32,7 @@ import { variante } from './variante.js'
 // Wallpaper zuerst: es liegt hinter den durchsichtigen Kacheln.
 wallpaperSetzen()
 addEventListener('akzent-geaendert', (e) => wallpaperSetzen(e.detail))
+addEventListener('design-geaendert', (e) => wallpaperSetzen(undefined, e.detail))
 
 await bus.basisErmitteln()
 // Die Stimmstufe ist je Geraet (localStorage) -- vor der ersten Meldung lesen.

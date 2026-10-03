@@ -95,19 +95,20 @@ export function eingabeBauen(opt) {
     feld.style.height = `${Math.min(feld.scrollHeight, Math.round(innerHeight * 0.4))}px`
   }
   // Vorschlag fuer die naechste Nachricht (daemon vorschlag.ts): steht als
-  // echter Text im Feld, grau, solange er unveraendert ist. Ein Klick ans Ende
-  // zum Ergaenzen, am Rechner ein Rechtsklick zum Senden.
+  // Schatten im leeren Feld (Platzhalter, also nie echter Text). Sobald Can
+  // tippt, ist er weg; Pfeil nach rechts uebernimmt ihn ans Ende, in normaler Farbe.
   let vorschlagText = null
-  const vorschlagAus = () => { vorschlagText = null; feld.classList.remove('vorschlag-text'); feld.removeAttribute('title') }
-  feld.addEventListener('contextmenu', (ev) => {
-    // Nur am Rechner (am Handy ist langes Druecken das Auswahlmenue) und nur,
-    // solange der Text noch genau der Vorschlag ist.
-    if (vorschlagText === null || feld.value !== vorschlagText || matchMedia('(pointer: coarse)').matches) return
+  const vorschlagAus = () => { vorschlagText = null; feld.placeholder = PLATZHALTER }
+  feld.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'ArrowRight' || vorschlagText === null || feld.value !== '' || ev.shiftKey || ev.ctrlKey || ev.altKey || ev.metaKey || ev.isComposing) return
     ev.preventDefault()
-    senden()
+    feld.value = vorschlagText
+    vorschlagAus()
+    groesse()
+    knopfZustand()
+    feld.setSelectionRange(feld.value.length, feld.value.length)
   })
   feld.addEventListener('input', () => {
-    if (vorschlagText !== null && feld.value !== vorschlagText) vorschlagAus()
     // Waehrend des Diktats: was Can tippt, gehoert ihm -- die Erkennung
     // schreibt danach dahinter weiter (diktat.js).
     if (laufend) { laufend.eingabe(); spiegelZeichnen() }
@@ -352,7 +353,7 @@ export function eingabeBauen(opt) {
     diktat.el.classList.remove('warnt')
     diktat.zeit.classList.remove('warnt')
     mikroKnopf.setAttribute('aria-pressed', String(an))
-    feld.placeholder = an ? 'Sprich einfach los – der Text erscheint hier …' : PLATZHALTER
+    feld.placeholder = an ? 'Sprich einfach los – der Text erscheint hier …' : (vorschlagText ?? PLATZHALTER)
     if (z === 'oeffnet') {
       diktat.marke.replaceChildren(symbol('mikro', 15))
       setzen(diktat.text, 'Mikro wird geöffnet …')
@@ -556,27 +557,18 @@ export function eingabeBauen(opt) {
       laeuft = an
       el.classList.toggle('laeuft', an)
       // Das Diktat setzt seinen eigenen Platzhalter und stellt danach PLATZHALTER her.
-      if (diktatZustand === 'aus') feld.placeholder = an ? 'Weiterschreiben – wird gelesen, sobald Claude fertig ist' : PLATZHALTER
+      if (diktatZustand === 'aus') feld.placeholder = an ? 'Weiterschreiben – wird gelesen, sobald Claude fertig ist' : (vorschlagText ?? PLATZHALTER)
       knopfZustand()
     },
     /** Fuer bestehende Chats steht der Ordner fest (null = frei waehlbar). */
     ordnerFestlegen(p) { ordnerFest = p; ordnerZeigen() },
-    /** Vorschlag ins leere Feld legen -- nie über etwas, das Can schon tippt, diktiert oder anhängt. */
+    /** Vorschlag als Schatten ins leere Feld -- nie über etwas, das Can schon diktiert oder anhängt. */
     vorschlagSetzen(t) {
-      if (!t || laeuft || diktatZustand !== 'aus' || feld.value.trim() || anhaenge.length) return
-      feld.value = t
+      if (!t || laeuft || diktatZustand !== 'aus' || anhaenge.length) return
       vorschlagText = t
-      feld.classList.add('vorschlag-text')
-      feld.title = 'Vorschlag – Rechtsklick sendet ihn, ein Klick ans Ende zum Ergänzen'
-      groesse()
-      knopfZustand()
-      // Cursor ans Ende: wer das Feld schon im Fokus hat, tippt direkt weiter.
-      feld.setSelectionRange(t.length, t.length)
+      feld.placeholder = t
     },
-    vorschlagWeg() {
-      if (vorschlagText !== null && feld.value === vorschlagText) { feld.value = ''; groesse(); knopfZustand() }
-      vorschlagAus()
-    },
+    vorschlagWeg: vorschlagAus,
     textSetzen(t) { vorschlagAus(); laufend?.anhalten(); feld.value = t; groesse(); knopfZustand() },
     /** Schon hochgeladene Anhaenge (Pfade unter ANHAENGE) wieder ins Feld -- "Zuruecknehmen" aus der Warteschlange. */
     anhaengeUebernehmen(pfade) {
