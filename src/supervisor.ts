@@ -13,7 +13,10 @@ import {
 } from '@anthropic-ai/claude-agent-sdk'
 import { kenntAufwand } from './chatOptionen.js'
 import { modellName } from './einstellungen.js'
-import { AUTO_ERSATZ, MODELL_AUTO, MODELL_JE_STUFE, aufwandFuer, modellWaehlen, type Auftrag } from './modellwahl.js'
+import {
+  AUTO_ERSATZ, CACHE_FRIST_MS, MODELL_AUTO, MODELL_JE_STUFE, aufwandFuer, cacheBinden, cacheGrenze, modellWaehlen,
+  nichtsZuWaehlen, stufeVon, type Auftrag, type CacheLage,
+} from './modellwahl.js'
 import { type Entscheidung, freigabeErgebnis } from './freigaben.js'
 import type { CockpitDb } from './db.js'
 import { einordnen } from './normalisieren.js'
@@ -151,6 +154,8 @@ export class Supervisor extends EventEmitter {
   private seq = new Map<string, number>()
   private agenten = new Map<string, AgentState>()
   private laufende = new Map<string, { abort: AbortController }>()
+  /** Womit der letzte Zug je Agent lief -- fuer die Modellwahl (Prompt-Cache, modellwahl.ts). Nur im Speicher. */
+  private cacheLagen = new Map<string, CacheLage>()
   /**
    * Letzter gemessener Limitstand -- ueber ALLE Konten hinweg, vom zuletzt
    * aktiven. Bleibt so fuer /api/gesundheit, das laut Vorgabe kompatibel
@@ -427,6 +432,7 @@ export class Supervisor extends EventEmitter {
         this.agentAendern(o.runId, o.agentId, { status: 'starting', endedAt: null, lastError: null })
         konto = naechstes
       }
+      this.cacheLageMerken(k, o, konto)
     } finally {
       this.laufende.delete(k)
     }
@@ -441,16 +447,40 @@ export class Supervisor extends EventEmitter {
    * und als Modell am Agenten.
    */
   private async modellAutomatisch(o: AgentStartOptionen, konto: Konto | null, signal: AbortSignal): Promise<AgentStartOptionen> {
-    const wahl = await modellWaehlen({ text: o.prompt, ...o.modellKontext }, kontoUmgebung(konto), signal)
+    // Ist der Cache des vorigen Zugs noch warm, geht es nicht abwaerts; ist
+    // er schon Opus mit vollem Aufwand, spart das sogar die Wahl selbst.
+    const grenze = cacheGrenze(this.cacheLagen.get(this.schluessel(o.runId, o.agentId)), konto?.name ?? null, Date.now())
+    const sparen = grenze !== null && nichtsZuWaehlen(grenze, o.effort)
+    const wahl = sparen
+      ? null
+      : await modellWaehlen({ text: o.prompt, ...o.modellKontext }, kontoUmgebung(konto), signal)
     if (signal.aborted) return o
-    const model = wahl ? MODELL_JE_STUFE[wahl.stufe] : AUTO_ERSATZ
-    const effort = !kenntAufwand(model) ? undefined : wahl ? aufwandFuer(wahl.aufwand, o.effort) as AgentStartOptionen['effort'] : o.effort
+    const gewaehlt = wahl ? MODELL_JE_STUFE[wahl.stufe] : AUTO_ERSATZ
+    const b = cacheBinden({
+      stufe: stufeVon(gewaehlt)!,
+      aufwand: !kenntAufwand(gewaehlt) ? undefined : wahl ? aufwandFuer(wahl.aufwand, o.effort) : o.effort,
+    }, grenze)
+    const model = MODELL_JE_STUFE[b.stufe]
+    const effort = (kenntAufwand(model) ? b.aufwand ?? o.effort : undefined) as AgentStartOptionen['effort']
     this.agentAendern(o.runId, o.agentId, { model })
     const name = modellName(model)
+    const was = `${name}${effort ? `, Denkaufwand ${effort}` : ''}`
+    const grund = sparen ? 'Cache vom letzten Zug noch warm'
+      : wahl && b.gebunden ? `${wahl.grund}; bleibt so, Cache noch warm`
+        : wahl?.grund ?? null
     this.melden(o.runId, o.agentId, 'protocol',
-      wahl ? `Modellwahl: ${name}${effort ? `, Denkaufwand ${effort}` : ''} -- ${wahl.grund}` : `Modellwahl ausgefallen, weiter mit ${name}`,
-      { modellwahl: { modell: model, aufwand: effort ?? null, grund: wahl?.grund ?? null, automatisch: wahl !== null } })
+      grund ? `Modellwahl: ${was} -- ${grund}` : `Modellwahl ausgefallen, weiter mit ${was}`,
+      { modellwahl: { modell: model, aufwand: effort ?? null, grund, automatisch: grund !== null } })
     return { ...o, model, effort, subagentenAuto: true }
+  }
+
+  /** Nach einem Zug: Modell, Aufwand und Konto fuer die naechste Modellwahl merken. */
+  private cacheLageMerken(k: string, o: AgentStartOptionen, konto: Konto | null): void {
+    const jetzt = Date.now()
+    for (const [schluessel, lage] of this.cacheLagen) {
+      if (jetzt - lage.zeit > CACHE_FRIST_MS) this.cacheLagen.delete(schluessel)
+    }
+    this.cacheLagen.set(k, { modell: o.model ?? null, aufwand: o.effort ?? null, konto: konto?.name ?? null, zeit: jetzt })
   }
 
   /**

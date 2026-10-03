@@ -8,7 +8,8 @@
 // Waehlen laesst Sonnet 5.5, nicht Haiku: Can will eine gute Entscheidung
 // und nimmt dafuer bis ~10 s in Kauf (03.10.2026). Gemessen ~3 s. Schlaegt
 // die Wahl fehl oder dauert laenger als TIMEOUT_MS, gilt AUTO_ERSATZ -- ein
-// Auftrag soll nie an der Modellwahl scheitern.
+// Auftrag soll nie an der Modellwahl scheitern. Solange der Prompt-Cache
+// eines Chats warm ist, geht es nie abwaerts (cacheGrenze, unten).
 
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import { homedir } from 'node:os'
@@ -79,6 +80,70 @@ export function wahlPrompt(a: Auftrag): string {
  */
 export function aufwandFuer(wahl: WahlAufwand, vorgabe: string | undefined): string {
   return wahl === 'high' && (vorgabe === 'xhigh' || vorgabe === 'max') ? vorgabe : wahl
+}
+
+// --- Prompt-Cache -------------------------------------------------------------
+//
+// Der Cache eines Chats gilt nur fuer dasselbe Modell, denselben Denkaufwand
+// und dasselbe Konto (Organisation). Jeder Wechsel baut den ganzen Verlauf
+// neu auf: 1,25-facher Eingabepreis statt 0,1-fach, bei ~25k Grundkontext
+// (System, Werkzeuge) plus Verlauf. Nach unten lohnt das praktisch nie --
+// Opus 5.5 und Sonnet 5.5 lesen den Cache zum selben Preis (0,20 $/M), nur
+// die Ausgabe wird billiger, und die Qualitaet sinkt mitten in der Aufgabe.
+// Nach oben zahlt man den Neuaufbau bewusst fuer die bessere Antwort.
+// Regel deshalb: solange der Cache des letzten Zugs warm ist, nie schwaecher
+// als dort (Stufe, bei gleicher Stufe auch Aufwand); staerker jederzeit.
+// Ist er kalt (Pause, anderes Konto, Neustart des Daemons), waehlt die
+// Automatik frei wie bisher.
+
+/** Die CLI cached mit 1 h TTL (ephemeral_1h in den Sitzungsdateien); etwas Abstand. */
+export const CACHE_FRIST_MS = 55 * 60_000
+
+/** Womit der letzte Zug eines Agenten lief. */
+export interface CacheLage {
+  modell: string | null
+  aufwand: string | null
+  konto: string | null
+  zeit: number
+}
+
+/** Untergrenze aus einem noch warmen Cache. */
+export interface CacheGrenze {
+  stufe: Stufe
+  aufwand: string | null
+}
+
+const STUFE_RANG: Record<Stufe, number> = { haiku: 0, sonnet: 1, opus: 2 }
+const AUFWAND_RANG = ['low', 'medium', 'high', 'xhigh', 'max']
+const aufwandRang = (a: string | null | undefined): number => AUFWAND_RANG.indexOf(a ?? '')
+
+/** Ist der Cache des letzten Zugs noch warm, dessen Stufe und Aufwand; sonst null (freie Wahl). */
+export function cacheGrenze(lage: CacheLage | undefined, konto: string | null, jetzt: number): CacheGrenze | null {
+  if (!lage || lage.konto !== konto || jetzt - lage.zeit > CACHE_FRIST_MS) return null
+  const stufe = stufeVon(lage.modell)
+  return stufe ? { stufe, aufwand: lage.aufwand } : null
+}
+
+/**
+ * Staerker als die Grenze geht nicht mehr (Opus mit dem Aufwand, den eine
+ * schwere Aufgabe bekaeme) -- dann muss Sonnet gar nicht erst waehlen.
+ */
+export function nichtsZuWaehlen(g: CacheGrenze, vorgabe: string | undefined): boolean {
+  return g.stufe === 'opus' && aufwandRang(g.aufwand) >= aufwandRang(aufwandFuer('high', vorgabe))
+}
+
+/**
+ * Die Wahl gegen die Grenze halten: eine schwaechere Stufe wird zur Grenze
+ * (samt deren Aufwand), bei gleicher Stufe gilt der hoehere Aufwand, eine
+ * staerkere Stufe bleibt. `gebunden`: die Grenze hat etwas geaendert.
+ */
+export function cacheBinden(
+  wahl: { stufe: Stufe; aufwand: string | undefined }, g: CacheGrenze | null,
+): { stufe: Stufe; aufwand: string | undefined; gebunden: boolean } {
+  if (!g || STUFE_RANG[wahl.stufe] > STUFE_RANG[g.stufe]) return { ...wahl, gebunden: false }
+  if (STUFE_RANG[wahl.stufe] < STUFE_RANG[g.stufe]) return { stufe: g.stufe, aufwand: g.aufwand ?? wahl.aufwand, gebunden: true }
+  if (g.aufwand && aufwandRang(g.aufwand) > aufwandRang(wahl.aufwand)) return { stufe: g.stufe, aufwand: g.aufwand, gebunden: true }
+  return { ...wahl, gebunden: false }
 }
 
 /** Stufe zu einer Modell-Id oder einem Kurznamen, null wenn unbekannt. */

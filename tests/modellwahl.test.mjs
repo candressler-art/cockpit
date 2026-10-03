@@ -1,6 +1,6 @@
 // Reine Teile der automatischen Modellwahl (src/modellwahl.ts) -- ohne
 // Modellaufruf. Vorher `npm run build`.
-import { wahlLesen, wahlPrompt, stufeVon, aufwandFuer, MODELL_JE_STUFE, AUTO_ERSATZ, MODELL_AUTO } from '../dist/modellwahl.js'
+import { wahlLesen, wahlPrompt, stufeVon, aufwandFuer, MODELL_JE_STUFE, AUTO_ERSATZ, MODELL_AUTO, cacheGrenze, cacheBinden, nichtsZuWaehlen, CACHE_FRIST_MS } from '../dist/modellwahl.js'
 import { modellGueltig, MODELLE } from '../dist/einstellungen.js'
 import { chatOptionenBauen, kenntAufwand } from '../dist/chatOptionen.js'
 import { vorgaben } from '../dist/einstellungen.js'
@@ -41,6 +41,30 @@ pruefe('"auto" ist waehlbar', modellGueltig(MODELL_AUTO) && MODELLE[0].id === 'a
 const o = chatOptionenBauen(vorgaben('/tmp'), { modell: 'auto' }, () => ({}), null)
 pruefe('Chat mit "auto": Modell bleibt auto (der Supervisor waehlt)', 'optionen' in o && o.optionen.model === 'auto')
 pruefe('"auto" kennt Aufwand (Ersatz kann Opus sein)', kenntAufwand('auto'))
+
+// Prompt-Cache: solange warm, nie abwaerts
+const T = 1_000_000_000
+const lage = { modell: 'claude-opus-5-5', aufwand: 'xhigh', konto: 'haupt', zeit: T }
+pruefe('Cache: warm -> Grenze', cacheGrenze(lage, 'haupt', T + 60_000)?.stufe === 'opus')
+pruefe('Cache: nach Frist kalt', cacheGrenze(lage, 'haupt', T + CACHE_FRIST_MS + 1) === null)
+pruefe('Cache: anderes Konto kalt', cacheGrenze(lage, 'zweit', T + 60_000) === null)
+pruefe('Cache: kein voriger Zug frei', cacheGrenze(undefined, 'haupt', T) === null)
+pruefe('Cache: unbekanntes Modell frei', cacheGrenze({ ...lage, modell: null }, 'haupt', T) === null)
+const gOpus = { stufe: 'opus', aufwand: 'xhigh' }
+const r1 = cacheBinden({ stufe: 'sonnet', aufwand: 'low' }, gOpus)
+pruefe('Binden: Sonnet bei warmem Opus -> Opus samt Aufwand', r1.stufe === 'opus' && r1.aufwand === 'xhigh' && r1.gebunden)
+const r2 = cacheBinden({ stufe: 'opus', aufwand: 'xhigh' }, { stufe: 'sonnet', aufwand: 'high' })
+pruefe('Binden: aufwaerts frei', r2.stufe === 'opus' && !r2.gebunden)
+const r3 = cacheBinden({ stufe: 'sonnet', aufwand: 'medium' }, { stufe: 'sonnet', aufwand: 'high' })
+pruefe('Binden: gleiche Stufe, Aufwand nicht runter', r3.aufwand === 'high' && r3.gebunden)
+const r4 = cacheBinden({ stufe: 'sonnet', aufwand: 'xhigh' }, { stufe: 'sonnet', aufwand: 'medium' })
+pruefe('Binden: gleiche Stufe, Aufwand rauf frei', r4.aufwand === 'xhigh' && !r4.gebunden)
+pruefe('Binden: ohne Grenze frei', !cacheBinden({ stufe: 'haiku', aufwand: undefined }, null).gebunden)
+const r5 = cacheBinden({ stufe: 'haiku', aufwand: undefined }, { stufe: 'sonnet', aufwand: 'medium' })
+pruefe('Binden: Haiku bei warmem Sonnet -> Sonnet', r5.stufe === 'sonnet' && r5.aufwand === 'medium')
+pruefe('Sparen: Opus xhigh bei Vorgabe xhigh', nichtsZuWaehlen(gOpus, 'xhigh'))
+pruefe('Sparen nicht: Opus high bei Vorgabe xhigh (rauf moeglich)', !nichtsZuWaehlen({ stufe: 'opus', aufwand: 'high' }, 'xhigh'))
+pruefe('Sparen nicht: Sonnet', !nichtsZuWaehlen({ stufe: 'sonnet', aufwand: 'max' }, 'xhigh'))
 
 console.log(`\n${ok}/${gesamt} bestanden`)
 if (ok !== gesamt) process.exit(1)
