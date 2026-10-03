@@ -34,7 +34,8 @@ export function freigabeKarteBauen(f, { entscheiden, neuZeichnen, wer = null }) 
       h('div.freigabe-kopf', {}, symbol('aufgaben', 16), h('strong', {}, 'Claude schlägt einen Plan vor')),
       h('div.plan-text', {}, markdown(String(f.input?.plan ?? ''))),
       h('div.freigabe-knoepfe', {},
-        h('button.knopf.primaer', { type: 'button', onclick: () => entscheiden(f, { erlaubt: true, modus: 'acceptEdits' }, karte) }, 'Umsetzen (Änderungen automatisch)'),
+        h('button.knopf.primaer', { type: 'button', onclick: () => entscheiden(f, { erlaubt: true, modus: 'auto' }, karte) }, 'Umsetzen (selbstständig)'),
+        h('button.knopf', { type: 'button', onclick: () => entscheiden(f, { erlaubt: true, modus: 'acceptEdits' }, karte) }, 'Umsetzen (Änderungen automatisch)'),
         h('button.knopf', { type: 'button', onclick: () => entscheiden(f, { erlaubt: true, modus: 'default' }, karte) }, 'Umsetzen (nachfragen)'),
         h('button.knopf', { type: 'button', onclick: () => weiterPlanen(f, karte, entscheiden, neuZeichnen) }, 'Weiter planen')))
     return karte

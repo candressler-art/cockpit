@@ -106,6 +106,16 @@ else
   fi
 fi
 
+# Die Skills der Spezialisten (rollen/*.md, Feld skills) liegen unter 'haupt'.
+# Findet die CLI einen davon unter diesem Konto nicht, fehlt er dem
+# Spezialisten still. Je Skill ein Link: skills/synced gehoert dem Konto selbst.
+HAUPT_SKILLS="/home/claude/.claude/skills"
+if "${SSH[@]}" "mkdir -p '$KONTO_DIR/skills' && for s in '$HAUPT_SKILLS'/*/; do s=\${s%/}; n=\${s##*/}; [ \"\$n\" = synced ] || [ -e '$KONTO_DIR/skills/'\"\$n\" ] || ln -s \"\$s\" '$KONTO_DIR/skills/'\"\$n\"; done" 2>/dev/null; then
+  ok "skills/ -> Skills aus $HAUPT_SKILLS verlinkt"
+else
+  fehlt "Skills konnten nicht verlinkt werden"
+fi
+
 # --- 3. Kein API-Schluessel im Weg ------------------------------------------
 schritt "3/5  Kein ANTHROPIC_API_KEY im Weg"
 if "${SSH[@]}" '[ -z "$ANTHROPIC_API_KEY" ]' 2>/dev/null; then

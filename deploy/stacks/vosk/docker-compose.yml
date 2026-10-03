@@ -1,0 +1,29 @@
+# Live-Spracherkennung fuer das Diktat im Cockpit (Vosk, deutsch, klein).
+#
+# Warum neben Whisper noch ein Dienst: Whisper (small-int8) braucht auf
+# servertwo 5,5 s fuer einen Satz von 1,5 s und schafft 32 s Audio nicht
+# innerhalb seines 20-s-Limits -- mitlaufen kann es nicht. Vosk rechnet 100 ms
+# Audio in unter 100 ms auf einem Kern und liefert Zwischenstaende, waehrend
+# man spricht (gemessen am 26.09.2026 mit zwei Piper-Saetzen: beide richtig,
+# aber klein geschrieben und ohne Satzzeichen). Die graue Vorschau kommt von
+# hier, den sauberen Text schreibt danach Whisper.
+#
+# Nur 127.0.0.1: erreichbar ist der Dienst allein fuer den Daemon
+# (src/liveHoeren.ts), wie piper.yml und whisper.yml.
+services:
+  vosk:
+    build: .
+    image: cockpit-vosk:0.15
+    container_name: vosk
+    ports:
+      - "127.0.0.1:2700:2700"
+    restart: unless-stopped
+    mem_limit: 600m
+    cpus: 1.0
+    # Ein echter WebSocket-Aufbau: eine nackte TCP-Verbindung protokolliert
+    # websockets bei jedem Check als Traceback ("opening handshake failed").
+    healthcheck:
+      test: ["CMD", "python", "-c", "from websockets.sync.client import connect; connect('ws://127.0.0.1:2700', open_timeout=3).close()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

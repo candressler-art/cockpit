@@ -25,6 +25,11 @@ import { aufgabenBauen } from './ui/aufgaben.js'
 import { serverBauen } from './ui/server.js'
 import { notizenBauen } from './ui/notizen.js'
 import { terminalBauen } from './ui/terminal.js'
+import { wallpaperSetzen } from './wallpaper.js'
+
+// Wallpaper zuerst: es liegt hinter den durchsichtigen Kacheln.
+wallpaperSetzen()
+addEventListener('akzent-geaendert', (e) => wallpaperSetzen(e.detail))
 
 await bus.basisErmitteln()
 // Die Stimmstufe ist je Geraet (localStorage) -- vor der ersten Meldung lesen.
@@ -55,26 +60,36 @@ const handyTitel = document.getElementById('handyTitel')
 const chat = chatBereich({
   // Am Handy ersetzt die obere Leiste den Chat-Kopf -- dort steht der Titel.
   beiTitel: (t) => { if (aktuell?.art === 'chat') handyTitel.textContent = t },
-  beiNeuemChat: (id) => {
+  beiNeuemChat: (id, titel) => {
     // Adresse nachziehen, ohne den Chat neu zu laden: der Zug laeuft schon.
     history.replaceState(null, '', `#/chat/${encodeURIComponent(id)}`)
     aktuell = { art: 'chat', id }
+    letzterChat = id
+    // Sofort in die Liste, nicht erst, wenn der Server die Sitzung eingelesen hat.
+    chatliste.vorlaeufigZeigen(id, titel)
     chatliste.aktivSetzen(id)
-    chatliste.neuLaden()
   },
 })
 chat.el.classList.add('flaeche')
 flaechen.append(chat.el)
 
 // --- Seitenleiste ---------------------------------------------------------------
-document.getElementById('neuerChat').append(symbol('plus', 16), h('span', {}, 'Neuer Chat'))
+const mac = /Mac|iPhone|iPad/.test(navigator.platform)
+document.getElementById('neuerChat').append(symbol('plus', 16), h('span', {}, 'Neuer Chat'),
+  h('kbd', { 'aria-hidden': 'true' }, mac ? '⌘⇧O' : 'Strg ⇧ O'))
 document.getElementById('handyNeu').append(symbol('plus', 20))
 document.getElementById('seiteAuf').append(symbol('menue', 20))
 document.getElementById('seiteZu').append(symbol('kreuz', 18))
+// Workspaces wie in der Waybar: 1 Chat, 2 Aufgaben ... 7 Einstellungen (Strg+Zahl).
+// Der Chat-Workspace fuehrt zurueck in den zuletzt offenen Chat.
+const WORKSPACES = [{ id: 'chat', titel: 'Chat', symbol: 'chat' }, ...BEREICHE]
 const nav = document.getElementById('bereiche')
-for (const b of BEREICHE) {
-  nav.append(h('a.bereich-link', { href: `#/${b.id}`, dataset: { bereich: b.id } }, symbol(b.symbol, 16), h('span', {}, b.titel)))
-}
+WORKSPACES.forEach((b, i) => {
+  nav.append(h('a.ws-knopf', { href: `#/${b.id}`, dataset: { bereich: b.id }, title: `${b.titel} (Strg+${i + 1})`, 'aria-label': b.titel },
+    h('span.ws-nr', {}, String(i + 1)), symbol(b.symbol, 15), h('span.ws-name', {}, b.titel.toLowerCase())))
+})
+const chatWs = nav.querySelector('[data-bereich="chat"]')
+let letzterChat = null
 
 const seiteAuf = document.getElementById('seiteAuf')
 function schubladeZu() {
@@ -138,6 +153,10 @@ function wechseln() {
     a.classList.toggle('an', an)
     if (an) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current')
   }
+  // Die Chatliste gehoert zum Chat-Workspace; die anderen nutzen die ganze Breite.
+  app.classList.toggle('ws-chat', z.art === 'chat')
+  if (z.art === 'chat' && z.id) letzterChat = z.id
+  chatWs.href = letzterChat && !(z.art === 'chat' && !z.id) ? `#/chat/${encodeURIComponent(letzterChat)}` : '#/chat'
   document.getElementById('neuerChat').classList.toggle('an', z.art === 'chat' && !z.id)
 }
 addEventListener('hashchange', wechseln)
@@ -148,20 +167,37 @@ addEventListener('keydown', (ev) => {
   // Strg+K: Chats durchsuchen; Strg+Shift+O: neuer Chat (wie Claude Desktop).
   if (mod && ev.key.toLowerCase() === 'k') { ev.preventDefault(); app.classList.add('schublade'); chatliste.sucheFokus() }
   else if (mod && ev.shiftKey && ev.key.toLowerCase() === 'o') { ev.preventDefault(); location.hash = '#/chat' }
+  // Strg+1..7: Workspace wechseln. Bewusst nicht Alt -- auf dem Mac tippt Alt+5..9 Klammern.
+  else if (ev.ctrlKey && !ev.metaKey && !ev.altKey && !ev.shiftKey && /^[1-7]$/.test(ev.key)) {
+    ev.preventDefault()
+    location.hash = nav.children[Number(ev.key) - 1].getAttribute('href')
+  }
 })
 
 // --- Fuss: Verbindung und Limit ----------------------------------------------------
 // Nur EIN kleiner Hinweis auf das naechste Konto; die Zahlen im Detail stehen
 // im Bereich Nutzung (keine zweite Anzeige derselben Werte).
-const fuss = document.getElementById('seiteFuss')
-const verbindung = h('span.verbindung', { title: 'Verbindung zum Daemon' }, h('span.punkt'), h('span', {}, 'verbindet …'))
-const limitEl = h('a.limit-hinweis', { href: '#/nutzung', title: 'Zur Nutzung' })
-fuss.append(verbindung, limitEl)
+// Module rechts in der Waybar: wer wartet (chatliste.js fuellt es), Verbindung, Limit.
+const module = document.getElementById('module')
+const dranModul = h('a.modul.dran-modul', { id: 'dranModul', hidden: true })
+const verbindung = h('span.modul.verbindung', { title: 'Verbindung zum Daemon' }, h('span.punkt'), h('span', {}, 'verbindet …'))
+const limitEl = h('a.modul.limit-hinweis', { href: '#/nutzung', title: 'Zur Nutzung' })
+module.append(dranModul, verbindung, limitEl)
 bus.beiZustand((z) => {
   verbindung.classList.toggle('an', z === 'verbunden')
-  verbindung.lastChild.textContent = z === 'verbunden' ? 'verbunden' : 'getrennt'
+  verbindung.lastChild.textContent = z === 'verbunden' ? 'online' : 'getrennt'
+  app.classList.toggle('getrennt', z !== 'verbunden')
   if (z === 'verbunden') limitLaden()
 })
+
+// Uhr in der Mitte der Waybar.
+const uhr = document.getElementById('uhr')
+const uhrStellen = () => {
+  const d = new Date()
+  uhr.textContent = `${d.toLocaleDateString('de-DE', { weekday: 'short' }).replace('.', '')} ${d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })}  ${d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}`
+}
+uhrStellen()
+setInterval(uhrStellen, 15_000)
 
 async function limitLaden() {
   try {

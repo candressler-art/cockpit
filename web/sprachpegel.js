@@ -94,9 +94,17 @@ export function ausgabeBeendet() {
   if (stand.quelle === 'spricht') stand.quelle = 'still'
 }
 
+/** Warum das letzte mikroAn() scheiterte: DOMException-Name oder 'unsicher'. */
+let mikroFehlerName = null
+export const mikroFehler = () => mikroFehlerName
+
 /** Mikrofon einschalten. Fragt beim ersten Mal nach Erlaubnis. */
 export async function mikroAn() {
   if (mikroStrom) { stand.quelle = 'hoert'; return true }
+  mikroFehlerName = null
+  // Ohne sicheren Ursprung (http ausser localhost) fehlt mediaDevices ganz --
+  // das soll als eigener Grund ankommen, nicht als TypeError.
+  if (!navigator.mediaDevices?.getUserMedia) { mikroFehlerName = 'unsicher'; return false }
   try {
     const c = kontext()
     await aufwecken()
@@ -113,6 +121,7 @@ export async function mikroAn() {
     return true
   } catch (e) {
     console.warn('[sprachpegel] Mikrofon nicht verfuegbar:', String(e))
+    mikroFehlerName = e?.name || 'unbekannt'
     mikroStrom = null
     return false
   }
@@ -120,6 +129,7 @@ export async function mikroAn() {
 
 export function mikroAus() {
   mikroStrom?.getTracks().forEach((t) => t.stop())
+  try { quelleEin?.disconnect() } catch { /* schon getrennt */ }
   mikroStrom = null
   analyserEin = null
   quelleEin = null
@@ -214,8 +224,12 @@ export const standLesen = () => stand
  *
  * Bei Stille wird eine ruhige Linie gezeichnet, die mit dem Atmen leicht
  * wandert -- nicht nichts, aber sichtbar anders als Sprache.
+ *
+ * `ruhig` (prefers-reduced-motion): kein Wandern und kein Zeitflimmern mehr,
+ * nur noch der echte Pegel bewegt die Balken -- der ist Information, keine
+ * Zierde, und bleibt deshalb auch dort.
  */
-export function wellenformZeichnen(cv, farbe) {
+export function wellenformZeichnen(cv, farbe, { ruhig = false } = {}) {
   const ctx2 = cv.getContext('2d')
   const b = cv.width
   const h = cv.height
@@ -235,9 +249,9 @@ export function wellenformZeichnen(cv, farbe) {
       // das sieht aus wie eine Stimme und nicht wie ein Spektrum.
       const naheMitte = 1 - Math.abs(anteil - 0.5) * 2
       wert = (stand.bass * naheMitte + stand.mitten * 0.7 + stand.hoehen * (1 - naheMitte)) *
-        (0.55 + 0.45 * Math.sin(i * 1.7 + performance.now() / 260))
+        (0.55 + 0.45 * Math.sin(i * 1.7 + (ruhig ? 0 : performance.now() / 260)))
     } else {
-      wert = 0.035 + 0.03 * Math.sin(i * 0.5 + stand.atmen * 5)
+      wert = ruhig ? 0.035 : 0.035 + 0.03 * Math.sin(i * 0.5 + stand.atmen * 5)
     }
     const hoehe = Math.max(2, Math.min(h, wert * h * 1.6))
     ctx2.globalAlpha = an && stand.pegel > 0.01 ? 0.9 : 0.42

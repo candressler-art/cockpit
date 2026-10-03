@@ -268,17 +268,39 @@ Pruefen im Browser: `node scripts/oberflaeche-pruefen.mjs [url] [ansichten]`
 
 ## Sprache
 
-**Diktieren:** das Mikrofon in der Chat-Eingabe nimmt auf und schreibt den
-erkannten Text ins Eingabefeld (abschicken tut man selbst). Ein AudioWorklet
-(`web/hoerer-prozessor.js`, Fallback ScriptProcessorNode) greift das Signal
-ab, `web/hoeren.js` baut daraus 16-bit-PCM und ein WAV. Bewusst kein
-`MediaRecorder` und keine Web-Speech-API: beide fehlen im WebKitGTK der
-Tauri-Huelle, und die Web-Speech-API liefe ueber Googles Server. Die Aufnahme
-endet nach 1,2 s Stille, sobald einmal Sprache erkannt wurde, spaetestens
-nach 60 s. Das WAV geht an `POST /api/hoeren`; `src/hoeren.ts` resampelt bei
-Bedarf auf 16 kHz und schickt es per Wyoming-Protokoll an den
-`whisper`-Container (`deploy/stacks/whisper.yml`, Modell `small-int8`,
-Sprache `de`, rund 6 s fuer einen kurzen Satz).
+**Diktieren:** Das Mikrofon in der Chat-Eingabe schaltet man selbst an und
+aus, ein automatisches Ende gibt es nicht (Pausen sind erlaubt, nur nach
+10 Minuten geht es von selbst aus). Waehrend man spricht, steht der Text
+schon grau im Eingabefeld. Man kann ihn jederzeit mit der Tastatur aendern
+und dann weiterreden. Beim Mikro-Aus wird er normal, abschicken tut man
+selbst.
+
+Zwei Erkennungen arbeiten zusammen (`web/diktat.js`):
+
+- **Vosk** (`deploy/stacks/vosk/`, deutsches Kleinmodell) liefert die graue
+  Vorschau in Echtzeit. Der Browser schickt 16-kHz-PCM ueber `/ws?hoeren`,
+  `src/liveHoeren.ts` reicht es an den Container auf 127.0.0.1:2700 durch.
+  Das Ergebnis ist klein geschrieben und ohne Satzzeichen.
+- **Whisper** (`deploy/stacks/whisper.yml`, `small-int8`) schreibt jeden
+  abgeschlossenen Satz danach sauber, schon waehrend man weiterspricht: per
+  `POST /api/hoeren`, immer nur ein Aufruf zugleich, gesammelt hoechstens
+  12 s Audio. Ein Aufruf braucht auf servertwo 5-7 s, 30 s Audio schafft
+  Whisper nicht mehr innerhalb seines 20-s-Limits. Deshalb laeuft es
+  satzweise im Hintergrund statt einmal am Ende.
+
+Was man selbst getippt oder geaendert hat, fasst keine der beiden
+Erkennungen mehr an. Das gilt nur fuer die beruehrten Saetze, die anderen
+verbessert Whisper weiter. Ist Vosk nicht erreichbar, laeuft das Diktat ohne
+Vorschau: Saetze werden dann an Sprechpausen abgeschnitten, und den Text
+liefert allein Whisper.
+
+Die graue Schrift ist ein Spiegel unter dem Feld, denn eine `textarea` kann
+Teile ihres Textes nicht faerben. Waehrend des Diktats schreibt das Feld
+deshalb durchsichtig, Cursor und Auswahl bleiben sichtbar. Ein AudioWorklet
+(`web/hoerer-prozessor.js`, als Rueckfall ScriptProcessorNode) greift das
+Mikrofon ab. Bewusst kein `MediaRecorder` und keine Web-Speech-API: Beide
+fehlen im WebKitGTK der Tauri-Huelle, und die Web-Speech-API liefe ueber
+Googles Server.
 
 **Sprachausgabe:** Piper (`POST /api/sprechen`, Browserstimme als Rueckfall)
 meldet je nach Stufe in den Einstellungen wartende Freigaben und Fragen; die

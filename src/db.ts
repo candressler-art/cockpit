@@ -307,6 +307,23 @@ export class CockpitDb {
    * Ereignisse bestimmter Arten seit `ts`, ueber alle Laeufe, aelteste zuerst.
    * Nur fuer den einmaligen Wiederaufbau des Aufgaben-Bereichs beim Start.
    */
+  /** Zu welchem Lauf gehoert eine Freigabe? null, wenn unbekannt. */
+  freigabeLauf(id: string): string | null {
+    const r = this.db.prepare('SELECT run_id FROM permissions WHERE id = ?').get(id) as { run_id: string } | undefined
+    return r?.run_id ?? null
+  }
+
+  /** Payloads der Werkzeugaufrufe eines Laufs, die eine HTML-Datei nennen (neueste zuerst) -- fuer die Live-Vorschau. */
+  htmlWerkzeugPayloads(runId: string, limit = 500): string[] {
+    const rows = this.db
+      .prepare(
+        `SELECT payload FROM events WHERE run_id = ? AND kind = 'tool_use' AND payload LIKE '%.htm%'
+          ORDER BY seq DESC LIMIT ?`,
+      )
+      .all(runId, limit) as { payload: string }[]
+    return rows.map((r) => r.payload)
+  }
+
   ereignisseArtSeit(ts: number, arten: string[], limit = 20_000): CockpitEvent[] {
     const rows = this.db
       .prepare(

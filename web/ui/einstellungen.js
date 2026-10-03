@@ -16,6 +16,7 @@ import { einstellungenHolen, ordnerWaehlen } from './eingabe.js'
 import * as bus from '../bus.js'
 import * as stimme from '../stimme.js'
 import * as benachrichtigen from '../benachrichtigen.js'
+import { AKZENTE, akzentLesen, akzentSetzen } from '../akzent.js'
 
 const STIMM_STUFEN = [
   { id: 'aus', name: 'Aus', hinweis: 'Dieses Gerät spricht nie' },
@@ -98,6 +99,12 @@ export function einstellungenBauen() {
           zahlFeld(w.team.maxRunden, 1, 40, (v) => speichern({ team: { maxRunden: v } }), 'Höchstens Runden')),
         zeile('Gleichzeitig', 'So viele Agenten arbeiten parallel.',
           zahlFeld(w.team.parallel, 1, 4, (v) => speichern({ team: { parallel: v } }), 'Gleichzeitig'))),
+
+      gruppe('Darstellung', 'Gilt nur für dieses Gerät.',
+        h('div.einst-zeile.senkrecht', {},
+          h('div.einst-text', {}, h('div.einst-name', {}, 'Akzentfarbe'),
+            h('div.einst-hinweis', {}, 'Wie ein HyDE-Theme: färbt Knöpfe, Auswahl und den Rand der aktiven Kachel.')),
+          akzentWahl())),
 
       gruppe('Stimme und Benachrichtigungen', 'Gilt nur für dieses Gerät.',
         zeile('Sprachausgabe', hinweisVon(STIMM_STUFEN, stimme.stufeLesen()),
@@ -184,6 +191,19 @@ export function einstellungenBauen() {
 }
 
 // --- Bausteine --------------------------------------------------------------
+
+function akzentWahl() {
+  const box = h('div.akzente', { role: 'group', 'aria-label': 'Akzentfarbe' })
+  const zeichnen = () => {
+    const jetzt = akzentLesen()
+    leeren(box, AKZENTE.map((x) => h('button.akzent-wahl', {
+      type: 'button', 'aria-pressed': String(x.id === jetzt), style: { '--a': x.a, '--b': x.b },
+      onclick: () => { akzentSetzen(x.id); zeichnen() },
+    }, h('span.akzent-probe'), h('span', {}, x.name), x.id === jetzt ? symbol('haken', 15) : null)))
+  }
+  zeichnen()
+  return box
+}
 
 function gruppe(titel, text, ...kinder) {
   return h('section.einst-gruppe', {}, h('h2', {}, titel), text && h('p.einst-gruppe-text', {}, text), h('div.einst-karte', {}, kinder))

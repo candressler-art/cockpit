@@ -7,6 +7,7 @@ und stehen hier, damit nachvollziehbar bleibt, was dort laeuft und warum.
 |---|---|---|
 | `piper.yml` | Sprachausgabe (Wyoming-Protokoll) fuer `/api/sprechen` | 127.0.0.1:10200 |
 | `whisper.yml` | Spracherkennung (Wyoming-Protokoll) fuer `/api/hoeren` | 127.0.0.1:10300 |
+| `vosk/` | Live-Vorschau beim Diktieren (WebSocket) fuer `/ws?hoeren` | 127.0.0.1:2700 |
 | `syncthing.yml` | holt Obsidian-Vault und Claude-Code-Sessions vom Desktop | 127.0.0.1:8384 |
 
 Der Browser der Agenten hat bewusst KEINEN Stack: er laeuft je Sitzung als
@@ -17,10 +18,26 @@ und die CLI meldete ihn als "needs authentication". Zwei Testlaeufe sind
 genau daran mit einem Blocker stehengeblieben. Ueber stdio faellt das weg:
 kein Port, keine Herkunftspruefung, keine Autorisierung.
 
+## vosk liegt nicht unter /opt/stacks
+
+`vosk/` ist der einzige Stack mit eigenem Bild (`Dockerfile`, `server.py`,
+das Modell ist eingebacken). Er laeuft aus `/home/claude/stacks/vosk`, weil
+er am 26.09.2026 aus dem Cockpit heraus eingerichtet wurde. Dort ist `sudo`
+gesperrt, und `/opt/stacks` gehoert root. Umziehen geht jederzeit, das Bild
+braucht keinen Datenordner:
+
+    cd /home/claude/stacks/vosk && docker compose down
+    sudo cp -r /home/claude/stacks/vosk /opt/stacks/ && cd /opt/stacks/vosk && sudo docker compose up -d --build
+
+Neu bauen nach einer Aenderung an `server.py`: die Dateien aus
+`deploy/stacks/vosk/` dorthin kopieren und `docker compose up -d --build`.
+Ohne den Dienst geht das Diktat weiter, nur ohne graue Vorschau (dann
+schreibt allein Whisper, satzweise).
+
 ## Warum alle nur auf 127.0.0.1 hoeren
 
 Nach aussen geht ausschliesslich das Cockpit selbst, und zwar ueber
-`tailscale serve` auf Port 8443. Piper, Whisper und Syncthing sind Zulieferer
+`tailscale serve` auf Port 8443. Piper, Whisper, Vosk und Syncthing sind Zulieferer
 des Daemons und brauchen keinen eigenen Weg dorthin. Die Syncthing-Oberflaeche
 kann Ordnerpfade aendern -- sie gehoert erst recht nicht ins Netz.
 

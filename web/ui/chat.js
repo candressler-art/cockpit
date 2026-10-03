@@ -14,13 +14,16 @@
 import * as bus from '../bus.js'
 import { h, symbol, api, leeren, uhrzeit, pfadKurz, modellName, melden, fehlerText } from './dom.js'
 import { markdown } from './markdown.js'
-import { werkzeugZeichnen, rollenSetzen, todoListe } from './werkzeuge.js'
+import { werkzeugZeichnen, rollenSetzen, todoListe, kopfDaten } from './werkzeuge.js'
 import { aktuelleTodos } from './taskliste.js'
-import { eingabeBauen } from './eingabe.js'
+import { eingabeBauen, einstellungenHolen } from './eingabe.js'
+import { AKZENTE, akzentLesen, akzentSetzen } from '../akzent.js'
 import { anhaengeTrennen, mitAnhaengen, istBild } from './anhangtext.js'
 import { freigabeKarteBauen, freigabeNormalisieren } from './freigabekarten.js'
+import { vorschauBauen } from './vorschau.js'
 
 const ENDZUSTAENDE = new Set(['done', 'failed', 'stopped', 'waiting_ratelimit'])
+const SCHREIB_WERKZEUGE = new Set(['Write', 'Edit', 'MultiEdit'])
 
 export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
   // --- Zustand --------------------------------------------------------------
@@ -38,6 +41,7 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
   let ladeNr = 0          // gegen spaet eintreffende Antworten eines vorigen Chats
   let offen = new Set()   // aufgeklappte Werkzeuge ueber Neuzeichnen hinweg
   let hinweise = []       // Hinweise dieses Zugs (Kontowechsel, Limit, Fehler)
+  let optionenGeholt = false // gemerkte Chat-Optionen nur beim Oeffnen, nicht nach jedem Zug
 
   // --- Geruest --------------------------------------------------------------
   const titelEl = h('div.chat-titel')
@@ -49,7 +53,17 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
   const innen = h('div.verlauf-innen', {}, verlaufEl, liveEl, freigabenEl)
   const scroller = h('div.verlauf-scroll', {}, innen)
   const eingabe = eingabeBauen({ beiSenden: senden, beiStopp: anhalten })
-  const el = h('section.chat', {}, kopfEl, scroller, eingabe.el)
+  const vorschau = vorschauBauen({
+    beiKommentar: (t) => eingabe.textAnhaengen(t),
+    beiOffen: (an) => el.classList.toggle('mit-vorschau', an),
+  })
+  const el = h('section.chat', {}, kopfEl, scroller, vorschau.leiste, eingabe.el, vorschau.el)
+  // Anderer Bereich (Aufgaben, Terminal ...): Vorschau zu, Ton und Video aus.
+  new MutationObserver(() => { if (!el.classList.contains('an')) vorschau.schliessen() })
+    .observe(el, { attributes: true, attributeFilter: ['class'] })
+  // Schreibende Werkzeugaufrufe, deren Ergebnis noch aussteht (id -> Pfad):
+  // erst mit dem Ergebnis steht die Datei, dann laedt die Vorschau neu.
+  const schreibend = new Map()
 
   api('/api/rollen').then((d) => { rollenSetzen(d.rollen); neuZeichnen() }).catch(() => {})
 
@@ -79,11 +93,16 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
     status = null
     offen = new Set()
     hinweise = []
+    optionenGeholt = false
+    schreibend.clear()
+    vorschau.zuruecksetzen()
     eingabe.laeuftSetzen(false)
     eingabe.ordnerFestlegen(null)
     klebt = true
 
     if (!id) {
+      // Neuer Chat: Modell, Aufwand und Modus wieder aus den Einstellungen.
+      eingabe.optionenSetzen(null)
       kopfZeichnen()
       leeren(verlaufEl, willkommen())
       leeren(liveEl); leeren(freigabenEl)
@@ -103,6 +122,7 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
         e.status === 404 ? null : h('button.knopf', { type: 'button', onclick: () => { const x = id; id = null; zeigen(x) } }, 'Nochmal versuchen')))
       return
     }
+    vorschau.laden(id)
     eingabe.fokus()
   }
 
@@ -118,6 +138,9 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
     ids = new Set(nachrichten.map((n) => n.id).filter(Boolean))
     laufId = kopf.fortsetzung?.laufId ?? `chat-${id}`
     eingabe.ordnerFestlegen(kopf.fortsetzung?.cwd ?? kopf.zielCwd ?? kopf.cwd)
+    // Spaeter nicht mehr: wer waehrend eines Zugs den Modus umstellt, dem
+    // soll ihn das Neuladen nach dem Zug nicht zuruecksetzen.
+    if (!optionenGeholt) { optionenGeholt = true; eingabe.optionenSetzen(d.optionen) }
     const lief = kopf.fortsetzung?.laeuft
     laeuftSetzen(Boolean(lief))
     if (lief) {
@@ -199,6 +222,10 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
         if (letzte?.vorlaeufig && letzte.bloecke[0]?.text === n.bloecke[0]?.text) return
       }
       nachrichten.push(n)
+      for (const b of n.bloecke) {
+        if (b.typ === 'werkzeug' && SCHREIB_WERKZEUGE.has(b.name) && typeof b.eingabe?.file_path === 'string') schreibend.set(b.id, b.eingabe.file_path)
+        else if (b.typ === 'ergebnis' && schreibend.has(b.zu)) { vorschau.geschrieben(schreibend.get(b.zu)); schreibend.delete(b.zu) }
+      }
       // Sobald die fertige Nachricht da ist, ist der Live-Text ueberholt.
       if (n.rolle === 'assistant' && !n.eltern) live = { text: '', denken: '' }
     } else if (e.kind === 'permission_decision') {
@@ -252,6 +279,7 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
       // darin und bleiben erhalten.
       const h0 = hinweise
       verlaufLaden().then(() => { hinweise = h0; neuZeichnen() }).catch(() => neuZeichnen())
+      vorschau.laden(x)
     }, 1200)
   }
 
@@ -272,6 +300,10 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
       ladeNr++
       id = r.id
       laufId = r.laufId
+      // Die Auswahl steht schon im Eingabefeld -- nicht beim ersten
+      // Nachladen mit dem gemerkten Stand ueberschreiben (z.B. nach "Plan umsetzen").
+      optionenGeholt = true
+      vorschau.laden(id)
       kopf = { titel: text.slice(0, 60), cwd: r.cwd, zielCwd: r.cwd, fortsetzung: { laufId: r.laufId, cwd: r.cwd } }
       eingabe.ordnerFestlegen(r.cwd)
       nachrichten = [vorlaeufig]
@@ -280,7 +312,7 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
       status = 'starting'
       kopfZeichnen()
       neuZeichnen()
-      beiNeuemChat?.(id)
+      beiNeuemChat?.(id, kopf.titel)
     } else {
       const { cwd, ...rest } = optionen
       const r = await api(`/api/chats/${encodeURIComponent(id)}/weiter`, { body: { text, ...rest } })
@@ -335,11 +367,78 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
       'Erklär mir den Aufbau dieses Projekts.',
       'Plane mir ein neues Feature, bevor du etwas änderst.',
     ]
+    // Wie fastfetch im Terminal: Logo und echte Werte (Konto, Modell, Modus,
+    // Aufgaben, Server). Die Farbbloecke darunter wechseln den Akzent.
+    const zeilen = h('dl.fetch-zeilen', { 'aria-live': 'polite' }, h('dt', {}, 'Lädt'), h('dd', {}, '…'))
+    const farben = h('div.fetch-farben', { role: 'group', 'aria-label': 'Akzentfarbe' })
+    const farbenZeichnen = () => {
+      const jetzt = akzentLesen()
+      leeren(farben, AKZENTE.map((x) => h('button.farbblock', {
+        type: 'button', title: x.name, 'aria-label': `Akzent ${x.name}`, 'aria-pressed': String(x.id === jetzt),
+        style: { '--a': x.a, '--b': x.b }, onclick: () => { akzentSetzen(x.id); farbenZeichnen() },
+      })))
+    }
+    farbenZeichnen()
+    fetchLaden(zeilen)
     return h('div.willkommen', {},
       h('div.willkommen-titel', {}, 'Womit fangen wir an?'),
-      h('div.willkommen-text', {}, 'Wähle unten den Projektordner, das Modell und wie viel Claude selbst darf. Spezialisten (Planer, Entwickler, Prüfer …) holt Claude dazu, wenn es passt.'),
+      h('div.fetch', {},
+        logoBauen(),
+        h('div.fetch-kopf', {}, 'can', h('span', {}, '@'), 'cockpit'),
+        zeilen, farben),
       h('div.vorschlaege', {}, vorschlaege.map((v) =>
         h('button.vorschlag', { type: 'button', onclick: () => { eingabe.textSetzen(v); eingabe.fokus() } }, v))))
+  }
+
+  /** Logo der Seitenleiste (index.html) als Kopie mit eigener Verlaufs-Id -- folgt so dem Akzent. */
+  function logoBauen() {
+    const svg = document.querySelector('.marke-logo svg')?.cloneNode(true)
+    if (!svg) return h('span')
+    svg.querySelector('linearGradient').id = 'logo-fetch'
+    for (const el of svg.querySelectorAll('[fill^="url"], [stroke^="url"]')) {
+      for (const a of ['fill', 'stroke']) if (el.getAttribute(a)?.startsWith('url')) el.setAttribute(a, 'url(#logo-fetch)')
+    }
+    svg.removeAttribute('width'); svg.removeAttribute('height')
+    svg.setAttribute('class', 'fetch-logo')
+    return svg
+  }
+
+  /** Werte fuer den fastfetch-Block. Was nicht laedt, faellt einfach weg. */
+  async function fetchLaden(zeilen) {
+    const [konten, vorgaben, aufgaben, system] = await Promise.allSettled([
+      api('/api/konten'), einstellungenHolen(), api('/api/aufgaben'), api('/api/system')])
+    const teile = []
+    const zeile = (name, ...wert) => teile.push(h('dt', {}, name), h('dd', {}, ...wert))
+    // Feste Leerzeichen (\u00a0): Zahl und Einheit reissen am Handy nicht auseinander.
+    const prozent = (x) => (typeof x === 'number' ? `${Math.round(x * 100)}\u00a0%` : '–')
+    if (konten.status === 'fulfilled') {
+      const d = konten.value
+      const k = d.konten.find((x) => x.name === d.naechstesKonto && x.angemeldet) ?? d.konten.find((x) => x.angemeldet)
+      if (k) {
+        const gesperrt = k.gesperrtBis && k.gesperrtBis > Date.now()
+        zeile('Konto', k.name, h('span.leise', {}, gesperrt ? ' · im Limit' : ` · 5\u00a0h\u00a0${prozent(k.fuenfStundenAnteil)} · Woche\u00a0${prozent(k.siebenTageAnteil)}`))
+      }
+    }
+    if (vorgaben.status === 'fulfilled') {
+      const { werte: w, modelle = [], aufwaende = [], berechtigungen = [] } = vorgaben.value
+      const name = (liste, wert) => liste.find((x) => x.id === wert)?.name ?? wert
+      zeile('Modell', name(modelle, w.modell), w.modell.includes('haiku') ? null : h('span.leise', {}, ` · ${name(aufwaende, w.aufwand)}`))
+      zeile('Modus', name(berechtigungen, w.berechtigung))
+    }
+    if (aufgaben.status === 'fulfilled') {
+      const aktiv = (aufgaben.value.laeufe ?? []).filter((l) => l.laeuft)
+      const wartet = aktiv.filter((l) => l.freigaben?.length || l.agenten?.some((a) => a.status === 'waiting_permission')).length
+      teile.push(h('dt', {}, 'Aufgaben'), wartet
+        ? h('dd.dran', {}, h('a', { href: '#/aufgaben', style: { color: 'inherit' } }, `${wartet} ${wartet === 1 ? 'wartet' : 'warten'} auf dich`))
+        : h('dd', {}, aktiv.length ? `${aktiv.length} ${aktiv.length === 1 ? 'läuft' : 'laufen'}` : 'nichts läuft'))
+    }
+    if (system.status === 'fulfilled') {
+      const hosts = system.value.hosts ?? []
+      if (hosts.length) zeile('Server', hosts.map((x) => (x.status === 'ok' && typeof x.cpuProzent === 'number'
+        ? `${x.name}\u00a0${Math.round(x.cpuProzent)}\u00a0%` : `${x.name}\u00a0offline`)).join(' · '), h('span.leise', {}, '\u00a0CPU'))
+    }
+    if (!zeilen.isConnected) return
+    leeren(zeilen, teile.length ? teile : [h('dt', {}, 'Daemon'), h('dd', {}, 'keine Werte')])
   }
 
   /**
@@ -370,7 +469,19 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
     const kinder = []
     if (gekuerzt) kinder.push(h('div.hinweis', {}, symbol('info', 14), 'Ältere Nachrichten sind ausgeblendet -- der Chat ist sehr lang.'))
     let antwort = null
-    const antwortSchliessen = () => { if (antwort) kinder.push(antwort); antwort = null }
+    let eintraege = [] // Bloecke der laufenden Antwort, Schritte werden beim Schliessen gebuendelt
+    let antwortModell = null
+    const antwortSchliessen = () => {
+      if (antwort) {
+        antwort.append(h('div.antwort-kopf', {}, h('span.claude-marke'), h('span', {}, 'claude'),
+          antwortModell ? h('span.antwort-modell', {}, modellName(antwortModell)) : null))
+        antwort.append(...schritteBuendeln(eintraege, ergebnisse))
+        kinder.push(antwort)
+      }
+      antwort = null
+      eintraege = []
+      antwortModell = null
+    }
 
     for (const n of haupt) {
       const sichtbar = n.bloecke.filter((b) => b.typ !== 'ergebnis')
@@ -388,7 +499,8 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
         continue
       }
       if (!antwort) antwort = h('div.antwort')
-      for (const b of sichtbar) antwort.append(blockEl(b, ergebnisse, unter, n))
+      if (n.modell) antwortModell = n.modell
+      for (const b of sichtbar) eintraege.push({ b, el: blockEl(b, ergebnisse, unter, n) })
     }
     antwortSchliessen()
     // Letzte Frage ohne Antwort und nichts laeuft: angehalten oder
@@ -406,7 +518,14 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
   function nutzerBlase(n, bloecke) {
     const { text, anhaenge } = anhaengeTrennen(bloecke.filter((b) => b.typ === 'text').map((b) => b.text).join('\n\n'))
     const bilder = bloecke.filter((b) => b.typ === 'bild').length
+    // Terminal-Stil: Prompt-Zeile wie in der Shell (› can ~/ordner 14:02), darunter der Text.
+    const ort = kopf?.fortsetzung?.cwd ?? kopf?.zielCwd ?? kopf?.cwd
     return h('div.nutzer', {},
+      h('div.prompt-zeile', {},
+        h('span.prompt-pfeil', { 'aria-hidden': 'true' }, symbol('pfeil', 13)),
+        h('span.prompt-wer', {}, 'can'),
+        ort ? h('span.prompt-ort', {}, pfadKurz(ort)) : null,
+        n.ts ? h('span.prompt-zeit', {}, uhrzeit(n.ts)) : null),
       h('div.blase', { title: uhrzeit(n.ts) }, text,
         anhaenge.length ? h('div.blase-anhaenge', {}, ...anhaenge.map(anhangEl)) : null,
         bilder ? h('div.bild-hinweis', {}, `${bilder} Bild${bilder > 1 ? 'er' : ''} angehängt`) : null))
@@ -451,6 +570,12 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
           w.dataset.schluessel = b.id
           if (offen.has(b.id)) { w.open = true; w.dispatchEvent(new Event('toggle')) }
         }
+        // HTML-Entwurf: direkt von hier in die Live-Vorschau.
+        if (erg && SCHREIB_WERKZEUGE.has(b.name) && vorschau.istHtml(b.eingabe?.file_path)) {
+          return h('div.werkzeug-mit-vorschau', {}, w,
+            h('button.knopf-klein.vorschau-link', { type: 'button', onclick: () => vorschau.oeffnen(b.eingabe.file_path) },
+              symbol('auge', 14), 'Vorschau ansehen'))
+        }
         return w
       }
       case 'hinweis': return hinweisEl(b.text)
@@ -461,16 +586,62 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
 
   /** Verlauf eines Subagenten in seiner Karte: dieselben Bausteine, kompakter. */
   function unterZeichnen(liste, ergebnisse, unter) {
-    const box = h('div.unter-verlauf')
+    const eintraege = []
     for (const n of liste) {
       for (const b of n.bloecke) {
         if (b.typ === 'ergebnis') continue
         // Der Auftrag an den Subagenten steht schon oben in der Karte.
         if (n.rolle === 'user' && b.typ === 'text') continue
-        box.append(blockEl(b, ergebnisse, unter, n))
+        eintraege.push({ b, el: blockEl(b, ergebnisse, unter, n) })
       }
     }
-    return box
+    return h('div.unter-verlauf', {}, schritteBuendeln(eintraege, ergebnisse))
+  }
+
+  /**
+   * Aufeinanderfolgende Arbeitsschritte (Werkzeugzeilen, Gedanken) an eine
+   * Schiene haengen; ab drei Schritten zu EINER Zeile zuklappen, die den
+   * letzten Schritt, Fehler und den Zustand zeigt. Can will zuerst die
+   * Antwort lesen, die Arbeit dahinter nur bei Bedarf. Spezialisten-Karten,
+   * To-do-Listen und Text unterbrechen eine Reihe.
+   */
+  function schritteBuendeln(eintraege, ergebnisse) {
+    const raus = []
+    let reihe = []
+    const schliessen = () => { if (reihe.length) raus.push(schritteBauen(reihe, ergebnisse)); reihe = [] }
+    for (const x of eintraege) {
+      const schritt = x.b.typ === 'denken'
+        || (x.b.typ === 'werkzeug' && (x.el.classList.contains('werkzeug') || x.el.classList.contains('werkzeug-mit-vorschau')))
+      if (schritt) reihe.push(x)
+      else { schliessen(); raus.push(x.el) }
+    }
+    schliessen()
+    return raus
+  }
+
+  function schritteBauen(reihe, ergebnisse) {
+    const schiene = h('div.schritte', {}, reihe.map((x) => x.el))
+    if (reihe.length < 3) return schiene
+    const werkzeuge = reihe.filter((x) => x.b.typ === 'werkzeug')
+    const fehler = werkzeuge.filter((x) => ergebnisse.get(x.b.id)?.fehler).length
+    const laufend = laeuft && werkzeuge.some((x) => !ergebnisse.has(x.b.id))
+    const letzter = werkzeuge.at(-1)
+    const [sym, titel, ziel] = letzter ? kopfDaten(letzter.b.name, letzter.b.eingabe ?? {}, todoStand.namen) : ['denken', 'Gedanken', '']
+    // Fehler meldet allein das Etikett: ein frueher, laengst behobener Fehlschlag
+    // soll die ganze Reihe nicht rot faerben.
+    const zustand = laufend ? 'laeuft' : 'ok'
+    const schluessel = `schritte-${reihe[0].b.id ?? reihe[0].el.dataset.schluessel ?? ''}`
+    const d = h(`details.schritte-gruppe.${zustand}`, { dataset: { schluessel } },
+      h('summary', { title: `${reihe.length} Arbeitsschritte -- antippen zum Aufklappen` },
+        h('span.sg-pfeil', {}, symbol('pfeil', 14)),
+        h('span.sg-zahl', {}, `${reihe.length} Schritte`),
+        h('span.sg-letzter', {}, symbol(sym, 13),
+          h('span', {}, laufend && ziel ? `${titel} · ${String(ziel).split('\n')[0]}` : titel)),
+        fehler ? h('span.sg-fehler', {}, `${fehler} Fehler`) : null,
+        h('span.w-zustand', { title: zustand === 'laeuft' ? 'läuft' : 'fertig' })),
+      schiene)
+    if (offen.has(schluessel)) d.open = true
+    return d
   }
 
   const STATUS_TEXT = {
@@ -480,6 +651,8 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
   }
 
   function liveZeichnen() {
+    // Wartet Claude auf Can, steht der drehende Rand der Kachel still (stil.css).
+    el.classList.toggle('wartet', laeuft && (status === 'waiting_permission' || freigaben.size > 0))
     if (!laeuft) { leeren(liveEl); return }
     const teile = []
     if (live.denken && !live.text) {

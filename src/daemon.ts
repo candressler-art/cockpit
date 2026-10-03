@@ -3,9 +3,9 @@
 // nur ueber `tailscale serve`, damit kein Port im LAN offensteht.
 
 import { createServer } from 'node:http'
-import { readFile } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
-import { join, dirname, extname, resolve as pfadAuflösen } from 'node:path'
+import { join, dirname, basename, extname, resolve as pfadAuflösen } from 'node:path'
 import { WebSocketServer, type WebSocket } from 'ws'
 import { CockpitDb } from './db.js'
 import { Supervisor } from './supervisor.js'
@@ -16,10 +16,11 @@ import { standLesen, verlaufAnhaengen, type SystemStand, type VerlaufPunkt } fro
 import { rollenLaden, rollenListe, agentDefinitionen } from './rollen.js'
 import { sprechenGecacht } from './stimme.js'
 import { erkennen } from './hoeren.js'
+import { liveHoerenVerbinden } from './liveHoeren.js'
 import {
   chatsIndizieren, chatsSuchen, verlaufLesen, chatKopfLesen, zuletztBenutzteOrdner,
   fortsetzungLesen, fortsetzungVorbereiten, fortsetzungAktualisieren, chatRegistrieren, sitzungVorhanden, chatMarkieren, sitzungBeschreiben, chatFuerSitzung, type Markierung,
-  type Fortsetzung,
+  type Fortsetzung, chatOptionenMerken, chatOptionenLesen, chatBerechtigungSetzen,
 } from './chats.js'
 import { chatOptionenBauen, type ChatOptionen } from './chatOptionen.js'
 import { entscheidungLesen } from './freigaben.js'
@@ -31,13 +32,14 @@ import { gedaechtnisOrdnerAnlegen, gedaechtnisWurzel, gedaechtnisZugriffErlaubt 
 import { anhangSpeichern, anhaengePruefen, promptMitAnhaengen, alteAnhaengeLoeschen, MAX_ANHANG_BYTES } from './anhaenge.js'
 import { konsoleBefehl, verlaufAufnehmen, type KonsoleEintrag } from './konsole.js'
 import { cwdPruefen, folgenLesen, zahlLesen } from './eingaben.js'
-import { nutzungAbfragen, guthabenAbfragen, guthabenRest, guthabenPrognose, type Guthaben } from './kontenNutzung.js'
+import { nutzungAbfragen, guthabenAbfragen, guthabenRest, guthabenPrognose, type Guthaben, type CloudGuthaben } from './kontenNutzung.js'
 import { AnfrageFehler, fehlerStatus, koerperAuswerten, textFeld } from './httpFehler.js'
 import { ChatZuege } from './chatZuege.js'
 import { nachliefern, senden as klientSenden, type Klient } from './nachlieferung.js'
 import { ereignisAufbereiten } from './nachrichten.js'
 import { auftraegeTrennen } from './protokoll.js'
 import { existsSync } from 'node:fs'
+import { htmlDateienAusEreignissen, wurzelKodieren, wurzelDekodieren, wurzelErlaubt, vorschauDateiFinden, helferEinbauen } from './vorschau.js'
 import { pathToFileURL } from 'node:url'
 import { pushStarten, pushSenden, pushSchluessel, aboGueltig, aboSpeichern, aboLoeschen, aboAnzahl, type Meldung } from './push.js'
 import { homedir } from 'node:os'
@@ -328,10 +330,29 @@ supervisor.on('delta', (d: unknown) => verteilen('delta', d))
  * Spezialisten, Live-Text) bekommen. Laeuft im Hintergrund; der Aufrufer
  * antwortet sofort.
  */
+/**
+ * Ein neuer Chat soll in der Liste stehen, sobald Can abschickt -- nicht erst,
+ * wenn die erste Antwort fertig ist (Index unten in chatZugStarten). Die CLI
+ * legt die Sitzungsdatei mit der ersten Zeile an; bis dahin (hoechstens 30 s)
+ * jede Sekunde neu einlesen.
+ */
+async function neuenChatFruehEintragen(id: string): Promise<void> {
+  for (let i = 0; i < 30; i++) {
+    await new Promise((r) => setTimeout(r, 1000))
+    await chatsIndizieren(DB_PFAD).catch(() => {})
+    if (chatKopfLesen(DB_PFAD, id)) {
+      verteilen('chats', { id })
+      return
+    }
+  }
+}
+
 function chatZugStarten(
   id: string, f: Fortsetzung, text: string, titel: string, opt: ChatOptionen, neu: boolean,
 ): number {
   const startSeq = db.letzteSeq(f.laufId)
+  // Gilt auch fuer den naechsten Zug und fuer die Anzeige nach Neuladen.
+  chatOptionenMerken(DB_PFAD, id, { modell: opt.model, aufwand: opt.effort, berechtigung: opt.permissionMode })
   chatZuege.starten(id, startSeq, async () => {
     try {
       const r = await supervisor.agentStarten({
@@ -373,7 +394,25 @@ function chatZugStarten(
       verteilen('chats', { id })
     }
   })
+  if (neu) void neuenChatFruehEintragen(id)
   return startSeq
+}
+
+/** HTML-Entwuerfe eines Laufs, die es noch gibt (neueste zuerst) -- fuer die Live-Vorschau. */
+async function vorschauDateien(laufId: string): Promise<{ pfad: string; name: string; geaendert: number; url: string }[]> {
+  const aus = []
+  for (const pfad of htmlDateienAusEreignissen(db.htmlWerkzeugPayloads(laufId))) {
+    if (!wurzelErlaubt(dirname(pfad))) continue
+    const st = await stat(pfad).catch(() => null)
+    if (!st?.isFile()) continue
+    aus.push({
+      pfad,
+      name: basename(pfad),
+      geaendert: st.mtimeMs,
+      url: `/vorschau/${encodeURIComponent(laufId)}/${wurzelKodieren(dirname(pfad))}/${encodeURIComponent(basename(pfad))}`,
+    })
+  }
+  return aus
 }
 
 /** Chat-Optionen aus Einstellungen + Anfrage; die Spezialisten erst laden, wenn sie gebraucht werden. */
@@ -441,20 +480,51 @@ setInterval(() => void systemPuls(), 20_000).unref()
 // und haelt so auch ein Konto aktuell, auf dem gerade niemand arbeitet --
 // genau das braucht das Balancing, um ein Konto ueberhaupt vergleichen zu
 // koennen, bevor es zum ersten Mal dran war.
+// Cloud-Guthaben je Konto, kommt mit jeder Messung oben mit (kontenNutzung.ts).
+const cloudGuthaben = new Map<string, CloudGuthaben>()
 async function kontenNutzungPuls(): Promise<void> {
-  for (const konto of supervisor.angemeldeteKonten()) {
+  // Alle Konten zugleich: der Bereich Nutzung wartet beim Oeffnen darauf
+  // (kontenFrischMessen), und jedes Konto kann bis zum Timeout brauchen.
+  await Promise.all(supervisor.angemeldeteKonten().map(async (konto) => {
     try {
       const r = await nutzungAbfragen(konto)
-      if (r) supervisor.nutzungMelden(konto.name, r.stand, r.quelle)
+      if (r) {
+        supervisor.nutzungMelden(konto.name, r.stand, r.quelle)
+        // Meldet Anthropic keins mehr (verfallen), auch hier verschwinden lassen.
+        if (r.cloud) cloudGuthaben.set(konto.name, r.cloud)
+        else cloudGuthaben.delete(konto.name)
+      }
     } catch (e) {
       // Ein Konto darf die anderen nicht mitreissen -- weiterpollen.
       console.warn(`[konten] Nutzungspuls fuer '${konto.name}' warf:`, String(e))
     }
-  }
+  }))
 }
 
-void kontenNutzungPuls()
-setInterval(() => void kontenNutzungPuls(), 10 * 60_000).unref()
+// Frisch messen, sobald jemand den Bereich Nutzung oeffnet -- der 10-Minuten-
+// Puls allein zeigt dort sonst einen Stand, der schon laengst ueberholt ist.
+// Hoechstens alle 10 s und nie zweimal gleichzeitig: schnelles Hin- und
+// Herklicken oder mehrere offene Fenster sollen den Endpunkt nicht in ein 429
+// treiben (Backoff in kontenNutzung.ts). Wer innerhalb der Sperre kommt,
+// bekommt den eben gemessenen Stand -- Can will bei jedem Oeffnen frische
+// Zahlen, 10 s alt ist dafuer frisch genug.
+const FRISCH_MINDESTABSTAND_MS = 10_000
+let letzteMessung = 0
+let messungLaeuft: Promise<void> | null = null
+function kontenMessen(): Promise<void> {
+  if (!messungLaeuft) {
+    letzteMessung = Date.now()
+    messungLaeuft = kontenNutzungPuls().finally(() => { messungLaeuft = null })
+  }
+  return messungLaeuft
+}
+function kontenFrischMessen(): Promise<void> {
+  if (messungLaeuft || Date.now() - letzteMessung >= FRISCH_MINDESTABSTAND_MS) return kontenMessen()
+  return Promise.resolve()
+}
+
+void kontenMessen()
+setInterval(() => void kontenMessen(), 10 * 60_000).unref()
 
 // Nutzungsguthaben je Konto (nur Anzeige -- einschalten geht nur in
 // claude.ai). Stuendlich; ein Fehlschlag laesst den alten Stand stehen.
@@ -660,7 +730,7 @@ async function koerperBinaerLesen(
 function guthabenUebersicht(): {
   guthaben: Record<string, Guthaben & { prognose: ReturnType<typeof guthabenPrognose> }>
   guthabenGesamt: { aktiv: number; rest: number | null; proTag: number | null; tage: number | null; leerAm: number | null; waehrung: string | null }
-} {
+} & ReturnType<typeof cloudUebersicht> {
   const jetzt = Date.now()
   const je: Record<string, Guthaben & { prognose: ReturnType<typeof guthabenPrognose> }> = {}
   let aktiv = 0
@@ -681,6 +751,28 @@ function guthabenUebersicht(): {
   return {
     guthaben: je,
     guthabenGesamt: { aktiv, rest, proTag, tage, leerAm: tage !== null ? Math.round(jetzt + tage * 86_400_000) : null, waehrung },
+    ...cloudUebersicht(),
+  }
+}
+
+/** Cloud-Guthaben je Konto und zusammen -- wie oben denkt Can in der Summe. */
+function cloudUebersicht(): {
+  cloud: Record<string, CloudGuthaben>
+  cloudGesamt: { konten: number; grenze: number; verbraucht: number; rest: number; verfaelltAm: number | null } | null
+} {
+  const alle = [...cloudGuthaben.values()]
+  if (!alle.length) return { cloud: {}, cloudGesamt: null }
+  const frist = alle.map((c) => c.verfaelltAm).filter((t): t is number => t !== null)
+  return {
+    cloud: Object.fromEntries(cloudGuthaben),
+    cloudGesamt: {
+      konten: alle.length,
+      grenze: alle.reduce((s, c) => s + c.grenze, 0),
+      verbraucht: alle.reduce((s, c) => s + c.verbraucht, 0),
+      rest: alle.reduce((s, c) => s + c.rest, 0),
+      // Die frueheste Frist zaehlt: ab da ist ein Teil der Summe weg.
+      verfaelltAm: frist.length ? Math.min(...frist) : null,
+    },
   }
 }
 
@@ -814,7 +906,13 @@ const server = createServer(async (req, res) => {
       // Modus nach einem angenommenen Plan, Rueckmeldung (freigaben.ts).
       const entscheidung = entscheidungLesen(k)
       const durch = textFeld(k, 'durch') ?? 'ui'
+      const laufId = entscheidung.modus ? db.freigabeLauf(id) : null
       const ok = supervisor.freigabeEntscheiden(id, entscheidung.erlaubt, durch, entscheidung)
+      // Plan angenommen: der neue Modus gilt fuer diesen Chat auch nach
+      // Neuladen oder am anderen Geraet, nicht wieder "Nur planen".
+      if (ok && entscheidung.erlaubt && entscheidung.modus && laufId?.startsWith('chat-')) {
+        chatBerechtigungSetzen(DB_PFAD, laufId.slice('chat-'.length), entscheidung.modus)
+      }
       return json(ok ? 200 : 404, { ok })
     }
 
@@ -891,7 +989,8 @@ const server = createServer(async (req, res) => {
       const statusVorher = supervisor.agentenListe(laufIdVorher).find((a) => a.agentId === 'chat')?.status
       if (!(await chatZuege.freiWerden(id, statusVorher, CHAT_AUSLAUF_WARTEN_MS))) return besetzt()
 
-      const opt = chatOptionen(k)
+      // Was die Anfrage nicht nennt, bleibt wie im letzten Zug dieses Chats.
+      const opt = chatOptionen({ ...chatOptionenLesen(DB_PFAD, id), ...k })
       if ('fehler' in opt) return json(400, { fehler: opt.fehler })
 
       // Ein eben erst im Cockpit begonnener Chat steht womoeglich noch nicht
@@ -912,6 +1011,14 @@ const server = createServer(async (req, res) => {
       const neu = !kopf && !sitzungVorhanden(DB_PFAD, id)
       const startSeq = chatZugStarten(id, f, promptMitAnhaengen(text, anh.pfade), kopf?.titel ?? text.slice(0, 50), opt.optionen, neu)
       return json(202, { laufId: f.laufId, cwd: f.cwd, startSeq })
+    }
+
+    // Live-Vorschau: welche HTML-Entwuerfe dieser Chat angelegt hat. Muss wie
+    // /weiter vor der allgemeinen GET-Route fuer /api/chats/<id> stehen.
+    if (pfad.startsWith('/api/chats/') && pfad.endsWith('/vorschau') && req.method === 'GET') {
+      const id = decodeURIComponent(pfad.slice('/api/chats/'.length, -'/vorschau'.length))
+      const laufId = fortsetzungLesen(DB_PFAD, id)?.laufId ?? `chat-${id}`
+      return json(200, { dateien: await vorschauDateien(laufId) })
     }
 
     // Umbenennen, anheften, aus der Liste nehmen -- nur der Cockpit-Eintrag,
@@ -995,6 +1102,7 @@ const server = createServer(async (req, res) => {
       const laufId = bestehend?.laufId ?? `chat-${id}`
       return json(200, {
         ...d,
+        optionen: chatOptionenLesen(DB_PFAD, id),
         kopf: {
           ...d.kopf,
           fortsetzbar: true,
@@ -1179,6 +1287,12 @@ const server = createServer(async (req, res) => {
       return json(200, { ...supervisor.kontenUebersicht(), ...guthabenUebersicht() })
     }
 
+    if (pfad === '/api/konten/messen' && req.method === 'POST') {
+      // Wie GET /api/konten, aber vorher frisch gemessen (Bereich Nutzung).
+      await kontenFrischMessen()
+      return json(200, { ...supervisor.kontenUebersicht(), ...guthabenUebersicht() })
+    }
+
     if (pfad === '/api/konten' && req.method === 'POST') {
       const k = (await koerperLesen(req)) as Record<string, unknown> | null
       // Leerstring oder fehlendes Feld heben die Bevorzugung auf.
@@ -1202,6 +1316,34 @@ const server = createServer(async (req, res) => {
         zeit: Date.now(),
         limit: supervisor.limitStandLesen(),
       })
+    }
+
+    // --- Live-Vorschau (siehe vorschau.ts) ---
+    if (pfad.startsWith('/vorschau/') && req.method === 'GET') {
+      const [, , laufRoh = '', wurzelRoh = '', ...rest] = pfad.split('/')
+      const laufId = decodeURIComponent(laufRoh)
+      const wurzel = wurzelDekodieren(wurzelRoh)
+      // Nur Ordner, deren Entwurf es wirklich gibt -- ein abgelehnter oder
+      // gescheiterter Write-Aufruf macht keinen Ordner lesbar.
+      const erlaubt = new Set((await vorschauDateien(laufId)).map((d) => dirname(d.pfad)))
+      const d = wurzel ? await vorschauDateiFinden(wurzel, rest.join('/'), erlaubt) : null
+      if (!d) {
+        res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
+        return res.end('nicht gefunden')
+      }
+      const roh = await readFile(d.pfad)
+      const inhalt = d.html ? Buffer.from(helferEinbauen(roh.toString('utf8'), '/vorschau-helfer.js')) : roh
+      res.writeHead(200, {
+        'content-type': d.mime,
+        // Eigener "null"-Ursprung, auch wenn jemand die Seite im Tab oeffnet.
+        'content-security-policy': 'sandbox allow-scripts allow-forms allow-popups allow-modals',
+        // Module und Schriften laedt ein "null"-Ursprung nur mit CORS. Sonst
+        // nichts: JSON o.ae. soll ein Skript der Seite nicht mitlesen.
+        ...(/font|javascript/.test(d.mime) ? { 'access-control-allow-origin': '*' } : {}),
+        'cache-control': 'no-store',
+        'x-content-type-options': 'nosniff',
+      })
+      return res.end(inhalt)
     }
 
     // --- statische Oberflaeche ---
@@ -1268,7 +1410,9 @@ const wss = new WebSocketServer({
 // Meldung steht in startFehlerMelden().
 wss.on('error', (e: NodeJS.ErrnoException) => startFehlerMelden(e))
 
-wss.on('connection', (sock) => {
+wss.on('connection', (sock, req) => {
+  // Diktat mit Live-Vorschau: eigene Verbindung, kein Lauf-Klient (liveHoeren.ts).
+  if (/[?&]hoeren\b/.test(req.url ?? '')) return liveHoerenVerbinden(sock)
   const klient: Klient = { sock, runId: null }
   klienten.add(klient)
 

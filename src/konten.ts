@@ -344,6 +344,25 @@ export function nutzungBeimLadenFiltern(stand: LimitStand, jetzt: number): Limit
 }
 
 /**
+ * Ein Fenster, dessen Reset inzwischen vorbei ist, steht wieder bei 0 --
+ * auch wenn seither keine Messung kam (Konto ungenutzt, Token abgelaufen).
+ * Sonst galt ein Konto nach dem Wochenreset bis zur naechsten Messung
+ * weiter als voll: in der Anzeige "Woche 100 %", im Balancing hintenan.
+ */
+export function fensterNachReset(stand: LimitStand, jetzt: number): LimitStand {
+  const f5Vorbei = stand.fuenfStundenResetsAt !== null && stand.fuenfStundenResetsAt * 1000 <= jetzt
+  const f7Vorbei = stand.siebenTageResetsAt !== null && stand.siebenTageResetsAt * 1000 <= jetzt
+  if (!f5Vorbei && !f7Vorbei) return stand
+  return {
+    ...stand,
+    fuenfStundenAnteil: f5Vorbei ? 0 : stand.fuenfStundenAnteil,
+    fuenfStundenResetsAt: f5Vorbei ? null : stand.fuenfStundenResetsAt,
+    siebenTageAnteil: f7Vorbei ? 0 : stand.siebenTageAnteil,
+    siebenTageResetsAt: f7Vorbei ? null : stand.siebenTageResetsAt,
+  }
+}
+
+/**
  * Warum ein Konto gesperrt ist. 'limit': volles Nutzungsfenster -- die
  * Sperre haelt bis zum Reset, egal was sonst passiert. 'anmeldung': die CLI
  * meldete einen Anmeldefehler (Token abgelaufen und nicht erneuerbar,
@@ -460,15 +479,17 @@ export class KontenVerwaltung {
     this.persistenz?.kontoNutzungSpeichern(name, stand, quelle)
   }
 
-  /** Letzter bekannter Nutzungsstand eines Kontos, oder null ohne Messung. */
-  nutzungLesen(name: string): { stand: LimitStand; quelle: 'usage_api' | 'rate_limit_event' } | null {
-    return this.nutzung.get(name) ?? null
+  /** Letzter bekannter Nutzungsstand eines Kontos, oder null ohne Messung.
+   *  Ein seither zurueckgesetztes Fenster steht auf 0 (fensterNachReset). */
+  nutzungLesen(name: string, jetzt = Date.now()): { stand: LimitStand; quelle: 'usage_api' | 'rate_limit_event' } | null {
+    const n = this.nutzung.get(name)
+    return n ? { ...n, stand: fensterNachReset(n.stand, jetzt) } : null
   }
 
   private balancingListe(nutzbar: readonly Konto[]): KontoBalancing[] {
     return nutzbar.map((k) => ({
       name: k.name,
-      siebenTageAnteil: this.nutzung.get(k.name)?.stand.siebenTageAnteil ?? null,
+      siebenTageAnteil: this.nutzungLesen(k.name)?.stand.siebenTageAnteil ?? null,
     }))
   }
 
@@ -499,7 +520,7 @@ export class KontenVerwaltung {
     const jetzt = Date.now()
     return kontenLesen().map((k) => {
       const bis = this.gesperrtBis.get(k.name) ?? null
-      const n = this.nutzung.get(k.name) ?? null
+      const n = this.nutzungLesen(k.name, jetzt)
       return {
         ...k,
         gesperrtBis: bis !== null && bis > jetzt ? bis : null,

@@ -17,6 +17,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { USAGE_LIMIT_ERROR_PREFIXES } from '@anthropic-ai/claude-agent-sdk'
+import { aufwandGueltig, berechtigungGueltig, modellGueltig } from './einstellungen.js'
 import { verlaufNormalisieren, type Nachricht } from './nachrichten.js'
 import { DB_WARTEN_MS } from './db.js'
 import { ANHANG_KOPF } from './anhaenge.js'
@@ -73,6 +74,17 @@ CREATE TABLE IF NOT EXISTS chat_markierung (
   titel        TEXT,
   angeheftet   INTEGER NOT NULL DEFAULT 0,
   ausgeblendet INTEGER
+);
+-- Modell, Denkaufwand und Berechtigungsmodus des letzten Zugs. Die Auswahl
+-- im Eingabefeld lebt sonst nur im Browser: nach Neuladen, Daemon-Neustart
+-- oder am anderen Geraet fiel ein Chat auf die Vorgabe zurueck, und aus
+-- "Alles erlauben" wurde mitten im Chat wieder "Nachfragen".
+CREATE TABLE IF NOT EXISTS chat_optionen (
+  session_id   TEXT PRIMARY KEY,
+  modell       TEXT,
+  aufwand      TEXT,
+  berechtigung TEXT,
+  geaendert    INTEGER NOT NULL
 );
 `
 
@@ -529,6 +541,43 @@ export function chatMarkieren(dbPfad: string, sessionId: string, m: Markierung):
     ).run(m.ausgeblendet ? Date.now() : null, m.ausgeblendet ? 1 : 0, sessionId)
   }
   return true
+}
+
+/** Was ein Chat zuletzt benutzt hat -- gleiche Schluessel wie die Anfrage an /api/chats. */
+export interface GemerkteOptionen {
+  modell?: string
+  aufwand?: string
+  berechtigung?: string
+}
+
+export function chatOptionenMerken(dbPfad: string, sessionId: string, o: GemerkteOptionen): void {
+  handle(dbPfad).prepare(
+    `INSERT INTO chat_optionen (session_id, modell, aufwand, berechtigung, geaendert) VALUES (?,?,?,?,?)
+     ON CONFLICT (session_id) DO UPDATE SET modell = excluded.modell, aufwand = excluded.aufwand,
+       berechtigung = excluded.berechtigung, geaendert = excluded.geaendert`,
+  ).run(sessionId, o.modell ?? null, o.aufwand ?? null, o.berechtigung ?? null, Date.now())
+}
+
+/** Nach "Plan umsetzen": nur den Modus eines schon gemerkten Chats aendern. */
+export function chatBerechtigungSetzen(dbPfad: string, sessionId: string, berechtigung: string): void {
+  if (!berechtigungGueltig(berechtigung)) return
+  handle(dbPfad).prepare('UPDATE chat_optionen SET berechtigung = ?, geaendert = ? WHERE session_id = ?')
+    .run(berechtigung, Date.now(), sessionId)
+}
+
+/**
+ * Leeres Objekt, wenn der Chat noch nie im Cockpit geschrieben wurde. Was
+ * inzwischen ungueltig ist (ein entferntes Modell), faellt weg -- dann gilt
+ * die Vorgabe, statt dass der naechste Zug mit 400 scheitert.
+ */
+export function chatOptionenLesen(dbPfad: string, sessionId: string): GemerkteOptionen {
+  const r = handle(dbPfad).prepare('SELECT modell, aufwand, berechtigung FROM chat_optionen WHERE session_id = ?')
+    .get(sessionId) as Record<string, unknown> | undefined
+  const o: GemerkteOptionen = {}
+  if (modellGueltig(r?.modell)) o.modell = r.modell
+  if (aufwandGueltig(r?.aufwand)) o.aufwand = r.aufwand
+  if (berechtigungGueltig(r?.berechtigung)) o.berechtigung = r.berechtigung
+  return o
 }
 
 export interface Fortsetzung {

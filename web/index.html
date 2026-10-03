@@ -4,25 +4,32 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <title>Cockpit</title>
+<script src="./akzent-frueh.js"></script>
+<link rel="preload" href="./schriften/mona-sans.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="./stil.css">
 <link rel="stylesheet" href="./bereiche.css">
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="icon" href="./symbol.svg" type="image/svg+xml">
-<meta name="theme-color" content="#1e1e2e">
+<meta name="theme-color" content="#0f1115">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 </head>
 <body>
 <div id="app">
-  <aside id="seite" aria-label="Navigation">
-    <div class="seite-kopf">
-      <a class="marke-logo" href="#/chat" aria-label="Cockpit – neuer Chat"><img src="./symbol.svg" alt="" width="20" height="20"><span>Cockpit</span></a>
-      <button type="button" class="knopf-klein nur-handy" id="seiteZu" aria-label="Menü schließen"></button>
+  <!-- Waybar: Workspaces links, Uhr in der Mitte, Module rechts. Am Handy wird die Leiste zum Dock unten. -->
+  <header id="leiste" class="leiste">
+    <a class="marke-logo" href="#/chat" aria-label="Cockpit – neuer Chat"><svg viewBox="0 0 512 512" width="22" height="22" aria-hidden="true"><defs><linearGradient id="logo-seite" x1="0" y1="0" x2="1" y2="1"><stop offset="0" class="logo-a"/><stop offset="1" class="logo-b"/></linearGradient></defs><rect width="512" height="512" rx="112" fill="#0f1115"/><rect x="14" y="14" width="484" height="484" rx="100" fill="none" stroke="url(#logo-seite)" stroke-width="20"/><g stroke="#3a404b" stroke-width="16" stroke-linecap="round"><path d="M256 196 L150 318"/><path d="M256 196 L256 318"/><path d="M256 196 L362 318"/></g><circle cx="256" cy="156" r="48" fill="url(#logo-seite)"/><circle cx="150" cy="352" r="36" fill="#eceef2"/><circle cx="256" cy="352" r="36" fill="#eceef2"/><circle cx="362" cy="352" r="36" fill="#eceef2"/></svg><span>cockpit</span></a>
+    <nav class="ws" id="bereiche" aria-label="Workspaces"></nav>
+    <div class="uhr" id="uhr" aria-hidden="true"></div>
+    <div class="module" id="module"></div>
+  </header>
+  <aside id="seite" aria-label="Chats">
+    <div class="seite-kopf nur-handy">
+      <span class="seite-titel">chats</span>
+      <button type="button" class="knopf-klein" id="seiteZu" aria-label="Menü schließen"></button>
     </div>
     <a class="neu-chat" href="#/chat" id="neuerChat"></a>
-    <nav class="bereiche" id="bereiche" aria-label="Bereiche"></nav>
     <div id="chatlisteOrt"></div>
-    <div class="seite-fuss" id="seiteFuss"></div>
   </aside>
   <div id="schleier" aria-hidden="true"></div>
   <main id="haupt">

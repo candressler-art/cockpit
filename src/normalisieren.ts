@@ -86,13 +86,16 @@ export function einordnen(m: Record<string, unknown>): Zuordnung | null {
       // Achtung: dieses Ereignis kommt im Normalbetrieb mehrfach und meldet
       // dann nur den Nutzungsstand (status 'allowed'). Es als Bremse zu deuten
       // war ein Fehlschluss -- nur ein status != 'allowed' haelt wirklich auf.
+      // Ebenso 'allowed_warning' (ein Fenster ist fast voll): der Agent laeuft
+      // weiter, als Limit gedeutet stand der Chat sonst bei jeder Antwort auf
+      // "Wartet auf ein freies Konto", obwohl er arbeitete.
       const info = (m.rate_limit_info ?? {}) as Record<string, unknown>
       const status = String(info.status ?? 'unknown')
       const fenster = (info.unifiedWindows ?? {}) as Record<string, { utilization?: number }>
       const anteil = fenster.five_hour?.utilization
       const prozent = typeof anteil === 'number' ? ` (${Math.round(anteil * 100)} % im 5-h-Fenster)` : ''
-      if (status === 'allowed') {
-        return { ...basis, kind: 'usage', summary: `Nutzungsstand${prozent}` }
+      if (status === 'allowed' || status === 'allowed_warning') {
+        return { ...basis, kind: 'usage', summary: `Nutzungsstand${status === 'allowed_warning' ? ', fast voll' : ''}${prozent}` }
       }
       return { ...basis, kind: 'rate_limit', summary: `Limit ${status}${prozent}` }
     }

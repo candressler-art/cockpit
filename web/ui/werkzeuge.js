@@ -22,8 +22,8 @@ const dateiname = (p) => String(p ?? '').split('/').filter(Boolean).pop() ?? ''
 
 const AUFGABE_STATUS = { completed: 'Aufgabe erledigt', in_progress: 'Aufgabe begonnen', pending: 'Aufgabe offen', deleted: 'Aufgabe entfernt' }
 
-/** Kurzbeschreibung je Werkzeug: [Symbol, Titel, Ziel]. */
-function kopfDaten(name, e, namen = null) {
+/** Kurzbeschreibung je Werkzeug: [Symbol, Titel, Ziel]. Auch fuer die Zeile einer zugeklappten Schrittreihe (chat.js). */
+export function kopfDaten(name, e, namen = null) {
   switch (name) {
     case 'Bash': return ['terminal', e.description || 'Befehl', e.command]
     case 'BashOutput': return ['terminal', 'Ausgabe lesen', e.bash_id]

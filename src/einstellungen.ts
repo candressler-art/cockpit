@@ -15,7 +15,7 @@
 // der dann mit einem API-Fehler abbricht.
 
 export type Aufwand = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
-export type Berechtigung = 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions'
+export type Berechtigung = 'default' | 'acceptEdits' | 'auto' | 'plan' | 'bypassPermissions'
 
 export interface Auswahl<T extends string> {
   id: T
@@ -31,7 +31,7 @@ export interface Auswahl<T extends string> {
  */
 export const MODELLE: Auswahl<string>[] = [
   { id: 'claude-opus-5-5', name: 'Opus 5.5', hinweis: 'Stärkstes Modell -- für anspruchsvolle Arbeit' },
-  { id: 'claude-sonnet-5', name: 'Sonnet 5', hinweis: 'Schnell und stark für die meisten Aufgaben' },
+  { id: 'claude-sonnet-5-5', name: 'Sonnet 5.5', hinweis: 'Schnell und stark für die meisten Aufgaben' },
   { id: 'claude-haiku-4-5-20251001', name: 'Haiku 4.5', hinweis: 'Am schnellsten, für einfache Aufgaben' },
 ]
 
@@ -46,6 +46,9 @@ export const AUFWAENDE: Auswahl<Aufwand>[] = [
 export const BERECHTIGUNGEN: Auswahl<Berechtigung>[] = [
   { id: 'default', name: 'Nachfragen', hinweis: 'Vor Änderungen und Befehlen um Erlaubnis fragen' },
   { id: 'acceptEdits', name: 'Änderungen automatisch', hinweis: 'Dateiänderungen ohne Rückfrage, Befehle nur mit Erlaubnis' },
+  // SDK-Modus 'auto': ein Pruefmodell entscheidet statt Can. Normale Arbeit
+  // laeuft durch, nur was es fuer riskant haelt, kommt als Freigabe an.
+  { id: 'auto', name: 'Selbstständig', hinweis: 'Arbeitet ohne Rückfragen, eine Sicherheitsprüfung hält nur riskante Schritte an' },
   { id: 'plan', name: 'Nur planen', hinweis: 'Liest und plant, ändert nichts, bis du den Plan annimmst' },
   { id: 'bypassPermissions', name: 'Alles erlauben', hinweis: 'Keine Rückfragen -- nur für vertraute Aufgaben' },
 ]

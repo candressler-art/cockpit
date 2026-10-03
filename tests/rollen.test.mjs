@@ -41,6 +41,8 @@ pruefe('Liste ohne Prompt', liste.every((r) => !('systemPrompt' in r)))
   pruefe('Rollen, die nichts aendern, schreiben nur ins Gedaechtnis',
     ['planer', 'rechercheur', 'reviewer'].every((id) => d[id].prompt.includes('nur in dein Gedaechtnis')))
   pruefe('Orchestrator hat kein Gedaechtnis', liste.find((r) => r.id === 'orchestrator')?.gedaechtnis === null)
+  pruefe('Gestalter bekommt seine Design-Skills', JSON.stringify(d.gestalter.skills) === '["frontend-design","impeccable"]')
+  pruefe('Rolle ohne skills-Feld hat keine', !('skills' in d.reviewer))
   const ohne = agentDefinitionen(['coder', 'planer'])
   pruefe('ausgeschaltete fehlen', !('coder' in ohne) && !('planer' in ohne) && 'pruefer' in ohne)
 }
@@ -51,9 +53,9 @@ pruefe('Regeln -> Namen, entdoppelt, ohne mcp',
   JSON.stringify(werkzeugNamen(['Bash(git log:*)', 'Bash(ls:*)', 'Read', 'mcp__browser__x'])) === '["Bash","Read"]')
 
 // --- inherit ------------------------------------------------------------------
-pruefe('inherit -> Vorgabe', modellAufloesen('inherit', 'claude-sonnet-5') === 'claude-sonnet-5')
-pruefe('null -> Vorgabe', modellAufloesen(null, 'claude-sonnet-5') === 'claude-sonnet-5')
-pruefe('Rollenmodell schlaegt Vorgabe', modellAufloesen('opus', 'claude-sonnet-5') === 'opus')
+pruefe('inherit -> Vorgabe', modellAufloesen('inherit', 'claude-sonnet-5-5') === 'claude-sonnet-5-5')
+pruefe('null -> Vorgabe', modellAufloesen(null, 'claude-sonnet-5-5') === 'claude-sonnet-5-5')
+pruefe('Rollenmodell schlaegt Vorgabe', modellAufloesen('opus', 'claude-sonnet-5-5') === 'opus')
 pruefe('inherit ohne Vorgabe -> undefined (SDK-Vorgabe)', modellAufloesen('inherit', undefined) === undefined)
 
 // --- Orchestrator-Block -------------------------------------------------------

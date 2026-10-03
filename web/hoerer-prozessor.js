@@ -9,7 +9,16 @@
  * sonst knackt das Mikrofonsignal jedes anderen Verbrauchers mit.
  */
 class HoererProzessor extends AudioWorkletProcessor {
+  constructor() {
+    super()
+    this.aktiv = true
+    // hoeren.js schickt 'stopp', sobald die Aufnahme endet: dann false liefern,
+    // damit der Browser den Prozessor abbauen kann.
+    this.port.onmessage = (ev) => { if (ev.data === 'stopp') this.aktiv = false }
+  }
+
   process(eingaenge) {
+    if (!this.aktiv) return false
     const kanal = eingaenge[0]?.[0]
     if (kanal && kanal.length) {
       // Kopieren: der Puffer, den 'process' hier bekommt, gehoert dem

@@ -43,6 +43,10 @@ export function eingabeBauen(opt) {
     rows: 1, placeholder: 'Schreib Claude eine Nachricht …', 'aria-label': 'Nachricht',
     enterkeyhint: 'send',
   })
+  // Beim Diktat liegt die Schrift in diesem Spiegel unter dem (dann
+  // durchsichtig schreibenden) Feld: eine textarea kann keinen Teil ihres
+  // Textes grau faerben. Siehe spiegelZeichnen().
+  const spiegel = h('div.feld-spiegel', { 'aria-hidden': 'true' })
   const sendeKnopf = h('button.senden', { type: 'button', title: 'Senden (Enter)', 'aria-label': 'Senden' }, symbol('senden', 18))
   const ordnerKnopf = h('button.chip.ordner-chip', { type: 'button', title: 'Projektordner' })
   const modellWahl = h('select.chip', { 'aria-label': 'Modell', title: 'Modell' })
@@ -51,20 +55,23 @@ export function eingabeBauen(opt) {
   const klammerKnopf = h('button.chip.rund', { type: 'button', title: 'Dateien anhängen (auch hineinziehen oder einfügen)', 'aria-label': 'Dateien anhängen' }, symbol('klammer', 15))
   const dateiWahl = h('input', { type: 'file', multiple: true, hidden: true, tabindex: '-1' })
   const anhangListe = h('div.eingabe-anhaenge', { hidden: true })
-  const mikroKnopf = h('button.chip.rund', { type: 'button', title: 'Diktieren', 'aria-label': 'Diktieren' }, symbol('mikro', 15))
+  const mikroKnopf = h('button.chip.rund', { type: 'button', title: 'Diktieren', 'aria-label': 'Diktieren', 'aria-pressed': 'false' }, symbol('mikro', 15))
 
   // Am Handy passen vier Auswahlfelder nicht in eine Zeile. Dort stehen
   // Modell, Denken und Modus hinter einem Chip, der ihre Kurzform zeigt und
   // sie beim Antippen aufklappt (nur per CSS unterschieden, siehe stil.css).
   const optionenKnopf = h('button.chip.optionen-chip', { type: 'button', 'aria-expanded': 'false', title: 'Modell, Denken, Berechtigungen' })
   const optionen = h('div.eingabe-optionen', {}, modellWahl, aufwandWahl, modusWahl)
+  const diktat = diktatLeisteBauen()
   const el = h('div.eingabe', {},
     h('div.eingabe-rahmen', {},
       anhangListe,
-      feld,
+      h('div.feld-huelle', {}, spiegel, feld),
       h('div.eingabe-leiste', {},
         ordnerKnopf, optionenKnopf, optionen,
-        h('span.spacer'), klammerKnopf, dateiWahl, mikroKnopf, sendeKnopf)))
+        h('span.spacer'), klammerKnopf, dateiWahl, mikroKnopf, sendeKnopf),
+      diktat.el),
+    diktat.ansage)
   optionenKnopf.addEventListener('click', () => {
     const auf = !el.classList.contains('optionen-offen')
     el.classList.toggle('optionen-offen', auf)
@@ -72,12 +79,13 @@ export function eingabeBauen(opt) {
   })
   function optionenKurz() {
     const text = (sel) => sel.selectedOptions[0]?.textContent ?? ''
-    const teile = [text(modellWahl)]
-    if (!aufwandWahl.disabled) teile.push(text(aufwandWahl).replace(/^Denken: /, ''))
     const modus = modusWahl.value
-    optionenKnopf.replaceChildren(h('span', {}, teile.join(' · ')))
+    // Die Denkstufe als eigener Teil: am schmalen Handy blendet stil.css sie aus,
+    // damit Ordner und Senden-Knopf daneben passen (aufgeklappt steht sie voll da).
+    optionenKnopf.replaceChildren(h('span', {}, text(modellWahl)),
+      aufwandWahl.disabled ? null : h('span.opt-aufwand', {}, `· ${text(aufwandWahl).replace(/^Denken: /, '')}`))
     // Ein anderer Modus als "Nachfragen" soll auffallen, auch zugeklappt.
-    if (modus && modus !== 'default') optionenKnopf.append(h('span.modus-marke', { title: text(modusWahl) }, symbol('schild', 12)))
+    if (modus && modus !== 'default') optionenKnopf.append(h(`span.modus-marke${modus === 'bypassPermissions' ? '.alles' : ''}`, { title: text(modusWahl) }, symbol('schild', 12)))
   }
   for (const sel of [modellWahl, aufwandWahl, modusWahl]) sel.addEventListener('change', optionenKurz)
 
@@ -85,13 +93,23 @@ export function eingabeBauen(opt) {
     feld.style.height = 'auto'
     feld.style.height = `${Math.min(feld.scrollHeight, Math.round(innerHeight * 0.4))}px`
   }
-  feld.addEventListener('input', () => { groesse(); knopfZustand() })
+  feld.addEventListener('input', () => {
+    // Waehrend des Diktats: was Can tippt, gehoert ihm -- die Erkennung
+    // schreibt danach dahinter weiter (diktat.js).
+    if (laufend) { laufend.eingabe(); spiegelZeichnen() }
+    groesse()
+    knopfZustand()
+  })
+  feld.addEventListener('scroll', () => { spiegel.scrollTop = feld.scrollTop })
   feld.addEventListener('keydown', (ev) => {
     // Enter sendet, Shift+Enter bricht um. Auf dem Handy nicht: dort gibt es
     // kein Shift, Enter ist dort der Zeilenumbruch und gesendet wird per Knopf.
     const handy = matchMedia('(pointer: coarse)').matches
     if (ev.key === 'Enter' && !ev.shiftKey && !handy && !ev.isComposing) {
       ev.preventDefault()
+      // Waehrend des Diktats heisst Enter "Mikro aus", nicht "senden": der
+      // Rest des Textes kaeme sonst erst nach der Nachricht an.
+      if (diktatZustand !== 'aus') { diktatHaupt(); return }
       senden()
     }
   })
@@ -201,6 +219,9 @@ export function eingabeBauen(opt) {
       ...(anhaenge.length ? { anhaenge: anhaenge.map((a) => a.pfad) } : {}),
     }
     sendeKnopf.disabled = true
+    // Waehrend des Sendens kein Diktat beginnen: das Feld wird danach geleert,
+    // und ein Diktat, das den alten Text kennt, schriebe ihn zurueck.
+    mikroKnopf.disabled = true
     try {
       await opt.beiSenden(text, optionen)
       feld.value = ''
@@ -209,6 +230,7 @@ export function eingabeBauen(opt) {
     } catch (e) {
       melden(`Senden fehlgeschlagen: ${fehlerText(e)}`, 'fehler')
     } finally {
+      mikroKnopf.disabled = false
       knopfZustand()
     }
   }
@@ -250,31 +272,264 @@ export function eingabeBauen(opt) {
     ordnerWaehlen(wahl.cwd ?? vorgaben?.werte.arbeitsordner, (p) => { wahl.cwd = p; ordnerZeigen() })
   })
 
-  // --- Diktieren (vorhandenes hoeren.js + /api/hoeren) ---------------------
-  // Erster Druck startet, zweiter beendet; sonst endet die Aufnahme nach
-  // kurzer Stille von selbst (hoeren.js).
-  mikroKnopf.addEventListener('click', async () => {
-    const hoeren = await import('../hoeren.js')
-    if (hoeren.aufnahmeLaeuft()) { hoeren.aufnahmeBeenden(); return }
-    mikroKnopf.classList.add('an')
-    try {
-      const wav = await hoeren.aufnahmeStarten()
-      if (!wav) { melden('Kein Mikrofon freigegeben oder nichts aufgenommen.', 'info'); return }
-      mikroKnopf.classList.add('arbeitet')
-      const r = await fetch(bus.api('/api/hoeren'), { method: 'POST', headers: { 'content-type': 'audio/wav' }, body: wav })
-      const d = await r.json().catch(() => ({}))
-      if (!r.ok) throw new Error(d?.fehler ?? `HTTP ${r.status}`)
-      const text = String(d.text ?? '').trim()
-      if (!text) { melden('Nichts verstanden -- noch einmal versuchen.', 'info'); return }
-      feld.value = feld.value ? `${feld.value} ${text}` : text
-      groesse()
-      knopfZustand()
-      feld.focus()
-    } catch (e) {
-      melden(`Diktieren geht gerade nicht: ${fehlerText(e)}`, 'fehler')
-    } finally {
-      mikroKnopf.classList.remove('an', 'arbeitet')
+  // --- Diktieren (diktat.js: Vosk live, Whisper schreibt sauber) -------------
+  // Zustaende (Klasse an .eingabe):
+  //   aus       Knopfreihe wie immer
+  //   oeffnet   Mikro geht auf / Browser fragt -- neutral, noch NICHT sprechen
+  //   hoert     ab dem ersten echten Audioblock: roter Punkt, Live-Pegel, Zeit.
+  //             Der Text steht schon grau im Feld, tippen geht. Kein
+  //             automatisches Ende: Can schaltet das Mikro selbst aus.
+  //   schreibt  Mikro zu, Whisper schreibt die letzten Saetze sauber, dann
+  //             wird der Text normal ("Sofort uebernehmen" wartet nicht).
+  // Waehrend des Diktats ersetzt die Leiste die Knopfreihe: Senden mit halb
+  // erkanntem Text waere ein Versehen. Nach jedem Ende ist das Mikrofon zu.
+  let diktatZustand = 'aus'
+  let laufend = null // Steuerung aus diktat.js
+  // Jeder Start und jeder Abbruch waehrend des Ladens zaehlt hoch: ein Start,
+  // der nach dem Laden der Module eine andere Nummer sieht, ist ueberholt --
+  // sonst liefen nach "abbrechen, sofort neu" zwei Diktate zugleich.
+  let diktatNr = 0
+  let pegelMod = null
+  let bildNr = 0
+  let gewarnt = false
+  let ohneVorschau = false
+  let whisperGemeldet = false
+  const ruhig = matchMedia('(prefers-reduced-motion: reduce)')
+  const handy = () => matchMedia('(pointer: coarse)').matches
+  const PLATZHALTER = feld.placeholder
+  const HINWEIS_HOERT = 'Pausen sind okay – Mikro aus, wenn du fertig bist'
+  const HINWEIS_OHNE = 'Ohne Live-Vorschau: der Text kommt satzweise'
+
+  function diktatLeisteBauen() {
+    const marke = h('span.diktat-marke', { 'aria-hidden': 'true' })
+    const text = h('span.diktat-text')
+    const zeit = h('span.diktat-zeit', { 'aria-hidden': 'true' })
+    const pegel = h('canvas.diktat-pegel', { 'aria-hidden': 'true', width: 1, height: 1 })
+    const hinweis = h('span.diktat-hinweis')
+    const verwerfen = h('button.knopf.diktat-abbrechen', { type: 'button', title: 'Gesprochenes verwerfen (Getipptes bleibt)', 'aria-label': 'Gesprochenes verwerfen' },
+      symbol('kreuz', 15), h('span', {}, 'Verwerfen'))
+    const haupt = h('button.knopf.primaer.diktat-fertig', { type: 'button' })
+    const el = h('div.diktat', { hidden: true },
+      h('div.diktat-stand', {}, marke, text, zeit, pegel),
+      h('div.diktat-aktion', {}, hinweis, verwerfen, haupt))
+    // Immer im Baum, auch wenn die Leiste versteckt ist -- eine Live-Region,
+    // die erst mit ihrem Inhalt auftaucht, lesen Screenreader oft nicht vor.
+    const ansage = h('div.sr-nur', { role: 'status', 'aria-live': 'polite' })
+    return { el, ansage, marke, text, zeit, pegel, hinweis, verwerfen, haupt }
+  }
+
+  /** Nur schreiben, wenn sich etwas aendert -- der Stand kommt alle 100 ms. */
+  const setzen = (knoten, wert) => { if (knoten.textContent !== wert) knoten.textContent = wert }
+  const dauer = (ms) => { const s = Math.floor(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` }
+  const ansagen = (t) => { diktat.ansage.textContent = ''; setTimeout(() => { diktat.ansage.textContent = t }, 50) }
+
+  function hauptKnopf(sym, text, titel) {
+    diktat.haupt.replaceChildren(symbol(sym, 15), h('span', {}, text))
+    diktat.haupt.title = titel
+    diktat.haupt.setAttribute('aria-label', text)
+  }
+
+  function zustandSetzen(z) {
+    diktatZustand = z
+    const an = z !== 'aus'
+    el.classList.toggle('diktat-an', an)
+    for (const k of ['oeffnet', 'hoert', 'schreibt']) el.classList.toggle(`diktat-${k}`, z === k)
+    diktat.el.hidden = !an
+    diktat.el.classList.remove('warnt')
+    diktat.zeit.classList.remove('warnt')
+    mikroKnopf.setAttribute('aria-pressed', String(an))
+    feld.placeholder = an ? 'Sprich einfach los – der Text erscheint hier …' : PLATZHALTER
+    if (z === 'oeffnet') {
+      diktat.marke.replaceChildren(symbol('mikro', 15))
+      setzen(diktat.text, 'Mikro wird geöffnet …')
+      setzen(diktat.zeit, '')
+      setzen(diktat.hinweis, 'Falls der Browser fragt: Mikrofon erlauben.')
+      hauptKnopf('mikro', 'Mikro aus', 'Mikro ausschalten (Enter oder Esc)')
+    } else if (z === 'hoert') {
+      diktat.marke.replaceChildren(h('span.diktat-punkt'))
+      setzen(diktat.text, 'Jetzt sprechen')
+      setzen(diktat.zeit, '0:00')
+      setzen(diktat.hinweis, ohneVorschau ? HINWEIS_OHNE : HINWEIS_HOERT)
+      hauptKnopf('mikro', 'Mikro aus', 'Mikro ausschalten (Enter oder Esc)')
+    } else if (z === 'schreibt') {
+      diktat.marke.replaceChildren(h('span.kreisel'))
+      setzen(diktat.text, 'Wird sauber geschrieben …')
+      setzen(diktat.zeit, '')
+      setzen(diktat.hinweis, 'Der graue Text wird gleich übernommen.')
+      hauptKnopf('haken', 'Sofort übernehmen', 'Nicht warten, grauen Text so übernehmen (Enter oder Esc)')
     }
+    spiegelZeichnen()
+    if (an) {
+      document.addEventListener('keydown', escTaste, true)
+      if (z === 'hoert' || z === 'oeffnet') pegelLaufen()
+    } else {
+      document.removeEventListener('keydown', escTaste, true)
+      knopfZustand()
+    }
+  }
+
+  /**
+   * Feldinhalt in den Spiegel: bis zum Beginn des Diktats normal, danach grau.
+   * Die Masse kommen vom Feld selbst, auch die Breite einer Bildlaufleiste --
+   * sonst bricht der Spiegel an anderer Stelle um als der Cursor laeuft.
+   */
+  function spiegelZeichnen() {
+    if (diktatZustand === 'aus' || !laufend) { spiegel.replaceChildren(); return }
+    const ab = Math.min(laufend.grauAb(), feld.value.length)
+    spiegel.replaceChildren(feld.value.slice(0, ab), h('span.vorlaeufig', {}, feld.value.slice(ab)), '​')
+    const cs = getComputedStyle(feld)
+    for (const k of ['fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing', 'wordSpacing', 'tabSize', 'paddingTop', 'paddingLeft', 'paddingBottom']) spiegel.style[k] = cs[k]
+    const leiste = feld.offsetWidth - feld.clientWidth - parseFloat(cs.borderLeftWidth) - parseFloat(cs.borderRightWidth)
+    spiegel.style.paddingRight = `${parseFloat(cs.paddingRight) + Math.max(0, leiste)}px`
+    spiegel.scrollTop = feld.scrollTop
+  }
+
+  /** Laufender Stand aus hoeren.js: Zeit, "gehoert?", nahende Obergrenze. */
+  function standZeigen(st) {
+    if (diktatZustand !== 'hoert') return
+    setzen(diktat.zeit, dauer(st.ms))
+    const bald = st.restMs < 30_000
+    diktat.zeit.classList.toggle('warnt', bald)
+    let text = st.gehoert ? 'Ich höre zu' : 'Jetzt sprechen'
+    let hinweis = ohneVorschau ? HINWEIS_OHNE : HINWEIS_HOERT
+    let warnt = false
+    if (!st.gehoert && st.ms > 5000) {
+      // Leises Mikro: soll man merken und nicht ins Leere reden.
+      text = 'Noch nichts gehört'
+      hinweis = 'Lauter oder näher ans Mikro sprechen'
+      warnt = true
+      if (!gewarnt) { gewarnt = true; ansagen('Noch nichts gehört. Lauter sprechen.') }
+    }
+    if (bald) hinweis = `Mikro geht in ${Math.ceil(st.restMs / 1000)} s aus – höchstens 10 Minuten am Stück`
+    diktat.el.classList.toggle('warnt', warnt)
+    setzen(diktat.text, text)
+    setzen(diktat.hinweis, hinweis)
+  }
+
+  /** Echter Pegel je Bild (sprachpegel.js), solange aufgenommen wird. */
+  function pegelLaufen() {
+    if (bildNr) return
+    const farbe = getComputedStyle(el).getPropertyValue('--rot').trim() || '#f38ba8'
+    const bild = (jetzt) => {
+      bildNr = 0
+      if (diktatZustand !== 'hoert' && diktatZustand !== 'oeffnet') return
+      // Ansicht gewechselt oder Eingabe verschwunden: nicht unsichtbar
+      // weiter mithoeren. Der Text bleibt, wie er dasteht.
+      if (!el.isConnected || !el.offsetParent) { laufend?.anhalten(); return }
+      if (diktatZustand === 'hoert' && pegelMod) {
+        const cv = diktat.pegel
+        const dpr = devicePixelRatio || 1
+        const b = Math.round(cv.clientWidth * dpr)
+        const hh = Math.round(cv.clientHeight * dpr)
+        if (b && hh && (cv.width !== b || cv.height !== hh)) { cv.width = b; cv.height = hh }
+        pegelMod.messen(jetzt)
+        pegelMod.wellenformZeichnen(cv, farbe, { ruhig: ruhig.matches })
+      }
+      bildNr = requestAnimationFrame(bild)
+    }
+    bildNr = requestAnimationFrame(bild)
+  }
+
+  function escTaste(ev) {
+    if (ev.key !== 'Escape' || diktatZustand === 'aus' || document.querySelector('dialog[open]')) return
+    // Vor chat.js abfangen: dort haelt Esc den laufenden Claude an -- wer das
+    // Mikro ausschaltet, meint nicht das. Esc verwirft nichts: eine Minute
+    // Diktat per Versehen weg waere schlimmer als ein Knopf mehr.
+    ev.preventDefault()
+    ev.stopPropagation()
+    diktatHaupt()
+  }
+
+  const MIKRO_FEHLER = {
+    NotAllowedError: 'Kein Zugriff aufs Mikrofon. Erlaube es in den Browser-Einstellungen für diese Seite.',
+    SecurityError: 'Kein Zugriff aufs Mikrofon. Erlaube es in den Browser-Einstellungen für diese Seite.',
+    NotFoundError: 'Kein Mikrofon gefunden.',
+    OverconstrainedError: 'Kein passendes Mikrofon gefunden.',
+    NotReadableError: 'Das Mikrofon lässt sich nicht öffnen – benutzt es gerade ein anderes Programm?',
+    unsicher: 'Das Mikrofon geht hier nur über HTTPS.',
+  }
+
+  async function diktatStarten() {
+    if (diktatZustand !== 'aus' || mikroKnopf.disabled) return
+    const nr = ++diktatNr
+    gewarnt = false
+    ohneVorschau = false
+    whisperGemeldet = false
+    zustandSetzen('oeffnet')
+    // Am Desktop bleibt der Cursor im Feld -- tippen soll jederzeit gehen.
+    // Am Handy nicht: die Tastatur schoebe sich ueber den Text.
+    if (handy()) diktat.haupt.focus()
+    else feld.focus()
+    ansagen('Mikrofon wird geöffnet.')
+    let diktatMod
+    try {
+      ;[diktatMod, pegelMod] = await Promise.all([import('../diktat.js'), import('../sprachpegel.js')])
+    } catch (e) {
+      if (nr !== diktatNr) return
+      zustandSetzen('aus')
+      melden(`Diktieren geht gerade nicht: ${fehlerText(e)}`, 'fehler')
+      return
+    }
+    if (nr !== diktatNr || diktatZustand !== 'oeffnet') return
+    laufend = diktatMod.diktatStarten(feld, {
+      beiZustand: (z) => {
+        if (z === 'aus') return diktatEnde()
+        zustandSetzen(z)
+        if (z === 'hoert') ansagen('Aufnahme läuft. Jetzt sprechen.')
+        if (z === 'schreibt') ansagen('Mikro aus. Der Text wird sauber geschrieben.')
+      },
+      beiStand: standZeigen,
+      beiText: () => { groesse(); knopfZustand(); spiegelZeichnen() },
+      beiHinweis: (art) => {
+        if (art === 'ohne-vorschau') {
+          ohneVorschau = true
+          if (diktatZustand === 'hoert') setzen(diktat.hinweis, HINWEIS_OHNE)
+        } else if (art === 'whisper-gestoert' && !whisperGemeldet) {
+          whisperGemeldet = true
+          melden('Die genaue Erkennung antwortet gerade nicht – der graue Text bleibt, wie er ist.', 'info')
+        } else if (art === 'max') {
+          melden('Mikro nach 10 Minuten automatisch ausgeschaltet.', 'info')
+        } else if (art === 'verloren') {
+          melden('Ein Stück wurde nicht erkannt – bitte noch einmal sagen.', 'fehler')
+        }
+      },
+      beiFehler: (grund, fehler) => {
+        const text = {
+          'kein-mikro': MIKRO_FEHLER[fehler] ?? 'Das Mikrofon ist nicht verfügbar.',
+          'kein-ton': 'Das Mikrofon liefert keinen Ton – noch einmal versuchen.',
+          belegt: 'Das Mikrofon ist noch belegt – gleich noch einmal versuchen.',
+        }[grund] ?? `Diktieren geht gerade nicht: ${fehler ?? 'unbekannter Fehler'}`
+        melden(text, grund === 'kein-ton' || grund === 'belegt' ? 'info' : 'fehler')
+      },
+    })
+  }
+
+  /** Nach jedem Ende: Leiste weg, Schrift normal, Fokus dorthin, wo man weitermacht. */
+  function diktatEnde() {
+    const hatteFokus = diktat.el.contains(document.activeElement) || document.activeElement === feld
+    laufend = null
+    zustandSetzen('aus')
+    groesse()
+    if (hatteFokus) {
+      if (handy()) mikroKnopf.focus({ preventScroll: true })
+      else { feld.focus(); feld.setSelectionRange(feld.value.length, feld.value.length) }
+    }
+    ansagen('Diktat beendet.')
+  }
+
+  /** Hauptknopf, Enter und Esc: erst Mikro aus, dann "sofort uebernehmen". */
+  function diktatHaupt() {
+    if (!laufend) { if (diktatZustand === 'oeffnet') { diktatNr++; zustandSetzen('aus') } return }
+    if (diktatZustand === 'schreibt') laufend.sofort()
+    else void laufend.aus()
+  }
+
+  mikroKnopf.addEventListener('click', diktatStarten)
+  diktat.haupt.addEventListener('click', diktatHaupt)
+  diktat.verwerfen.addEventListener('click', () => {
+    if (laufend) laufend.verwerfen()
+    else if (diktatZustand === 'oeffnet') { diktatNr++; zustandSetzen('aus') }
+    ansagen('Diktat verworfen.')
   })
 
   einstellungenHolen().then(listenFuellen).catch(() => { /* chat.js zeigt den Ladefehler */ })
@@ -286,9 +541,20 @@ export function eingabeBauen(opt) {
     laeuftSetzen(an) { laeuft = an; el.classList.toggle('laeuft', an); knopfZustand() },
     /** Fuer bestehende Chats steht der Ordner fest (null = frei waehlbar). */
     ordnerFestlegen(p) { ordnerFest = p; ordnerZeigen() },
-    textSetzen(t) { feld.value = t; groesse(); knopfZustand() },
+    textSetzen(t) { laufend?.anhalten(); feld.value = t; groesse(); knopfZustand() },
+    /** Kommentar aus der Vorschau: unten anfuegen, Getipptes bleibt stehen. */
+    textAnhaengen(t) { laufend?.anhalten(); feld.value = feld.value.trim() ? `${feld.value.trimEnd()}\n\n${t}` : t; groesse(); knopfZustand() },
     /** Nach "Plan umsetzen" gilt der gewaehlte Modus auch fuer die naechste Nachricht (wie in Claude Code). */
     modusSetzen(m) { wahl.berechtigung = m; modusWahl.value = m; optionenKurz() },
+    /**
+     * Beim Oeffnen eines Chats: was er zuletzt benutzt hat (vom Server
+     * gemerkt). Was fehlt, ist wieder die Vorgabe -- sonst ginge etwa "Alles
+     * erlauben" eines Chats still auf den naechsten ueber.
+     */
+    optionenSetzen(o) {
+      for (const k of ['modell', 'aufwand', 'berechtigung']) wahl[k] = o?.[k] ?? null
+      listenFuellen()
+    },
     neuLaden: listenFuellen,
   }
 }

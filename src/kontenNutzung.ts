@@ -64,21 +64,30 @@
 // rate_limit_event alle 10 Minuten wieder geloescht. nutzungAusAntwort()
 // rechnet deshalb selbst in die LimitStand-Form um (0..1, Sekunden).
 //
-// Kein Refresh-Versuch bei abgelaufenem Token: das OAuth-Refresh-Verfahren
-// selbst ist nicht nachvollzogen, und ein falscher Versuch koennte die
-// Anmeldung eines Kontos beschaedigen. Ein abgelaufenes Token faellt hier
-// einfach durch (null) -- der Aufrufer weicht dann auf rate_limit_event aus.
+// Abgelaufenes Token: nicht selbst per OAuth erneuern (das Verfahren ist
+// nicht nachvollzogen, ein falscher Versuch koennte die Anmeldung
+// beschaedigen), sondern die offizielle CLI kurz starten -- sie erneuert es
+// beim Start selbst und schreibt .credentials.json, genau wie zu Beginn
+// jedes Chats (tokenErneuern unten). Noetig, weil ein Konto, auf dem
+// niemand arbeitet (typisch: eins im Wochenlimit), sonst ab Ablauf (~8 h)
+// nie wieder gemessen wird: der Endpunkt antwortet auf ein abgelaufenes
+// Token mit 429 (nicht 401), der Backoff unten hielt das fuer eine Drosselung
+// und das Konto stand nach dem Wochenreset weiter auf "100 %" (03.10.2026).
 
+import { spawn } from 'node:child_process'
 import { readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { LimitStand } from './typen.js'
-import type { Konto } from './konten.js'
+import { HAUPT_KONTO, type Konto } from './konten.js'
 
 const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage?skip_spend=1'
 const TIMEOUT_MS = 5000
 
 interface Credentials {
   accessToken: string
+  /** Ablauf des accessToken in ms, null wenn die Datei keinen nennt. */
+  laeuftAbAm: number | null
 }
 
 function credentialsLesen(configDir: string): Credentials | null {
@@ -88,15 +97,103 @@ function credentialsLesen(configDir: string): Credentials | null {
     const o = roh.claudeAiOauth as Record<string, unknown> | undefined
     const token = o?.accessToken
     if (typeof token !== 'string' || !token) return null
-    return { accessToken: token }
+    return { accessToken: token, laeuftAbAm: typeof o?.expiresAt === 'number' ? o.expiresAt : null }
   } catch {
     return null
   }
 }
 
+// --- Abgelaufenes Token ueber die CLI erneuern ---------------------------
+//
+// Vorlauf wie in der CLI: sie erneuert schon 5 Minuten vor Ablauf.
+const ERNEUERN_VORLAUF_MS = 5 * 60_000
+const ERNEUERN_TIMEOUT_MS = 30_000
+
+export function tokenAbgelaufen(c: Pick<Credentials, 'laeuftAbAm'>, jetzt: number): boolean {
+  return c.laeuftAbAm !== null && c.laeuftAbAm - ERNEUERN_VORLAUF_MS <= jetzt
+}
+
+const erneuerungen = new Map<string, Promise<boolean>>()
+/** Nach einem Fehlschlag (z. B. abgemeldet) nicht alle 10 Minuten neu starten. */
+const ERNEUERN_PAUSE_MS = 30 * 60_000
+const erneuernFehlschlag = new Map<string, number>()
+
+/**
+ * Startet die CLI fuer dieses Konto im Stream-Modus, ohne ihr je eine
+ * Nachricht zu schicken: kein Modellaufruf, kein Verbrauch. Beim Start
+ * erneuert sie ein abgelaufenes Token und schreibt es zurueck; sobald die
+ * Datei ein gueltiges Token zeigt, wird stdin geschlossen und die CLI endet
+ * von selbst. true, wenn das Token danach gilt. Je Konto nur ein Lauf
+ * zugleich.
+ */
+export function tokenErneuern(konto: Konto): Promise<boolean> {
+  const laufend = erneuerungen.get(konto.name)
+  if (laufend) return laufend
+  const zuletzt = erneuernFehlschlag.get(konto.name)
+  if (zuletzt !== undefined && Date.now() - zuletzt < ERNEUERN_PAUSE_MS) return Promise.resolve(false)
+  const lauf = cliKurzStarten(konto)
+    .then((ok) => {
+      if (ok) erneuernFehlschlag.delete(konto.name)
+      else erneuernFehlschlag.set(konto.name, Date.now())
+      return ok
+    })
+    .finally(() => erneuerungen.delete(konto.name))
+  erneuerungen.set(konto.name, lauf)
+  return lauf
+}
+
+function cliKurzStarten(konto: Konto): Promise<boolean> {
+  return new Promise((fertig) => {
+    // Umgebung wie beim Agentenstart (supervisor.ts): das Hauptkonto erbt
+    // sie unveraendert, ein Zusatzkonto bekommt sein CLAUDE_CONFIG_DIR und
+    // keinen geerbten Schluessel.
+    const env: NodeJS.ProcessEnv = { ...process.env }
+    if (konto.name !== HAUPT_KONTO) {
+      env.CLAUDE_CONFIG_DIR = konto.configDir
+      delete env.CLAUDE_CODE_OAUTH_TOKEN
+      delete env.ANTHROPIC_API_KEY
+    }
+    const kind = spawn(process.env.COCKPIT_CLAUDE_CLI ?? 'claude', [
+      '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
+      '--strict-mcp-config', '--no-session-persistence',
+    ], { cwd: homedir(), env, stdio: ['pipe', 'ignore', 'ignore'] })
+
+    let erledigt = false
+    const beenden = (ok: boolean): void => {
+      if (erledigt) return
+      erledigt = true
+      clearInterval(blick)
+      clearTimeout(frist)
+      // Ohne Eingabe endet die CLI von selbst; haengt sie, nach 5 s hart.
+      kind.stdin.end()
+      setTimeout(() => { if (kind.exitCode === null) kind.kill('SIGTERM') }, 5000).unref()
+      if (ok) console.log(`[konten] Token fuer '${konto.name}' ueber die CLI erneuert`)
+      else console.warn(`[konten] Token fuer '${konto.name}' nicht erneuert`)
+      fertig(ok)
+    }
+    const blick = setInterval(() => {
+      const c = credentialsLesen(konto.configDir)
+      if (c && !tokenAbgelaufen(c, Date.now())) beenden(true)
+    }, 500)
+    const frist = setTimeout(() => beenden(false), ERNEUERN_TIMEOUT_MS)
+    kind.stdin.on('error', () => {})
+    kind.on('error', (e) => {
+      console.warn(`[konten] CLI fuer '${konto.name}' nicht startbar:`, String(e))
+      beenden(false)
+    })
+    kind.on('exit', () => {
+      // Schon vorher beendet (z. B. abgemeldet): ein letzter Blick in die Datei.
+      const c = credentialsLesen(konto.configDir)
+      beenden(c !== null && !tokenAbgelaufen(c, Date.now()))
+    })
+  })
+}
+
 export interface NutzungsAbfrage {
   stand: LimitStand
   quelle: 'usage_api'
+  /** Guthaben fuer Cloud-Sitzungen aus derselben Antwort, null wenn keins gemeldet. */
+  cloud: CloudGuthaben | null
 }
 
 // --- Backoff bei 429 ---------------------------------------------------
@@ -127,6 +224,21 @@ export function naechsteBackoffMs(bisherigeFolge: number): number {
 }
 
 /**
+ * Credentials mit gueltigem Token, bei Bedarf vorher ueber die CLI erneuert.
+ * null, wenn das nicht gelingt -- dann gar nicht erst fragen, das gaebe nur
+ * ein 429. Ein frisches Token beendet auch einen laufenden Backoff: die 429
+ * davor kamen vom abgelaufenen.
+ */
+async function gueltigeCredentials(konto: Konto): Promise<Credentials | null> {
+  const creds = credentialsLesen(konto.configDir)
+  if (!creds || !tokenAbgelaufen(creds, Date.now())) return creds
+  if (!(await tokenErneuern(konto))) return null
+  fehlerFolge.delete(konto.name)
+  naechsterVersuch.delete(konto.name)
+  return credentialsLesen(konto.configDir)
+}
+
+/**
  * Fragt den Nutzungsstand eines Kontos ab, ohne dass dafuer ein Agent laufen
  * muss. Liefert null, wenn keine Anmeldung vorliegt, das Token abgelaufen
  * ist, der Endpunkt nicht erreichbar ist, ein 429-Backoff noch laeuft oder
@@ -135,7 +247,7 @@ export function naechsteBackoffMs(bisherigeFolge: number): number {
  * auch nicht bei einem Fehler.
  */
 export async function nutzungAbfragen(konto: Konto): Promise<NutzungsAbfrage | null> {
-  const creds = credentialsLesen(konto.configDir)
+  const creds = await gueltigeCredentials(konto)
   if (!creds) return null
 
   const gesperrtBis = naechsterVersuch.get(konto.name)
@@ -188,9 +300,55 @@ export async function nutzungAbfragen(konto: Konto): Promise<NutzungsAbfrage | n
     return null
   }
 
-  const stand = nutzungAusAntwort(body, Date.now())
+  const jetzt = Date.now()
+  const stand = nutzungAusAntwort(body, jetzt)
   if (!stand) return null
-  return { stand, quelle: 'usage_api' }
+  return { stand, quelle: 'usage_api', cloud: cloudGuthabenAusAntwort(body, jetzt) }
+}
+
+// --- Guthaben fuer Cloud-Sitzungen -------------------------------------
+//
+// Einmalige Gutschrift zum Start der Cloud-Sitzungen (claude.ai/code,
+// `claude --cloud`): 100 $ bei Pro, 250 $ bei Max, einzuloesen bis 7.10.2026,
+// verfaellt am 4.11.2026 23:59 PT. Wird vor dem Abo-Limit verbraucht und gilt
+// nur fuer Cloud-Sitzungen, nicht fuer Chat, API oder lokales Claude Code.
+//
+// Anthropic meldet es in /api/oauth/usage unter dem Decknamen
+// `iguana_necktie` -- die CLI kennt den Namen nicht, er ist erschlossen:
+// Befund vom 26.09. auf beiden Pro-Konten limit_dollars 100,
+// used_dollars 0, resets_at 2026-11-05T07:59Z (= 4.11. 23:59 PST). Die
+// Felder heissen ausdruecklich *_dollars, die Waehrung ist also USD.
+
+export interface CloudGuthaben {
+  grenze: number
+  verbraucht: number
+  rest: number
+  /** Wann es verfaellt (ms), null wenn nicht gemeldet. */
+  verfaelltAm: number | null
+  /** Anthropics Grund, falls es gesperrt ist (Text wie gemeldet). */
+  gesperrt: string | null
+  gemessenAm: number
+}
+
+const zahlOderNull = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null)
+
+/** Cloud-Guthaben aus der Nutzungsantwort. null, wenn keins gemeldet ist (kein Rahmen). */
+export function cloudGuthabenAusAntwort(body: unknown, jetzt: number): CloudGuthaben | null {
+  const f = (body as Record<string, unknown> | null)?.iguana_necktie as Record<string, unknown> | null | undefined
+  if (!f || typeof f !== 'object') return null
+  const grenze = zahlOderNull(f.limit_dollars)
+  if (grenze === null || grenze <= 0) return null
+  const verbraucht = Math.max(0, zahlOderNull(f.used_dollars) ?? 0)
+  const rest = zahlOderNull(f.remaining_dollars) ?? grenze - verbraucht
+  const ms = typeof f.resets_at === 'string' ? Date.parse(f.resets_at) : NaN
+  return {
+    grenze,
+    verbraucht,
+    rest: Math.max(0, rest),
+    verfaelltAm: Number.isFinite(ms) ? ms : null,
+    gesperrt: typeof f.locked_reason === 'string' && f.locked_reason ? f.locked_reason : null,
+    gemessenAm: jetzt,
+  }
 }
 
 /** Ein Fenster der Antwort: Prozent 0..100 -> Anteil 0..1, ISO -> Sekunden. */
@@ -366,7 +524,7 @@ export function guthabenPrognose(
 
 /** Guthaben eines Kontos abfragen. null bei jedem Fehler -- der alte Stand bleibt dann stehen. */
 export async function guthabenAbfragen(konto: Konto): Promise<Guthaben | null> {
-  const creds = credentialsLesen(konto.configDir)
+  const creds = await gueltigeCredentials(konto)
   if (!creds) return null
   // Laeuft fuer das Konto gerade ein 429-Backoff, auch hier nicht fragen.
   const gesperrtBis = naechsterVersuch.get(konto.name)

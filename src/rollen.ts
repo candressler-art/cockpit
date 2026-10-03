@@ -43,6 +43,12 @@ export interface Fachrolle {
    * ueber alle Projekte hinweg. `gedaechtnis: aus` schaltet es ab.
    */
   gedaechtnis: 'user' | 'project' | 'local' | null
+  /**
+   * Skills, die der Spezialist von Anfang an im Kontext hat (SDK `skills`),
+   * z.B. frontend-design fuer den Gestalter. Sie muessen unter
+   * <CLAUDE_CONFIG_DIR>/skills/ liegen, siehe deploy/konto-hinzufuegen.sh.
+   */
+  skills: string[] | null
   systemPrompt: string
 }
 
@@ -70,6 +76,7 @@ function zerlegen(id: string, roh: string): Fachrolle {
   if (!name) throw new Error(`rollen/${id}.md: Feld 'name' fehlt`)
   const werkzeugeRoh = kopf.get('werkzeuge') ?? ''
   const mcpRoh = kopf.get('mcp') ?? ''
+  const skillsRoh = kopf.get('skills') ?? ''
   const systemPrompt = (m[2] ?? '').trim()
   if (!systemPrompt) throw new Error(`rollen/${id}.md: Prompt ist leer`)
   const farbe = kopf.get('farbe') ?? ''
@@ -88,6 +95,7 @@ function zerlegen(id: string, roh: string): Fachrolle {
     beschreibung: kopf.get('beschreibung') ?? '',
     mcp: mcpRoh ? mcpRoh.split(',').map((w) => w.trim()).filter(Boolean) : null,
     gedaechtnis: gedaechtnis === 'aus' ? null : (gedaechtnis as 'user' | 'project' | 'local'),
+    skills: skillsRoh ? skillsRoh.split(',').map((w) => w.trim()).filter(Boolean) : null,
     systemPrompt,
   }
 }
@@ -188,6 +196,7 @@ export function agentDefinitionen(ausgeschaltet: string[] = []): Record<string, 
       prompt: r.systemPrompt,
       ...(r.modell ? { model: r.modell } : {}),
       ...(r.gedaechtnis ? { memory: r.gedaechtnis } : {}),
+      ...(r.skills?.length ? { skills: r.skills } : {}),
       ...(werkzeugNamen(r.werkzeuge) ? { tools: werkzeugNamen(r.werkzeuge) } : {}),
       ...(mcp && Object.keys(mcp).length ? { mcpServers: [mcp as Record<string, never>] } : {}),
     }

@@ -9,7 +9,7 @@ import { DatabaseSync } from 'node:sqlite'
 const wurzel = mkdtempSync(join(tmpdir(), 'cockpit-markierung-test-'))
 process.env.COCKPIT_SESSIONS = join(wurzel, 'spiegel')
 process.env.CLAUDE_CONFIG_DIR = join(wurzel, 'claude')
-const { chatsSuchen, chatMarkieren, chatKopfLesen, chatFuerSitzung, chatRegistrieren } = await import('../dist/chats.js')
+const { chatsSuchen, chatMarkieren, chatKopfLesen, chatFuerSitzung, chatRegistrieren, chatOptionenMerken, chatOptionenLesen, chatBerechtigungSetzen } = await import('../dist/chats.js')
 
 let ok = 0, gesamt = 0
 const pruefe = (name, bedingung) => {
@@ -84,6 +84,26 @@ pruefe('nur registrierter Chat laesst sich markieren', chatMarkieren(dbPfad, 'n'
 
 // --- Ueberlebt einen Index-Neubau ----------------------------------------------
 h.exec('DELETE FROM chats_meta')
+// Gemerkte Optionen: der Modus eines Chats ueberlebt Neuladen und Neustart.
+pruefe('Optionen: unbekannter Chat -> leer', Object.keys(chatOptionenLesen(dbPfad, 'b')).length === 0)
+chatOptionenMerken(dbPfad, 'b', { modell: 'claude-sonnet-5-5', aufwand: 'high', berechtigung: 'auto' })
+chatOptionenMerken(dbPfad, 'b', { modell: 'claude-opus-5-5', aufwand: undefined, berechtigung: 'bypassPermissions' })
+{
+  const o = chatOptionenLesen(dbPfad, 'b')
+  pruefe('Optionen: letzter Zug gilt', o.modell === 'claude-opus-5-5' && o.berechtigung === 'bypassPermissions' && !('aufwand' in o))
+}
+chatBerechtigungSetzen(dbPfad, 'b', 'auto')
+chatBerechtigungSetzen(dbPfad, 'b', 'frei')
+chatBerechtigungSetzen(dbPfad, 'a', 'auto')
+pruefe('Plan umgesetzt: nur der Modus aendert sich', chatOptionenLesen(dbPfad, 'b').berechtigung === 'auto' && chatOptionenLesen(dbPfad, 'b').modell === 'claude-opus-5-5')
+pruefe('Plan umgesetzt: kein Eintrag fuer ungemerkte Chats', Object.keys(chatOptionenLesen(dbPfad, 'a')).length === 0)
+chatBerechtigungSetzen(dbPfad, 'b', 'bypassPermissions')
+h.prepare("INSERT INTO chat_optionen (session_id, modell, aufwand, berechtigung, geaendert) VALUES ('c','claude-alt-1','high','frei',0)").run()
+{
+  const o = chatOptionenLesen(dbPfad, 'c')
+  pruefe('Optionen: Ungueltiges faellt weg', !('modell' in o) && !('berechtigung' in o) && o.aufwand === 'high')
+}
+
 h.exec('INSERT INTO chats_meta (version) VALUES (0)')
 h.close()
 {
@@ -94,6 +114,7 @@ h.close()
   const n = h2.prepare("SELECT COUNT(*) AS n FROM chat_markierung WHERE session_id = 'a' AND titel = 'Kochbuch'").get().n
   h2.close()
   pruefe('Markierung bleibt beim Neubau des Index', n === 1)
+  pruefe('Optionen bleiben beim Neubau des Index', m.chatOptionenLesen(dbPfad, 'b').berechtigung === 'bypassPermissions')
 }
 
 rmSync(wurzel, { recursive: true, force: true })

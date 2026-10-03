@@ -78,7 +78,7 @@ pruefe('CLAUDE.md aus: settingSources leer', Array.isArray(o3.optionen.settingSo
 pruefe('Live-Text aus', o3.optionen.liveText === false)
 const o4 = chatOptionenBauen(e, null, () => ({}), null)
 pruefe('alle Rollen aus: kein agents-Feld, kein Hinweis', !o4.optionen.agents && !/Subagenten/.test(o4.optionen.systemPromptZusatz))
-pruefe('kenntAufwand', kenntAufwand('claude-opus-5-5') && kenntAufwand('claude-sonnet-5') && !kenntAufwand('claude-haiku-4-5-20251001'))
+pruefe('kenntAufwand', kenntAufwand('claude-opus-5-5') && kenntAufwand('claude-sonnet-5-5') && !kenntAufwand('claude-haiku-4-5-20251001'))
 pruefe('Zusatz ohne alles: nur Grundregeln', chatSystemZusatz(null, false).split('\n\n').length === 3)
 pruefe('Lernen gehoert zu den Grundregeln', /Lerne aus jeder Aufgabe/.test(chatSystemZusatz(null, false)))
 const o5 = chatOptionenBauen(e, null, agents, null, '/g/agent-memory')

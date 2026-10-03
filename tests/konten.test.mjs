@@ -13,13 +13,16 @@ import {
   emailLesen,
   KontenVerwaltung,
   nutzungBeimLadenFiltern,
+  fensterNachReset,
   sitzungsdateiVorhanden,
   wochenPrognose,
 } from '../dist/konten.js'
 import {
   nutzungAusAntwort, nutzungAbfragen, naechsteBackoffMs, guthabenAusAntwort, guthabenPrognose, guthabenRest,
+  cloudGuthabenAusAntwort, tokenAbgelaufen,
 } from '../dist/kontenNutzung.js'
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
+import { einordnen } from '../dist/normalisieren.js'
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, chmodSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -895,6 +898,23 @@ const SDK_LIMIT_PRAEFIXE = ["You've hit your", "You've reached your"]
   pruefe('Guthaben: Unsinn im Betrag -> null', guthabenAusAntwort({ extra_usage: { balance: 'viel' }, spend: { used: 'x' } }, 1).stand === null)
 }
 
+// --- Cloud-Guthaben (iguana_necktie) ---
+{
+  // Form wie am 26.09. live auf beiden Pro-Konten gesehen.
+  const c = cloudGuthabenAusAntwort({
+    five_hour: { utilization: 41 },
+    iguana_necktie: { utilization: 0, resets_at: '2026-11-05T07:59:00+00:00', limit_dollars: 100, used_dollars: 0, remaining_dollars: 100, locked_reason: null },
+  }, 7)
+  pruefe('Cloud: 100 $ Rahmen, nichts verbraucht', c && c.grenze === 100 && c.verbraucht === 0 && c.rest === 100 && c.gesperrt === null && c.gemessenAm === 7)
+  pruefe('Cloud: Frist in ms', c.verfaelltAm === Date.parse('2026-11-05T07:59:00Z'))
+  const d = cloudGuthabenAusAntwort({ iguana_necktie: { limit_dollars: 100, used_dollars: 12.5, resets_at: null, locked_reason: 'expired' } }, 1)
+  pruefe('Cloud: Rest aus Grenze minus Verbrauch, wenn nicht gemeldet', d.rest === 87.5 && d.verfaelltAm === null && d.gesperrt === 'expired')
+  pruefe('Cloud: ohne Feld oder ohne Rahmen -> null',
+    cloudGuthabenAusAntwort({ iguana_necktie: null }, 1) === null &&
+    cloudGuthabenAusAntwort({ iguana_necktie: { limit_dollars: null } }, 1) === null &&
+    cloudGuthabenAusAntwort(null, 1) === null)
+}
+
 // --- Sitzungsdatei vor resume ------------------------------------------------
 {
   const dir = mkdtempSync(join(tmpdir(), 'sitzung-'))
@@ -959,6 +979,84 @@ const SDK_LIMIT_PRAEFIXE = ["You've hit your", "You've reached your"]
 
   const ohneRest = guthabenPrognose([{ ts: J - 2 * T, verbraucht: 0 }, { ts: J, verbraucht: 4 }], null, J)
   pruefe('Prognose: Tempo auch ohne bekannten Rest', ohneRest.proTag === 2 && ohneRest.tage === null)
+}
+
+// --- 20. Fenster nach dem Reset: wieder 0, auch ohne neue Messung ----------
+// 03.10.2026: Hauptkonto stand nach dem Wochenreset um 04:00 weiter auf
+// "Woche 100 %" (Token abgelaufen, keine Messung) und kam nicht dran.
+{
+  const J = 1_790_000_000_000
+  const stand = {
+    status: 'rejected', rateLimitType: 'seven_day', resetsAt: null,
+    fuenfStundenAnteil: 0.4, fuenfStundenResetsAt: J / 1000 + 3600,
+    siebenTageAnteil: 1, siebenTageResetsAt: J / 1000 - 60, gemessenAm: J - 8 * 3600_000,
+  }
+  const n = fensterNachReset(stand, J)
+  pruefe('Reset vorbei: Woche wieder 0', n.siebenTageAnteil === 0 && n.siebenTageResetsAt === null)
+  pruefe('Reset vorbei: laufendes 5-h-Fenster bleibt', n.fuenfStundenAnteil === 0.4)
+  pruefe('kein Reset vorbei: unveraendert', fensterNachReset(stand, J - 3600_000) === stand)
+
+  const kv = new KontenVerwaltung()
+  kv.nutzungMelden('haupt', { ...stand, siebenTageResetsAt: Date.now() / 1000 - 60, fuenfStundenResetsAt: null }, 'usage_api')
+  pruefe('nutzungLesen: Woche nach Reset 0', kv.nutzungLesen('haupt')?.stand.siebenTageAnteil === 0)
+}
+
+// --- 21. Token-Ablauf und Erneuerung ueber die CLI ---------------------------
+{
+  const J = 1_790_000_000_000
+  pruefe('Token ohne Ablaufzeit gilt', !tokenAbgelaufen({ laeuftAbAm: null }, J))
+  pruefe('Token in 1 h gilt', !tokenAbgelaufen({ laeuftAbAm: J + 3600_000 }, J))
+  pruefe('Token in 2 min: schon erneuern (Vorlauf wie die CLI)', tokenAbgelaufen({ laeuftAbAm: J + 120_000 }, J))
+  pruefe('abgelaufenes Token', tokenAbgelaufen({ laeuftAbAm: J - 1 }, J))
+}
+{
+  // Attrappe der CLI: schreibt ein frisches Token und wartet, bis stdin zugeht.
+  const ordner = mkdtempSync(join(tmpdir(), 'nutzung-erneuern-'))
+  const cli = join(ordner, 'claude')
+  writeFileSync(cli, '#!/bin/sh\nsleep 0.3\nprintf \'{"claudeAiOauth":{"accessToken":"neu","expiresAt":%s}}\' "$(( $(date +%s) * 1000 + 3600000 ))" > "$CLAUDE_CONFIG_DIR/.credentials.json"\ncat > /dev/null\n')
+  chmodSync(cli, 0o755)
+  const stumm = join(ordner, 'stumm')
+  writeFileSync(stumm, '#!/bin/sh\nexit 0\n')
+  chmodSync(stumm, 0o755)
+  const alt = JSON.stringify({ claudeAiOauth: { accessToken: 'alt', expiresAt: Date.now() - 3600_000 } })
+  const antwort = JSON.stringify({ five_hour: { utilization: 0, resets_at: null }, seven_day: { utilization: 12, resets_at: null } })
+  const alterFetch = global.fetch
+  const alteCli = process.env.COCKPIT_CLAUDE_CLI
+
+  const dir1 = join(ordner, 'k1'); mkdirSync(dir1)
+  writeFileSync(join(dir1, '.credentials.json'), alt)
+  let token = null
+  global.fetch = async (_url, o) => { token = o.headers.Authorization; return new Response(antwort, { status: 200 }) }
+  process.env.COCKPIT_CLAUDE_CLI = cli
+  const r = await nutzungAbfragen({ name: 'test-erneuern', configDir: dir1, angemeldet: true, email: null, abo: null })
+  pruefe('abgelaufenes Token: CLI erneuert, dann gemessen', r?.stand.siebenTageAnteil === 0.12 && token === 'Bearer neu')
+  pruefe('erneuerte Datei stammt von der CLI', JSON.parse(readFileSync(join(dir1, '.credentials.json'), 'utf-8')).claudeAiOauth.accessToken === 'neu')
+
+  const dir2 = join(ordner, 'k2'); mkdirSync(dir2)
+  writeFileSync(join(dir2, '.credentials.json'), alt)
+  let aufrufe = 0
+  global.fetch = async () => { aufrufe++; return new Response('', { status: 429 }) }
+  process.env.COCKPIT_CLAUDE_CLI = stumm
+  const konto2 = { name: 'test-nicht-erneuert', configDir: dir2, angemeldet: true, email: null, abo: null }
+  pruefe('Erneuerung scheitert: null, kein 429-Aufruf', (await nutzungAbfragen(konto2)) === null && aufrufe === 0)
+  const vorher = Date.now()
+  await nutzungAbfragen(konto2)
+  pruefe('nach Fehlschlag Pause statt sofort neuer CLI-Start', Date.now() - vorher < 200 && aufrufe === 0)
+
+  global.fetch = alterFetch
+  if (alteCli === undefined) delete process.env.COCKPIT_CLAUDE_CLI
+  else process.env.COCKPIT_CLAUDE_CLI = alteCli
+  rmSync(ordner, { recursive: true, force: true })
+}
+
+// --- 22. rate_limit_event 'allowed_warning' ist kein Limit -------------------
+// Das Konto ist fast voll, der Agent arbeitet aber weiter -- vorher stand der
+// Chat dabei auf "Wartet auf ein freies Konto".
+{
+  const ev = (status) => einordnen({ type: 'rate_limit_event', rate_limit_info: { status } })
+  pruefe('allowed: Nutzungsstand', ev('allowed')?.kind === 'usage')
+  pruefe('allowed_warning: Nutzungsstand, kein Limit', ev('allowed_warning')?.kind === 'usage')
+  pruefe('rejected: Limit', ev('rejected')?.kind === 'rate_limit')
 }
 
 console.log(`\n${ok}/${gesamt} bestanden`)

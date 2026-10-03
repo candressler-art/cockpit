@@ -1,12 +1,19 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="96" fill="#1e1e2e"/>
-  <circle cx="256" cy="150" r="42" fill="#89b4fa"/>
-  <circle cx="146" cy="350" r="34" fill="#94e2d5"/>
-  <circle cx="256" cy="350" r="34" fill="#cba6f7"/>
-  <circle cx="366" cy="350" r="34" fill="#f9e2af"/>
-  <g stroke="#45475a" stroke-width="12" stroke-linecap="round">
-    <path d="M256 192 L146 316"/>
-    <path d="M256 192 L256 316"/>
-    <path d="M256 192 L366 316"/>
+  <defs>
+    <linearGradient id="rand" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#33ccff"/>
+      <stop offset="1" stop-color="#00ff99"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="#0f1115"/>
+  <rect x="14" y="14" width="484" height="484" rx="100" fill="none" stroke="url(#rand)" stroke-width="16"/>
+  <g stroke="#3a404b" stroke-width="14" stroke-linecap="round">
+    <path d="M256 196 L150 318"/>
+    <path d="M256 196 L256 318"/>
+    <path d="M256 196 L362 318"/>
   </g>
+  <circle cx="256" cy="156" r="46" fill="url(#rand)"/>
+  <circle cx="150" cy="352" r="34" fill="#eceef2"/>
+  <circle cx="256" cy="352" r="34" fill="#eceef2"/>
+  <circle cx="362" cy="352" r="34" fill="#eceef2"/>
 </svg>

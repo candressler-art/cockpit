@@ -10,7 +10,7 @@
  * Die Konten stehen nur hier: Limits, Reset, Prognose, Guthaben und der
  * Vorzug gehoeren zusammen -- man waehlt ein Konto nach dem, was es noch hat.
  */
-import { h, symbol, api, leeren, kurzZahl, zahl, uhrzeit, modellName, melden, fehlerText } from './dom.js'
+import { h, symbol, api, leeren, kurzZahl, zahl, uhrzeit, wann, modellName, melden, fehlerText } from './dom.js'
 import * as bus from '../bus.js'
 
 const WOCHENTAGE = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So']
@@ -55,9 +55,10 @@ function resetText(ms) {
  */
 export const anteilProzent = (anteil) => (anteil === null || anteil === undefined ? null : Math.round(anteil * 100))
 
-/** Woher die Zahlen eines Kontos stammen, oder dass es noch keine gibt. */
+/** Woher die Zahlen eines Kontos stammen, oder dass es noch keine gibt --
+ *  mit "gestern"/Wochentag, damit ein alter Stand nicht wie ein frischer aussieht. */
 export const messungText = (k) => (k.gemessenAm
-  ? `gemessen ${uhrzeit(k.gemessenAm)}${k.quelle === 'rate_limit_event' ? ' (aus einem Chat)' : ''}`
+  ? `gemessen ${wann(k.gemessenAm)}${k.quelle === 'rate_limit_event' ? ' (aus einem Chat)' : ''}`
   : 'noch nicht gemessen')
 
 function dauerText(ms) {
@@ -68,6 +69,14 @@ function dauerText(ms) {
   return `${Math.round(std / 24)} Tagen`
 }
 
+const CLOUD_ERKLAERUNG = 'Einmalige Gutschrift von Anthropic für Cloud-Sitzungen. Gilt nicht für Chat, API oder Claude Code auf dem Server.'
+
+/** Verbrauchter Anteil des Cloud-Guthabens in ganzen Prozent. */
+export const cloudProzent = (c) => (c.grenze > 0 ? Math.round((c.verbraucht / c.grenze) * 100) : 0)
+
+/** Frist mit Datum und Uhrzeit -- "5. Nov." allein verschweigt, dass es morgens um 9 schon weg ist. */
+const fristText = (ms) => `am ${new Date(ms).toLocaleString('de-DE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
+
 const geld = (betrag, waehrung) => betrag === null || betrag === undefined ? '?' :
   betrag.toLocaleString('de-DE', { style: 'currency', currency: waehrung || 'USD' })
 
@@ -77,6 +86,7 @@ export function nutzungBauen() {
   const el = h('section.bereich', {}, h('header.bereich-kopf.mit-status', {}, h('h1', {}, 'Nutzung'), h('span.spacer'), aktualisieren), inhalt)
 
   const kontenOrt = h('div.konten-ort')
+  const kontenStatus = h('span.leise.konten-status', { 'aria-live': 'polite' })
   const tagOrt = h('div.tag-detail')
   let bericht = null
   let gewaehlt = null
@@ -87,6 +97,9 @@ export function nutzungBauen() {
     if (!bericht) leeren(inhalt, h('div.laedt', {}, h('span.kreisel'), 'Lädt …'))
     aktualisieren.disabled = true
     try {
+      // Die Limits erst aus dem letzten Stand zeigen, dann frisch messen --
+      // die Messung kann ein paar Sekunden dauern, der Rest soll nicht warten.
+      void frischMessen()
       const [b] = await Promise.all([api('/api/nutzung'), kontenLaden()])
       bericht = b
       zeichnen()
@@ -114,7 +127,7 @@ export function nutzungBauen() {
         kachel('Aktivster Tag', k.aktivsterTag ? kurzZahl(k.aktivsterTag.tokens) : '–', k.aktivsterTag ? tagKurz(k.aktivsterTag.tag) : 'noch keiner'),
         gesamtKachel(b.gesamt)),
       karte('Aktivität', `${k.aktiveTage} aktive Tage im letzten Jahr`, raster(b, nachTag), tagOrt),
-      karte('Konten', null, kontenOrt),
+      karte('Konten', kontenStatus, kontenOrt),
       h('div.zwei-spalten', {},
         karte('Tageszeit', 'Wann du arbeitest (letztes Jahr)', stundenBild(b.stunden)),
         karte('Modelle', null, balkenListe(b.modelle.map((m) => ({ name: modellName(m.modell) || m.modell, wert: m.tokens, zusatz: `${zahl(m.antworten)} Antworten` }))))),
@@ -215,13 +228,46 @@ export function nutzungBauen() {
   }
 
   // --- Konten ---------------------------------------------------------------------
-  async function kontenLaden() {
+  // Zwei Wege: GET liefert den letzten Stand sofort, POST .../messen fragt
+  // vorher bei Anthropic nach (der Server misst hoechstens alle 10 s). Eine
+  // frische Messung ist immer der neueste Stand, auch wenn sie vor einem GET
+  // losging. Ein GET, der schon unterwegs war, als sie ankam, kann dagegen
+  // noch den alten Stand tragen -- er wird verworfen, sonst ueberschriebe er
+  // die eben gemessenen Werte.
+  let frischAngekommen = -1
+  let messung = null
+
+  async function kontenLaden(frisch = false) {
+    const gestartet = performance.now()
+    const veraltet = () => !frisch && gestartet < frischAngekommen
     try {
-      const d = await api('/api/konten')
+      const d = await (frisch ? api('/api/konten/messen', { method: 'POST' }) : api('/api/konten'))
+      if (veraltet()) return
+      if (frisch) frischAngekommen = performance.now()
       leeren(kontenOrt, kontenInhalt(d))
+      // Der Limit-Hinweis unten in der Seitenleiste soll dasselbe zeigen.
+      if (frisch) dispatchEvent(new Event('konten-geaendert'))
     } catch (e) {
+      if (veraltet()) return
+      // Ein Stand ist schon zu sehen: stehen lassen, nur sagen, dass er nicht neu ist.
+      if (frisch && kontenOrt.childElementCount) throw e
       leeren(kontenOrt, h('div.fehlertext.pad', {}, `Konten nicht geladen: ${fehlerText(e)}`))
     }
+  }
+
+  /** Limits frisch messen; laeuft schon eine Messung, auf diese warten. */
+  function frischMessen() {
+    if (messung) return messung
+    leeren(kontenStatus, h('span.kreisel'), 'wird gemessen …')
+    kontenStatus.title = ''
+    messung = kontenLaden(true)
+      .then(() => leeren(kontenStatus))
+      .catch((e) => {
+        leeren(kontenStatus, 'nicht neu gemessen')
+        kontenStatus.title = fehlerText(e)
+      })
+      .finally(() => { messung = null })
+    return messung
   }
 
   async function vorzugSetzen(name) {
@@ -241,7 +287,7 @@ export function nutzungBauen() {
         h('button.link', { type: 'button', onclick: () => vorzugSetzen(null) }, 'Wieder ausgleichen'))
       : h('div.konten-modus', {}, symbol('info', 14), h('span', {}, 'Ausgeglichen: jeder neue Chat nimmt das Konto mit der meisten Luft im Wochenlimit.'))
     const karten = d.konten.map((k) => kontoKarte(k, d))
-    return [modus, guthabenGesamtBlock(d), h('div.konten', {}, karten)].filter(Boolean)
+    return [modus, cloudGesamtBlock(d), guthabenGesamtBlock(d), h('div.konten', {}, karten)].filter(Boolean)
   }
 
   function kontoKarte(k, d) {
@@ -266,6 +312,8 @@ export function nutzungBauen() {
             ? 'Beim bisherigen Tempo reicht das Wochenlimit bis zum Reset.'
             : `Beim bisherigen Tempo ist das Wochenlimit ${resetText(k.wochePrognose.leerAm)} erreicht (in ${dauerText(k.wochePrognose.leerAm - jetzt)}).`))
       }
+      const cloud = d.cloud?.[k.name]
+      if (cloud) zeilen.push(cloudZeile(cloud))
       zeilen.push(h('div.gemessen', {}, messungText(k)))
       zeilen.push(guthabenZeile(d.guthaben?.[k.name]))
     } else {
@@ -293,6 +341,36 @@ export function nutzungBauen() {
         h('span', { style: { width: `${Math.min(100, p ?? 0)}%` } })),
       h('span.fenster-zahl', {}, p === null ? '–' : `${p} %`),
       h('span.fenster-reset', {}, resetAm ? `Reset ${resetText(resetAm)}` : ''))
+  }
+
+  /** Cloud-Guthaben eines Kontos, als Balken wie die Limits: Anteil verbraucht. */
+  function cloudZeile(c) {
+    const p = cloudProzent(c)
+    const klasse = p >= 90 ? '.hoch' : p >= 70 ? '.mittel' : ''
+    // Die Frist steht im Block darueber -- in der schmalen Karte waeren es sonst drei Zeilen.
+    const unter = [`${geld(c.verbraucht, 'USD')} von ${geld(c.grenze, 'USD')} verbraucht`]
+    if (c.gesperrt) unter.push(`gesperrt (${c.gesperrt})`)
+    return h('div.fenster', { title: CLOUD_ERKLAERUNG },
+      h('span.fenster-name', {}, 'Cloud'),
+      h(`span.fenster-balken${klasse}`, { role: 'meter', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': p, 'aria-label': `Cloud-Guthaben: ${p} % verbraucht` },
+        h('span', { style: { width: `${Math.min(100, p)}%` } })),
+      h('span.fenster-zahl', {}, `${p} %`),
+      h('span.fenster-reset', {}, unter.join(' · ')))
+  }
+
+  /** Summe ueber alle Konten -- steht vor dem Nutzungsguthaben, weil es das ist, was Can wirklich hat. */
+  function cloudGesamtBlock(d) {
+    const c = d.cloudGesamt
+    if (!c) return null
+    const teile = [`Cloud-Guthaben: ${geld(c.rest, 'USD')} von ${geld(c.grenze, 'USD')} übrig` +
+      (c.konten > 1 ? ` (${c.konten} Konten)` : ''), `${geld(c.verbraucht, 'USD')} verbraucht`]
+    if (c.verfaelltAm) {
+      const tage = Math.floor((c.verfaelltAm - Date.now()) / 86_400_000)
+      teile.push(`verfällt ${fristText(c.verfaelltAm)}${tage >= 1 ? ` (noch ${tage} ${tage === 1 ? 'Tag' : 'Tage'})` : ''}`)
+    }
+    return h('div.guthaben-gesamt.an', { title: CLOUD_ERKLAERUNG }, symbol('wolke', 14),
+      h('span', {}, teile.join(' · '), h('br'),
+        h('span.leise', {}, 'Nur für Cloud-Sitzungen (claude.ai/code, claude --cloud), wird dort vor dem Abo-Limit verbraucht.')))
   }
 
   function guthabenZeile(g) {
@@ -360,15 +438,20 @@ export function nutzungBauen() {
   }
 
   bus.abonnieren('limit', () => { if (sichtbar) kontenLaden() })
+  // Zurueck ins Fenster (anderes Programm, Handy entsperrt) zaehlt wie ein
+  // neues Oeffnen des Bereichs.
+  document.addEventListener('visibilitychange', () => {
+    if (sichtbar && document.visibilityState === 'visible') frischMessen()
+  })
 
   return {
     el,
     zeigen() {
       sichtbar = true
       laden()
-      // Limits aendern sich laufend; das Jahr nicht -- nur die Konten pollen.
+      // Limits aendern sich laufend; das Jahr nicht -- nur die Konten neu messen.
       clearInterval(uhr)
-      uhr = setInterval(() => { if (document.visibilityState === 'visible') kontenLaden() }, 60_000)
+      uhr = setInterval(() => { if (document.visibilityState === 'visible') frischMessen() }, 60_000)
     },
     verbergen() { sichtbar = false; clearInterval(uhr) },
   }
@@ -390,5 +473,5 @@ function kachel(titel, wert, unter) {
 }
 
 function karte(titel, unter, ...kinder) {
-  return h('section.n-karte', {}, h('div.n-karte-kopf', {}, h('h2', {}, titel), unter && h('span.leise', {}, unter)), kinder)
+  return h('section.n-karte', {}, h('div.n-karte-kopf', {}, h('h2', {}, titel), unter && (unter instanceof Node ? unter : h('span.leise', {}, unter))), kinder)
 }

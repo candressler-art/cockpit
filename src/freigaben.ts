@@ -31,8 +31,11 @@ export interface Entscheidung {
   nachricht?: string
 }
 
-/** Modi, in die ein angenommener Plan wechseln darf. 'bypassPermissions' bewusst nicht. */
-const PLAN_MODI = new Set<string>(['default', 'acceptEdits'])
+/**
+ * Modi, in die ein angenommener Plan wechseln darf. 'auto' ja (die
+ * Sicherheitspruefung bleibt an), 'bypassPermissions' bewusst nicht.
+ */
+const PLAN_MODI = new Set<string>(['default', 'acceptEdits', 'auto'])
 
 /** Vorschlaege auf die laufende Sitzung umschreiben -- nichts davon landet in einer Datei. */
 export function sitzungsVorschlaege(vorschlaege: PermissionUpdate[] | undefined): PermissionUpdate[] {

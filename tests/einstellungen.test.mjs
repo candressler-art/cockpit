@@ -19,8 +19,8 @@ const basis = vorgaben('/home/test')
 
 // --- Pruefung ---------------------------------------------------------------
 {
-  const { werte, fehler } = einstellungenPruefen({ modell: 'claude-sonnet-5', aufwand: 'max' }, basis)
-  pruefe('gueltige Felder uebernommen', werte.modell === 'claude-sonnet-5' && werte.aufwand === 'max' && fehler.length === 0)
+  const { werte, fehler } = einstellungenPruefen({ modell: 'claude-sonnet-5-5', aufwand: 'max' }, basis)
+  pruefe('gueltige Felder uebernommen', werte.modell === 'claude-sonnet-5-5' && werte.aufwand === 'max' && fehler.length === 0)
   pruefe('Ausgangsstand nicht veraendert', basis.modell === 'claude-opus-5-5')
 }
 {
@@ -94,16 +94,17 @@ const dbPfad = join(verzeichnis, 'test.db')
 }
 {
   const l = auswahlListen()
-  pruefe('Auswahllisten vollstaendig', l.modelle.length === 3 && l.aufwaende.length === 5 && l.berechtigungen.length === 4)
+  pruefe('Auswahllisten vollstaendig', l.modelle.length === 3 && l.aufwaende.length === 5 && l.berechtigungen.length === 5)
+  pruefe('Selbststaendig (auto) ist ein gueltiger Modus', l.berechtigungen.some((b) => b.id === 'auto'))
 }
 
 rmSync(verzeichnis, { recursive: true, force: true })
 // --- Team-Auftrag: Vorgaben aus den Einstellungen fuellen Luecken ---
 {
-  const team = { maxRunden: 8, parallel: 2, orchestratorModell: 'claude-opus-5-5', workerModell: 'claude-sonnet-5' }
+  const team = { maxRunden: 8, parallel: 2, orchestratorModell: 'claude-opus-5-5', workerModell: 'claude-sonnet-5-5' }
   const leer = teamAuftragWerte({}, team)
   pruefe('Team: ohne Angaben gelten die Vorgaben', leer.maxRunden === 8 && leer.parallelitaet === 2 &&
-    leer.orchestratorModell === 'claude-opus-5-5' && leer.workerModell === 'claude-sonnet-5')
+    leer.orchestratorModell === 'claude-opus-5-5' && leer.workerModell === 'claude-sonnet-5-5')
   const eigen = teamAuftragWerte({ maxRunden: 3, parallelitaet: 1, workerModell: 'claude-haiku-4-5-20251001' }, team)
   pruefe('Team: Angaben der Anfrage gehen vor', eigen.maxRunden === 3 && eigen.parallelitaet === 1 &&
     eigen.workerModell === 'claude-haiku-4-5-20251001' && eigen.orchestratorModell === 'claude-opus-5-5')

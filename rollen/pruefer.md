@@ -4,6 +4,7 @@ symbol: ✓
 farbe: #a6e3a1
 modell: inherit
 werkzeuge:
+skills: webapp-testing
 beschreibung: Prüft, ob etwas wirklich funktioniert: Tests, Randfälle, echte Abläufe.
 einsatz: Wenn geprueft werden soll, ob etwas wirklich funktioniert -- nach einer groesseren Aenderung, bevor etwas als fertig gilt oder ausgerollt wird, oder wenn Tests fehlen. Schreibt und startet Tests, probiert Randfaelle und echte Ablaeufe durch. NICHT fuer das reine Durchlesen von Code (das ist der Reviewer) und nicht zum Beheben der gefundenen Fehler.
 ---
