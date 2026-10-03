@@ -1,0 +1,645 @@
+/* Cockpit -- Designs (zweite Achse neben dem Akzent).
+ *
+ * design.js setzt html[data-design]; ohne Attribut gilt 'Glas' aus stil.css.
+ * Can (03.10.2026): "auch designed, nicht nur faerben" -- Umfaerben allein
+ * bemerkt er nicht. Darum aendert jedes Design Aufbau und Charakter so, dass
+ * man es in einer Sekunde erkennt:
+ *   Terminal  tmux: Statuszeile unten, Fenster stossen aneinander, alles Mono,
+ *             0 px Ecken, 1 px Linien, Ueberschriften als Box-Rahmen.
+ *   Neon      Synthwave: Gitter und Sonne, leuchtende Raender, Verlaufsflaechen,
+ *             breite Grossbuchstaben.
+ *   Brutal    3 px Raender, harte versetzte Schatten, Vollfarbe, grosse
+ *             schmale Typo, schief geklebte Etiketten.
+ *   Ruhig     kein Bild, feste Flaechen, weiche grosse Ecken, keine Raender,
+ *             viel Luft, Nachrichten rechts wie im Messenger.
+ * Jedes Design faerbt sich nur aus --akzent/--akzent-2, passt also zu allen
+ * 14 Akzenten. Zustaende bleiben in jedem Design sichtbar: drehender Rand
+ * (Claude arbeitet), "Du bist dran" (orange), Freigaben, Fehler (rot).
+ * Fuer Touchgeraete (pointer: coarse) fallen Blur und Glow weg -- Android
+ * soll fluessig bleiben.
+ */
+
+/* --- Auswahl: Vorschau-Kacheln (Einstellungen > Darstellung, Startseite) ----- */
+.designs { display: grid; grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); gap: 10px; width: 100%; }
+.design-wahl {
+  display: flex; flex-direction: column; gap: 7px; padding: 8px 8px 10px; text-align: left; min-width: 0;
+  border: 1px solid var(--surface1); border-radius: 12px; background: var(--base); color: var(--subtext);
+  transition: border-color .12s, color .12s;
+}
+.design-wahl:hover { border-color: var(--surface2); color: var(--text); }
+.design-wahl[aria-pressed="true"] { color: var(--text); border-color: var(--akzent); box-shadow: 0 0 0 1px var(--akzent); }
+.design-name { display: flex; align-items: center; gap: 6px; font-weight: 650; font-size: 14px; color: var(--text); }
+.design-name .sym { margin-left: auto; color: var(--akzent); }
+.design-hinweis { font-size: 12px; line-height: 1.4; color: var(--overlay); }
+@media (max-width: 760px) {
+  .designs { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .design-hinweis { display: none; }
+}
+
+/* Akzentliste: lange Namen ("Sonnenuntergang") kuerzen statt aus der Karte zu ragen. */
+.akzent-wahl { min-width: 0; }
+.akzent-wahl > span:not(.akzent-probe) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 760px) { .akzente { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* Mini-Cockpit: Leiste, Liste, Fenster -- jedes Design zeichnet es in seinem Stil. */
+.design-probe {
+  --p-a: var(--akzent); --p-b: var(--akzent-2);
+  display: grid; grid-template-columns: 30% minmax(0, 1fr); grid-template-rows: 13% minmax(0, 1fr); gap: 4px; padding: 5px;
+  width: 100%; aspect-ratio: 16 / 10; border-radius: 8px; overflow: hidden; flex: none;
+  background: #07080a var(--probe-tapete, none) center / cover no-repeat;
+}
+.design-probe > span { display: block; min-width: 0; min-height: 0; }
+.dp-leiste { grid-column: 1 / -1; }
+.dp-haupt { display: flex !important; flex-direction: column; gap: 4px; padding: 10% 9%; }
+.dp-zeile { height: 4px; width: 80%; background: rgb(236 238 242 / .55); }
+.dp-zeile.kurz { width: 50%; }
+.dp-knopf { margin-top: auto; align-self: flex-end; width: 32%; height: 18%; min-height: 6px; background: var(--p-a); }
+/* Glas */
+[data-probe="glas"] .dp-leiste, [data-probe="glas"] .dp-seite, [data-probe="glas"] .dp-haupt { background: rgb(15 17 21 / .62); border-radius: 4px; }
+[data-probe="glas"] .dp-haupt { box-shadow: inset 0 0 0 1px var(--p-a); }
+[data-probe="glas"] .dp-zeile, [data-probe="glas"] .dp-knopf { border-radius: 2px; }
+/* Terminal: Statuszeile unten, Fenster ohne Luecke */
+[data-probe="terminal"] { border-radius: 0; gap: 0; grid-template-rows: minmax(0, 1fr) 12%; }
+[data-probe="terminal"] .dp-leiste { grid-row: 2; background: var(--p-a); }
+[data-probe="terminal"] .dp-seite, [data-probe="terminal"] .dp-haupt { grid-row: 1; background: rgb(3 5 5 / .9); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--p-a) 45%, #1c2222); }
+[data-probe="terminal"] .dp-zeile { height: 3px; background: var(--p-a); opacity: .7; }
+/* Neon: Leuchtraender, Verlaufsknopf */
+[data-probe="neon"] .dp-leiste { background: none; }
+[data-probe="neon"] .dp-seite, [data-probe="neon"] .dp-haupt { background: rgb(10 6 20 / .7); border-radius: 5px; }
+[data-probe="neon"] .dp-seite { box-shadow: 0 0 0 1px var(--p-b), 0 0 8px var(--p-b); }
+[data-probe="neon"] .dp-haupt { box-shadow: 0 0 0 1px var(--p-a), 0 0 8px var(--p-a); }
+[data-probe="neon"] .dp-knopf { background: linear-gradient(90deg, var(--p-a), var(--p-b)); border-radius: 3px; box-shadow: 0 0 6px var(--p-a); }
+/* Brutal: dicke Raender, harter Schatten, Leiste in Vollfarbe */
+[data-probe="brutal"] { border-radius: 0; gap: 6px; padding: 6px 9px 9px 6px; }
+[data-probe="brutal"] .dp-leiste { background: var(--p-a); box-shadow: 0 0 0 2px #f4f4f0; }
+[data-probe="brutal"] .dp-seite, [data-probe="brutal"] .dp-haupt { background: #141518; box-shadow: 0 0 0 2px #f4f4f0, 3px 3px 0 2px var(--p-b); }
+[data-probe="brutal"] .dp-zeile { height: 5px; background: #f4f4f0; }
+[data-probe="brutal"] .dp-knopf { background: var(--p-b); transform: rotate(-6deg); box-shadow: 0 0 0 2px #f4f4f0; }
+/* Ruhig: kein Bild, eine weiche Flaeche, die Liste liegt offen */
+[data-probe="ruhig"] { background: #101216; border-radius: 12px; gap: 6px; padding: 7px; }
+[data-probe="ruhig"] .dp-leiste { background: none; }
+[data-probe="ruhig"] .dp-seite { background: linear-gradient(#262a31, #262a31) 10% 12% / 70% 10% no-repeat, linear-gradient(#262a31, #262a31) 10% 32% / 55% 10% no-repeat; }
+[data-probe="ruhig"] .dp-haupt { background: #1c1f25; border-radius: 9px; }
+[data-probe="ruhig"] .dp-zeile { border-radius: 3px; background: rgb(230 232 236 / .35); }
+[data-probe="ruhig"] .dp-zeile:first-child { align-self: flex-end; width: 45%; background: #30343c; height: 7px; border-radius: 4px; }
+[data-probe="ruhig"] .dp-knopf { border-radius: 99px; }
+
+/* Startseite (fastfetch): Designs neben den Farbbloecken */
+.fetch-designs { grid-column: 2; display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.fetch-design {
+  display: flex; flex-direction: column; align-items: center; gap: 3px; width: 58px; padding: 3px 3px 2px;
+  border: 1px solid transparent; border-radius: 7px; background: none; color: var(--subtext); font: 10.5px/1.2 var(--mono);
+}
+.fetch-design .design-probe { padding: 3px; gap: 2px; border-radius: 4px; }
+.fetch-design .dp-zeile { height: 2px; }
+.fetch-design:hover { color: var(--text); border-color: var(--surface1); }
+.fetch-design[aria-pressed="true"] { color: var(--text); border-color: var(--akzent); }
+@media (max-width: 760px) {
+  .fetch-design { width: 60px; font-size: 11px; }
+}
+
+/* ============================================================================
+ * TERMINAL -- wie tmux in einer Roehre
+ * ========================================================================== */
+:root[data-design="terminal"] {
+  --sans: var(--mono);
+  --radius: 0px; --radius-kachel: 0px; --luecke: 0px;
+  --crust: #020303; --base: #070909; --mantle: #0a0d0d; --mantle-fest: #0a0d0d;
+  --surface0: #141a1a; --surface1: #222a2a; --surface2: #34403f;
+  --glas: rgb(4 6 6 / .92); --glas-blur: none;
+  --schatten: none;
+  --linie: color-mix(in srgb, var(--akzent) 42%, #1c2222);
+  --rand-inaktiv: var(--linie);
+}
+html[data-design="terminal"] *, html[data-design="terminal"] *::before, html[data-design="terminal"] *::after { border-radius: 0 !important; }
+html[data-design="terminal"] body { font-size: 14px; letter-spacing: 0; }
+html[data-design="terminal"] #seite, html[data-design="terminal"] #haupt, html[data-design="terminal"] .leiste { box-shadow: none; }
+/* Fensterrand: 1 px, aktiv hart geteilt in beide Akzentfarben -- dreht sich, solange Claude arbeitet. */
+html[data-design="terminal"] #seite::before, html[data-design="terminal"] #haupt::before {
+  padding: 1px; --rand-aktiv: linear-gradient(var(--winkel), var(--akzent) 50%, var(--akzent-2) 50%);
+}
+html[data-design="terminal"] #haupt { padding: 1px; }
+html[data-design="terminal"] #seite { padding: 10px 10px 4px; }
+@media (min-width: 761px) {
+  /* tmux: Fenster stossen aneinander, die Statuszeile liegt unten. */
+  html[data-design="terminal"] #app { grid-template-rows: minmax(0, 1fr) auto; padding: 6px 6px 0; }
+  html[data-design="terminal"] .leiste { grid-row: 2; }
+  html[data-design="terminal"] #seite, html[data-design="terminal"] #haupt { grid-row: 1; }
+  html[data-design="terminal"] #app.ws-chat #haupt { margin-left: -1px; }
+}
+html[data-design="terminal"] .leiste {
+  height: 28px; padding: 0 4px 0 0; gap: 0; background: var(--akzent); color: var(--auf-akzent);
+}
+html[data-design="terminal"] .leiste::before { display: none; }
+html[data-design="terminal"] .marke-logo { color: var(--auf-akzent); padding: 0 12px; height: 100%; background: rgb(0 0 0 / .18); font-size: 13px; }
+html[data-design="terminal"] .marke-logo svg { display: none; }
+html[data-design="terminal"] .marke-logo span::before { content: "["; }
+html[data-design="terminal"] .marke-logo span::after { content: "]"; }
+html[data-design="terminal"] .ws { gap: 0; }
+html[data-design="terminal"] .ws-knopf { height: 28px; padding: 0 9px; color: var(--auf-akzent); font-size: 13px; gap: 5px; }
+html[data-design="terminal"] .ws-knopf .sym { display: none; }
+html[data-design="terminal"] .ws-nr { color: var(--auf-akzent); font-weight: 700; }
+html[data-design="terminal"] .ws-nr::after { content: ":"; }
+html[data-design="terminal"] .ws-knopf:hover { background: rgb(0 0 0 / .14); color: var(--auf-akzent); }
+html[data-design="terminal"] .ws-knopf.an { background: var(--crust); color: var(--akzent); }
+html[data-design="terminal"] .ws-knopf.an .ws-nr { color: var(--akzent); opacity: 1; }
+html[data-design="terminal"] .ws-knopf.an .ws-name::after { content: "*"; }
+@media (max-width: 1500px) and (min-width: 761px) { html[data-design="terminal"] .ws-knopf:not(.an) .ws-name { display: inline; } }
+html[data-design="terminal"] #app.dran .ws-knopf[data-bereich="chat"]::after { top: 4px; right: 1px; box-shadow: 0 0 0 2px #000; }
+html[data-design="terminal"] .uhr { color: var(--auf-akzent); font-size: 13px; }
+html[data-design="terminal"] .modul { height: 22px; background: var(--crust); color: var(--text); font-size: 12px; }
+html[data-design="terminal"] a.modul:hover { background: #000; }
+html[data-design="terminal"] .verbindung:not(.an) { color: var(--rot); }
+html[data-design="terminal"] .dran-modul { background: var(--orange); color: #000; box-shadow: 0 0 0 1px #000; }
+
+/* Ueberschriften als Box-Rahmen: ┌─ titel ───────┐ */
+html[data-design="terminal"] :is(.bereich-kopf h1, .einst-gruppe h2, .willkommen-titel) {
+  display: flex; align-items: center; gap: 1ch; font: 700 15px/1.3 var(--mono); letter-spacing: 0; text-transform: lowercase; color: var(--akzent);
+}
+html[data-design="terminal"] :is(.bereich-kopf h1, .einst-gruppe h2, .willkommen-titel)::before { content: "┌─"; color: var(--linie); }
+html[data-design="terminal"] :is(.bereich-kopf h1, .einst-gruppe h2, .willkommen-titel)::after {
+  content: "┐"; flex: 1; text-align: right; color: var(--linie);
+  background: linear-gradient(var(--linie), var(--linie)) 0 50% / calc(100% - 1ch) 1px no-repeat;
+}
+html[data-design="terminal"] .einst-gruppe h2 { margin: 0; }
+html[data-design="terminal"] .einst-gruppe-text { margin: 0; padding: 4px 1ch 8px; border-inline: 1px solid var(--linie); }
+html[data-design="terminal"] .einst-karte { border-color: var(--linie); border-top-style: dashed; background: var(--base); }
+html[data-design="terminal"] .chat-titel::before { content: "┌─ "; color: var(--linie); }
+html[data-design="terminal"] .chat-kopf { border-bottom: 1px solid var(--linie); min-height: 44px; }
+html[data-design="terminal"] .seite-titel::before { content: "┌─ "; color: var(--linie); }
+html[data-design="terminal"] .md :is(h1, h2, h3) { font-stretch: 100%; font-size: 1em; color: var(--akzent); }
+html[data-design="terminal"] .md h1::before { content: "# "; color: var(--linie); }
+html[data-design="terminal"] .md h2::before { content: "## "; color: var(--linie); }
+html[data-design="terminal"] .md h3::before { content: "### "; color: var(--linie); }
+html[data-design="terminal"] .antwort > .md, html[data-design="terminal"] .live > .md { font-size: 14px; }
+html[data-design="terminal"] .md strong { color: var(--akzent-hell); }
+html[data-design="terminal"] .md code { background: none; border: 0; color: var(--akzent-2); padding: 0; }
+html[data-design="terminal"] .md code::before, html[data-design="terminal"] .md code::after { content: "`"; color: var(--overlay); }
+html[data-design="terminal"] .md pre code::before, html[data-design="terminal"] .md pre code::after { content: none; }
+html[data-design="terminal"] .md pre code { color: var(--text); }
+
+/* Flaechen: alles 1 px Linie, nichts schwebt */
+html[data-design="terminal"] :is(.karte, .kachel, .n-karte, .a-lauf, .t-eintrag, .pc-karte, .guthaben-gesamt, .codeblock, .tabelle, .live-todos, .arbeitet, .fetch, .dialog, .meldung, .eintrag-menue, .vorschlag, .option, .meta-teil, .hinweis, .schritte-gruppe > summary, .w-inhalt) {
+  border: 1px solid var(--linie); box-shadow: none;
+}
+html[data-design="terminal"] .code-kopf { background: var(--surface0); border-bottom: 1px solid var(--linie); }
+html[data-design="terminal"] .fetch { background: rgb(2 3 3 / .9); }
+html[data-design="terminal"] .fetch-kopf { border-bottom: 1px dashed var(--linie); }
+html[data-design="terminal"] .farbblock { border: 1px solid #000; }
+html[data-design="terminal"] .farbblock[aria-pressed=true] { box-shadow: 0 0 0 1px var(--crust), 0 0 0 2px var(--text); }
+/* Startseite: wie eine Shell -- Eingabeaufforderung mit blinkendem Block */
+html[data-design="terminal"] .willkommen { padding-top: 7vh; align-items: stretch; max-width: 640px; margin: 0 auto; width: 100%; }
+html[data-design="terminal"] .willkommen-titel { text-align: left; }
+html[data-design="terminal"] .fetch { width: 100%; }
+html[data-design="terminal"] .vorschlaege { justify-content: flex-start; flex-direction: column; align-items: stretch; gap: 4px; }
+html[data-design="terminal"] .vorschlag { text-align: left; background: none; font-size: 13px; padding: 6px 10px; }
+html[data-design="terminal"] .vorschlag::before { content: "$ "; color: var(--akzent); }
+html[data-design="terminal"] .vorschlag:hover { background: var(--akzent); color: var(--auf-akzent); border-color: var(--akzent); }
+html[data-design="terminal"] .vorschlag:hover::before { color: var(--auf-akzent); }
+
+/* Chatliste */
+html[data-design="terminal"] .neu-chat { background: none; color: var(--akzent); border: 1px dashed var(--akzent); font-weight: 700; height: 36px; }
+html[data-design="terminal"] .neu-chat:hover { background: var(--akzent); color: var(--auf-akzent); }
+html[data-design="terminal"] .neu-chat kbd { color: inherit; border-color: currentColor; background: none; }
+html[data-design="terminal"] .suche-box { background: none; border: 1px solid var(--linie); }
+html[data-design="terminal"] .gruppe::before { content: "── "; color: var(--linie); }
+html[data-design="terminal"] .chat-eintrag { padding: 5px 8px; border-left: 2px solid transparent; }
+html[data-design="terminal"] .chat-eintrag.an { background: color-mix(in srgb, var(--akzent) 14%, transparent); border-left-color: var(--akzent); }
+html[data-design="terminal"] .chat-eintrag.an .chat-eintrag-titel::before { content: "> "; }
+html[data-design="terminal"] .chat-eintrag-titel { font-size: 13px; }
+
+/* Knoepfe: [ Erlauben ] */
+html[data-design="terminal"] .knopf { background: none; border: 1px solid var(--linie); font-weight: 600; font-size: 13px; }
+html[data-design="terminal"] .knopf::before { content: "["; color: var(--overlay); }
+html[data-design="terminal"] .knopf::after { content: "]"; color: var(--overlay); }
+html[data-design="terminal"] .knopf:hover:not(:disabled) { background: var(--surface0); border-color: var(--akzent); }
+html[data-design="terminal"] .knopf.primaer { background: var(--akzent); color: var(--auf-akzent); border-color: var(--akzent); }
+html[data-design="terminal"] .knopf.primaer::before, html[data-design="terminal"] .knopf.primaer::after { color: var(--auf-akzent); }
+html[data-design="terminal"] .knopf.primaer:hover:not(:disabled) { background: var(--akzent-hell); }
+html[data-design="terminal"] .knopf.gefahr { border-color: color-mix(in srgb, var(--rot) 55%, transparent); }
+html[data-design="terminal"] .chip { background: none; border-color: var(--linie); font-family: var(--mono); }
+html[data-design="terminal"] select.chip option { background: var(--base); }
+html[data-design="terminal"] .senden { width: 36px; }
+
+/* Chat: Eingaben als Zeile mit Balken, keine Blase */
+html[data-design="terminal"] .blase {
+  background: none; border: 0; border-left: 2px solid var(--akzent); padding: 2px 0 2px 12px; font-size: 14px;
+}
+html[data-design="terminal"] .prompt-wer::after { content: "@cockpit"; color: var(--overlay); font-weight: 400; }
+html[data-design="terminal"] .prompt-ort::after { content: " $"; color: var(--akzent); }
+html[data-design="terminal"] .claude-marke { transform: none; width: 7px; height: 13px; }
+html[data-design="terminal"] .werkzeug > summary:hover, html[data-design="terminal"] .werkzeug[open] > summary { background: var(--surface0); }
+html[data-design="terminal"] .hinweis { align-self: stretch; }
+html[data-design="terminal"] .hinweis.fehler { background: color-mix(in srgb, var(--rot) 10%, var(--base)); border-color: var(--rot); }
+html[data-design="terminal"] .hinweis.fehler::before { content: "E!"; font-weight: 700; color: var(--rot); }
+html[data-design="terminal"] .arbeitet { background: var(--base); }
+/* Freigabe: doppelte Linie wie ein Dialog in einer TUI */
+html[data-design="terminal"] .freigabe-karte { border: 3px double var(--ton); background: color-mix(in srgb, var(--ton) 7%, var(--base)); box-shadow: none; }
+html[data-design="terminal"] .freigabe-kopf::before { content: "!!"; font-weight: 800; color: var(--ton); }
+html[data-design="terminal"] .schlange-rahmen { background: var(--base); }
+html[data-design="terminal"] .schlange-eintrag { background: none; border-left: 1px solid var(--linie); }
+html[data-design="terminal"] .schlange-eintrag::before { content: "↳"; color: var(--akzent); }
+html[data-design="terminal"] .eingabe-rahmen { background: rgb(2 3 3 / .95); border: 1px solid var(--linie); box-shadow: none; }
+html[data-design="terminal"] .eingabe-rahmen:focus-within { border-color: var(--akzent); box-shadow: none; }
+html[data-design="terminal"] .eingabe.diktat-hoert .eingabe-rahmen { border-color: var(--rot); box-shadow: none; }
+html[data-design="terminal"] .feld-huelle::before { content: "$"; font-size: 15px; line-height: 1.5; }
+html[data-design="terminal"] .akzent-wahl, html[data-design="terminal"] .design-wahl { background: none; }
+html[data-design="terminal"] :focus-visible { outline-offset: 1px; }
+
+/* Am Handy: Statuszeile als flache Leiste am unteren Rand */
+@media (max-width: 760px) {
+  html[data-design="terminal"] #haupt { padding: 0 0 calc(54px + env(safe-area-inset-bottom)); }
+  html[data-design="terminal"] .leiste {
+    left: 0; right: 0; bottom: 0; height: calc(54px + env(safe-area-inset-bottom)); padding: 0 0 env(safe-area-inset-bottom);
+    border-top: 1px solid var(--akzent);
+  }
+  html[data-design="terminal"] .ws-knopf { height: 54px; }
+  html[data-design="terminal"] .ws-knopf .sym { display: block; }
+  html[data-design="terminal"] .ws-nr { display: none; }
+  html[data-design="terminal"] .handy-leiste { min-height: 52px; border-bottom-width: 1px; }
+  html[data-design="terminal"] .willkommen-titel { font-size: 14px; }
+}
+
+/* ============================================================================
+ * NEON -- Synthwave: Gitter, Sonne, Leuchtroehren
+ * ========================================================================== */
+:root[data-design="neon"] {
+  --radius: 10px; --radius-kachel: 18px; --luecke: 16px;
+  --crust: #05030a; --base: #0c0816; --mantle: rgb(22 13 38 / .78); --mantle-fest: #150d24;
+  --surface0: #1f1533; --surface1: #2e2149; --surface2: #443266;
+  --glas: rgb(10 6 20 / .6); --glas-blur: blur(14px) saturate(150%);
+  --glow: 0 0 0 1px color-mix(in srgb, var(--akzent) 75%, transparent), 0 0 16px color-mix(in srgb, var(--akzent) 50%, transparent), 0 0 42px -6px color-mix(in srgb, var(--akzent-2) 40%, transparent);
+  --glow-2: 0 0 0 1px color-mix(in srgb, var(--akzent-2) 75%, transparent), 0 0 16px color-mix(in srgb, var(--akzent-2) 45%, transparent);
+  --glow-klein: 0 0 0 1px color-mix(in srgb, var(--akzent) 65%, transparent), 0 0 10px color-mix(in srgb, var(--akzent) 40%, transparent);
+  --leucht-text: 0 0 10px color-mix(in srgb, var(--akzent) 70%, transparent);
+  --verlauf: linear-gradient(100deg, var(--akzent), var(--akzent-2));
+  --rand-inaktiv: color-mix(in srgb, var(--akzent-2) 40%, transparent);
+  --schatten: 0 0 24px -6px color-mix(in srgb, var(--akzent) 45%, transparent);
+}
+html[data-design="neon"] #haupt { box-shadow: var(--glow); }
+html[data-design="neon"] #seite { box-shadow: var(--glow-2); }
+html[data-design="neon"] #seite::before, html[data-design="neon"] #haupt::before { padding: 1.5px; }
+/* Leiste: kein Kasten, die Workspaces sind Leuchtroehren */
+html[data-design="neon"] .leiste { background: none; -webkit-backdrop-filter: none; backdrop-filter: none; box-shadow: none; padding-inline: 4px; }
+html[data-design="neon"] .leiste::before { display: none; }
+html[data-design="neon"] .marke-logo, html[data-design="neon"] .uhr { font-family: var(--sans); font-stretch: 125%; text-transform: uppercase; letter-spacing: .14em; text-shadow: var(--leucht-text); }
+html[data-design="neon"] .ws { gap: 8px; }
+html[data-design="neon"] .ws-knopf {
+  border-radius: 999px; font: 700 11.5px/1 var(--sans); font-stretch: 120%; text-transform: uppercase; letter-spacing: .1em;
+  color: var(--text); background: rgb(10 6 20 / .7); box-shadow: 0 0 0 1px color-mix(in srgb, var(--akzent) 40%, transparent);
+}
+html[data-design="neon"] .ws-knopf:hover { background: rgb(10 6 20 / .85); box-shadow: var(--glow-klein); color: var(--text); }
+html[data-design="neon"] .ws-knopf.an { background: var(--verlauf); color: var(--auf-akzent); box-shadow: var(--glow-klein); }
+html[data-design="neon"] .modul { border-radius: 999px; background: rgb(10 6 20 / .75); box-shadow: 0 0 0 1px var(--surface2); }
+html[data-design="neon"] .dran-modul { background: var(--orange); box-shadow: 0 0 14px var(--orange); color: #000; }
+/* Typo: breit, gross, leuchtend */
+html[data-design="neon"] :is(.bereich-kopf h1, .einst-gruppe h2, .chat-titel, .seite-titel) {
+  font-family: var(--sans); font-stretch: 125%; font-weight: 800; text-transform: uppercase; letter-spacing: .1em; text-shadow: var(--leucht-text);
+}
+html[data-design="neon"] .bereich-kopf h1 { font-size: 26px; }
+html[data-design="neon"] .bereich-kopf h1::before, html[data-design="neon"] .chat-titel::before { content: none; }
+html[data-design="neon"] .chat-titel { font-size: 13px; color: var(--akzent-hell); }
+html[data-design="neon"] .chat-kopf { border-bottom-color: color-mix(in srgb, var(--akzent) 30%, transparent); }
+html[data-design="neon"] .einst-gruppe h2 { font-size: 15px; color: var(--akzent-hell); }
+html[data-design="neon"] .md :is(h1, h2) { font-stretch: 125%; text-transform: uppercase; letter-spacing: .06em; text-shadow: var(--leucht-text); }
+html[data-design="neon"] .willkommen-titel {
+  font-size: 44px; font-weight: 900; font-stretch: 125%; text-transform: uppercase; letter-spacing: .04em; line-height: 1.05;
+  background: linear-gradient(180deg, #fff 0 40%, var(--akzent-hell) 55%, var(--akzent-2)); -webkit-background-clip: text; background-clip: text; color: transparent;
+  filter: drop-shadow(0 0 14px color-mix(in srgb, var(--akzent) 60%, transparent));
+}
+/* Flaechen: dunkelviolett, Leuchtrand */
+html[data-design="neon"] :is(.karte, .kachel, .n-karte, .a-lauf, .t-eintrag, .pc-karte, .einst-karte, .codeblock, .live-todos) {
+  border-color: color-mix(in srgb, var(--akzent) 35%, transparent); box-shadow: 0 0 18px -4px color-mix(in srgb, var(--akzent) 30%, transparent);
+}
+html[data-design="neon"] .fetch { background: rgb(8 4 16 / .82); border: 0; box-shadow: var(--glow); }
+html[data-design="neon"] .fetch-kopf { text-shadow: var(--leucht-text); }
+html[data-design="neon"] .farbblock { box-shadow: 0 0 8px color-mix(in srgb, var(--a) 60%, transparent); }
+html[data-design="neon"] .farbblock[aria-pressed=true] { box-shadow: 0 0 0 2px var(--crust), 0 0 0 3.5px #fff, 0 0 14px var(--a); }
+html[data-design="neon"] .vorschlag { background: rgb(10 6 20 / .75); border-color: color-mix(in srgb, var(--akzent-2) 45%, transparent); border-radius: 999px; }
+html[data-design="neon"] .vorschlag:hover { box-shadow: var(--glow-2); color: var(--text); }
+/* Kraeftige Flaechen: Verlauf statt Ton */
+html[data-design="neon"] .neu-chat { background: var(--verlauf); box-shadow: var(--glow-klein); border-radius: 999px; text-transform: uppercase; letter-spacing: .08em; font-stretch: 115%; font-size: 13.5px; }
+html[data-design="neon"] .neu-chat:hover { background: var(--verlauf); filter: brightness(1.12); }
+html[data-design="neon"] .suche-box { border-radius: 999px; background: rgb(8 4 16 / .6); }
+html[data-design="neon"] .chat-eintrag.an { background: linear-gradient(90deg, color-mix(in srgb, var(--akzent) 28%, transparent), transparent); box-shadow: inset 2px 0 0 var(--akzent); }
+html[data-design="neon"] .knopf { background: rgb(10 6 20 / .7); border-color: color-mix(in srgb, var(--akzent) 45%, transparent); border-radius: 999px; }
+html[data-design="neon"] .knopf:hover:not(:disabled) { background: rgb(10 6 20 / .9); box-shadow: var(--glow-klein); border-color: var(--akzent); }
+html[data-design="neon"] .knopf.primaer { background: var(--verlauf); box-shadow: var(--glow-klein); border-color: transparent; }
+html[data-design="neon"] .knopf.primaer:hover:not(:disabled) { background: var(--verlauf); filter: brightness(1.12); }
+html[data-design="neon"] .knopf.gefahr { border-color: color-mix(in srgb, var(--rot) 55%, transparent); }
+html[data-design="neon"] .chip { border-radius: 999px; background: rgb(10 6 20 / .7); border-color: var(--surface2); }
+html[data-design="neon"] .senden { background: var(--verlauf); box-shadow: var(--glow-klein); }
+html[data-design="neon"] .senden:disabled { background: var(--surface1); box-shadow: none; }
+/* Chat: Eingaben als leuchtende Verlaufsflaeche */
+html[data-design="neon"] .blase {
+  background: var(--verlauf); color: var(--auf-akzent); border: 0; font: 600 14.5px/1.55 var(--sans);
+  border-radius: 16px 16px 16px 4px; box-shadow: 0 0 22px -4px color-mix(in srgb, var(--akzent) 60%, transparent);
+}
+html[data-design="neon"] .antwort-kopf > span:nth-child(2), html[data-design="neon"] .prompt-wer { text-shadow: var(--leucht-text); }
+html[data-design="neon"] .claude-marke { box-shadow: 0 0 8px var(--akzent-2); }
+html[data-design="neon"] .hinweis { background: rgb(10 6 20 / .8); }
+html[data-design="neon"] .hinweis.fehler { border-color: var(--rot); box-shadow: 0 0 14px -2px color-mix(in srgb, var(--rot) 60%, transparent); }
+html[data-design="neon"] .freigabe-karte {
+  border-color: var(--ton); background: color-mix(in srgb, var(--ton) 10%, rgb(10 6 20 / .9));
+  box-shadow: 0 0 0 1px var(--ton), 0 0 26px -2px color-mix(in srgb, var(--ton) 55%, transparent);
+}
+html[data-design="neon"] .freigabe-kopf { text-shadow: 0 0 10px color-mix(in srgb, var(--ton) 70%, transparent); }
+html[data-design="neon"] .schlange-rahmen { border-color: var(--akzent-2); background: rgb(10 6 20 / .85); box-shadow: 0 0 16px -4px var(--akzent-2); }
+html[data-design="neon"] .eingabe-rahmen { background: rgb(8 4 16 / .88); border-color: color-mix(in srgb, var(--akzent) 55%, transparent); border-radius: 22px; box-shadow: 0 0 20px -6px color-mix(in srgb, var(--akzent) 55%, transparent); }
+html[data-design="neon"] .eingabe-rahmen:focus-within { border-color: var(--akzent); box-shadow: var(--glow); }
+html[data-design="neon"] .eingabe.diktat-hoert .eingabe-rahmen { border-color: var(--rot); box-shadow: 0 0 22px -4px var(--rot); }
+html[data-design="neon"] .design-wahl[aria-pressed="true"], html[data-design="neon"] .akzent-wahl[aria-pressed="true"] { box-shadow: var(--glow-klein); }
+@media (max-width: 760px) {
+  html[data-design="neon"] .leiste { background: rgb(10 6 20 / .85); box-shadow: var(--glow); border-radius: 999px; left: 14px; right: 14px; }
+  html[data-design="neon"] .ws-knopf { box-shadow: none; background: none; }
+  html[data-design="neon"] .ws-knopf.an { background: var(--verlauf); box-shadow: var(--glow-klein); border-radius: 999px; }
+  html[data-design="neon"] #haupt { box-shadow: none; }
+  html[data-design="neon"] .handy-leiste { border-bottom-width: 2px; box-shadow: 0 6px 18px -8px var(--akzent); }
+  html[data-design="neon"] .willkommen-titel { font-size: 30px; }
+}
+/* Touch: Leuchten nur als Rand, kein Blur -- bleibt am Android-Handy fluessig. */
+@media (pointer: coarse) {
+  :root[data-design="neon"] {
+    --glas: rgb(10 6 20 / .86); --glas-blur: none;
+    --glow: 0 0 0 1px var(--akzent); --glow-2: 0 0 0 1px var(--akzent-2); --glow-klein: 0 0 0 1px var(--akzent);
+  }
+  html[data-design="neon"] .willkommen-titel { filter: none; }
+  html[data-design="neon"] :is(.blase, .eingabe-rahmen, .freigabe-karte, .karte, .kachel, .n-karte, .a-lauf, .einst-karte, .codeblock) { box-shadow: 0 0 0 1px color-mix(in srgb, var(--akzent) 45%, transparent); }
+  html[data-design="neon"] .freigabe-karte { box-shadow: 0 0 0 2px var(--ton); }
+}
+
+/* ============================================================================
+ * BRUTAL -- dicke Linien, harte Schatten, Vollfarbe, grosse Schrift
+ * ========================================================================== */
+:root[data-design="brutal"] {
+  --radius: 0px; --radius-kachel: 0px; --luecke: 18px;
+  --crust: #0b0c0e; --base: #141518; --mantle: #1b1c20; --mantle-fest: #1b1c20;
+  --surface0: #26282d; --surface1: #3a3d44; --surface2: #5a5e66;
+  --glas: #141518; --glas-blur: none;
+  --strich: #f4f4f0;
+  --tinte: #0b0c0e;
+  --schatten: 5px 5px 0 var(--strich);
+  --rand-inaktiv: var(--strich);
+}
+html[data-design="brutal"] *:not(.punkt, .w-zustand, .puls-punkt, .pc-punkt, .diktat-punkt, .kreisel, .schalter-knopf),
+html[data-design="brutal"] *::before, html[data-design="brutal"] *::after { border-radius: 0 !important; }
+html[data-design="brutal"] body { font-size: 15.5px; }
+/* Kacheln: 3 px Strich, harter Schatten in Akzentfarbe */
+html[data-design="brutal"] #haupt { box-shadow: 9px 9px 0 var(--akzent); padding: 3px; }
+html[data-design="brutal"] #seite { box-shadow: 9px 9px 0 var(--akzent-2); }
+html[data-design="brutal"] #seite::before, html[data-design="brutal"] #haupt::before {
+  padding: 3px;
+  /* Aktiv: ein Akzentband im weissen Strich -- es wandert, solange Claude arbeitet. */
+  --rand-aktiv: linear-gradient(var(--winkel), var(--strich) 0 38%, var(--akzent) 38% 62%, var(--strich) 62%);
+}
+@media (min-width: 761px) { html[data-design="brutal"] #app { padding: 14px 24px 24px 14px; } }
+/* Leiste: Vollfarbe, schwarze Kaesten */
+html[data-design="brutal"] .leiste { background: var(--akzent); color: var(--tinte); box-shadow: 6px 6px 0 var(--strich); height: 54px; }
+html[data-design="brutal"] .leiste::before { padding: 3px; background: var(--tinte); }
+html[data-design="brutal"] .marke-logo { color: var(--tinte); font: 900 20px/1 var(--sans); font-stretch: 75%; text-transform: uppercase; letter-spacing: .02em; }
+html[data-design="brutal"] .ws-knopf { color: var(--tinte); font: 800 13px/1 var(--sans); font-stretch: 80%; text-transform: uppercase; letter-spacing: .04em; height: 36px; }
+html[data-design="brutal"] .ws-nr { color: var(--tinte); }
+html[data-design="brutal"] .ws-knopf:hover { background: rgb(0 0 0 / .14); color: var(--tinte); }
+html[data-design="brutal"] .ws-knopf.an { background: var(--tinte); color: var(--akzent); transform: rotate(-2deg); }
+html[data-design="brutal"] .ws-knopf.an .ws-nr { color: var(--akzent); opacity: 1; }
+html[data-design="brutal"] #app.dran .ws-knopf[data-bereich="chat"]::after { width: 12px; height: 12px; top: -3px; right: -3px; box-shadow: 0 0 0 3px var(--tinte); }
+html[data-design="brutal"] .uhr { color: var(--tinte); font: 900 16px/1 var(--sans); font-stretch: 75%; }
+html[data-design="brutal"] .modul { background: var(--tinte); color: var(--strich); height: 32px; }
+html[data-design="brutal"] a.modul:hover { background: #000; color: #fff; }
+html[data-design="brutal"] .verbindung:not(.an) { color: var(--rot); }
+html[data-design="brutal"] .dran-modul { background: var(--orange); color: var(--tinte); box-shadow: 0 0 0 3px var(--tinte); transform: rotate(2deg); font-weight: 800; }
+/* Grosse, schmale Typo */
+html[data-design="brutal"] :is(.bereich-kopf h1, .willkommen-titel, .chat-titel, .seite-titel) {
+  font-family: var(--sans); font-weight: 900; font-stretch: 75%; text-transform: uppercase; letter-spacing: -.01em;
+}
+html[data-design="brutal"] .bereich-kopf h1 { font-size: 46px; line-height: 1; }
+html[data-design="brutal"] .bereich-kopf h1::before, html[data-design="brutal"] .chat-titel::before { content: none; }
+html[data-design="brutal"] .willkommen-titel { font-size: 64px; line-height: .95; }
+html[data-design="brutal"] .chat-titel { font-size: 22px; }
+html[data-design="brutal"] .chat-kopf { border-bottom: 3px solid var(--strich); }
+html[data-design="brutal"] .md :is(h1, h2, h3) { font-weight: 900; font-stretch: 75%; text-transform: uppercase; color: var(--strich); }
+html[data-design="brutal"] .md h1 { font-size: 2em; } html[data-design="brutal"] .md h2 { font-size: 1.6em; }
+html[data-design="brutal"] .md h2 { box-shadow: inset 0 -.32em 0 color-mix(in srgb, var(--akzent) 55%, transparent); display: inline-block; }
+html[data-design="brutal"] .antwort > .md, html[data-design="brutal"] .live > .md { font-size: 17px; }
+html[data-design="brutal"] .md strong { background: var(--akzent); color: var(--tinte); padding: 0 .2em; }
+html[data-design="brutal"] .md code { background: var(--strich); color: var(--tinte); border: 0; }
+html[data-design="brutal"] .md pre code { background: none; color: var(--text); }
+/* Schief geklebte Etiketten */
+html[data-design="brutal"] :is(.einst-gruppe h2, .gruppe, .schlange-titel, .fetch-kopf, .marke, .meta-teil, .karte-kopf, .agent-abschnitt) {
+  display: inline-block; background: var(--akzent-2); color: var(--tinte); padding: 3px 10px; transform: rotate(-2deg);
+  box-shadow: 3px 3px 0 var(--strich); font-weight: 800; text-transform: uppercase; border: 0;
+}
+html[data-design="brutal"] .einst-gruppe h2 { font-size: 22px; font-stretch: 75%; font-weight: 900; margin-bottom: 12px; }
+html[data-design="brutal"] .gruppe { margin: 14px 0 8px 6px; padding: 2px 8px; font-size: 11px; }
+html[data-design="brutal"] .meta-teil { color: var(--tinte); transform: rotate(1.5deg); box-shadow: 2px 2px 0 var(--strich); }
+html[data-design="brutal"] .meta-teil .sym { color: var(--tinte); }
+html[data-design="brutal"] .meta-teil.warnung { background: var(--orange); color: var(--tinte); }
+html[data-design="brutal"] .fetch-kopf { justify-self: start; }
+html[data-design="brutal"] .fetch-kopf span { color: var(--tinte); }
+html[data-design="brutal"] .karte-kopf { margin: 8px 0 4px 10px; }
+html[data-design="brutal"] .antwort-kopf > span:nth-child(2), html[data-design="brutal"] .prompt-wer {
+  background: var(--strich); color: var(--tinte); padding: 1px 7px; transform: rotate(-3deg); display: inline-block; text-transform: uppercase; font-weight: 900;
+}
+html[data-design="brutal"] .claude-marke { background: var(--akzent-2); width: 12px; height: 12px; }
+/* Flaechen: flach, dicker Strich */
+html[data-design="brutal"] :is(.karte, .kachel, .n-karte, .a-lauf, .t-eintrag, .pc-karte, .einst-karte, .guthaben-gesamt, .codeblock, .tabelle, .live-todos, .arbeitet, .dialog, .meldung, .eintrag-menue, .option, .hinweis, .schritte-gruppe > summary, .w-inhalt) {
+  border: 3px solid var(--strich); box-shadow: none; background: var(--mantle);
+}
+html[data-design="brutal"] .einst-karte { box-shadow: 7px 7px 0 var(--surface2); }
+html[data-design="brutal"] .einst-zeile + .einst-zeile { border-top: 3px solid var(--strich); }
+html[data-design="brutal"] .code-kopf { background: var(--strich); color: var(--tinte); border-bottom: 3px solid var(--strich); font-weight: 800; }
+html[data-design="brutal"] .fetch { border: 3px solid var(--strich); background: var(--base); box-shadow: 10px 10px 0 var(--akzent-2); }
+html[data-design="brutal"] .farbblock { border: 2px solid var(--strich); width: 30px; height: 20px; }
+html[data-design="brutal"] .farbblock[aria-pressed=true] { box-shadow: 4px 4px 0 var(--strich); transform: translate(-2px, -2px); }
+html[data-design="brutal"] .vorschlag { border: 3px solid var(--strich); background: var(--base); color: var(--text); font-weight: 700; box-shadow: 4px 4px 0 var(--akzent); }
+html[data-design="brutal"] .vorschlag:hover { transform: translate(-2px, -2px); box-shadow: 6px 6px 0 var(--akzent); border-color: var(--strich); }
+/* Knoepfe: Klotz mit Schatten, drueckt sich beim Klick hinein */
+html[data-design="brutal"] .neu-chat { background: var(--akzent); border: 3px solid var(--strich); box-shadow: 5px 5px 0 var(--strich); text-transform: uppercase; font-weight: 900; font-stretch: 80%; font-size: 17px; height: 48px; }
+html[data-design="brutal"] .neu-chat:hover { background: var(--akzent); transform: translate(-2px, -2px); box-shadow: 7px 7px 0 var(--strich); }
+html[data-design="brutal"] .neu-chat kbd { color: var(--tinte); border-color: var(--tinte); }
+html[data-design="brutal"] .suche-box { border: 3px solid var(--strich); background: var(--base); }
+html[data-design="brutal"] .chat-eintrag { border: 3px solid transparent; }
+html[data-design="brutal"] .chat-eintrag.an { background: var(--strich); border-color: var(--strich); box-shadow: 4px 4px 0 var(--akzent); }
+html[data-design="brutal"] .chat-eintrag.an .chat-eintrag-titel { color: var(--tinte); font-weight: 800; }
+html[data-design="brutal"] .chat-eintrag.an .chat-eintrag-meta { color: #3a3d44; }
+html[data-design="brutal"] .knopf { border: 3px solid var(--strich); background: var(--strich); color: var(--tinte); font-weight: 800; box-shadow: 4px 4px 0 var(--surface2); }
+html[data-design="brutal"] .knopf:hover:not(:disabled) { background: #fff; border-color: var(--strich); transform: translate(-1px, -1px); box-shadow: 5px 5px 0 var(--akzent); }
+html[data-design="brutal"] .knopf:active:not(:disabled) { transform: translate(3px, 3px); box-shadow: 1px 1px 0 var(--surface2); }
+html[data-design="brutal"] .knopf.primaer { background: var(--akzent); color: var(--tinte); box-shadow: 4px 4px 0 var(--strich); }
+html[data-design="brutal"] .knopf.primaer:hover:not(:disabled) { background: var(--akzent); }
+html[data-design="brutal"] .knopf.gefahr { background: var(--rot); color: var(--tinte); }
+html[data-design="brutal"] .knopf-klein:hover { background: var(--strich); color: var(--tinte); }
+html[data-design="brutal"] .chip { border: 2px solid var(--strich); background: var(--base); color: var(--text); font-weight: 700; }
+html[data-design="brutal"] .senden { border: 3px solid var(--strich); box-shadow: 3px 3px 0 var(--strich); }
+html[data-design="brutal"] .senden:disabled { background: var(--surface1); box-shadow: none; }
+/* Chat */
+html[data-design="brutal"] .blase {
+  background: var(--akzent); color: var(--tinte); border: 3px solid var(--strich); box-shadow: 6px 6px 0 var(--strich);
+  font: 650 16px/1.5 var(--sans);
+}
+html[data-design="brutal"] .hinweis.fehler { background: var(--rot); color: var(--tinte); font-weight: 750; }
+html[data-design="brutal"] .hinweis.limit { background: var(--orange); color: var(--tinte); }
+html[data-design="brutal"] .freigabe-karte { border: 3px solid var(--ton); background: var(--base); box-shadow: 10px 10px 0 var(--ton); }
+html[data-design="brutal"] .freigabe-kopf { align-self: flex-start; background: var(--ton); color: var(--tinte); padding: 4px 12px; transform: rotate(-1.5deg); font-size: 17px; font-weight: 900; text-transform: uppercase; font-stretch: 80%; }
+html[data-design="brutal"] .freigabe-kopf > :not(.sym) { color: var(--tinte); }
+html[data-design="brutal"] .schlange-rahmen { border: 3px dashed var(--akzent); background: var(--base); }
+html[data-design="brutal"] .schlange-titel { background: var(--akzent); }
+html[data-design="brutal"] .schlange-eintrag { background: var(--mantle); border: 2px solid var(--surface2); }
+html[data-design="brutal"] .eingabe-rahmen { border: 3px solid var(--strich); background: var(--base); box-shadow: 8px 8px 0 var(--akzent); }
+html[data-design="brutal"] .eingabe-rahmen:focus-within { border-color: var(--strich); box-shadow: 8px 8px 0 var(--akzent-2); }
+html[data-design="brutal"] .eingabe.diktat-hoert .eingabe-rahmen { border-color: var(--rot); box-shadow: 8px 8px 0 var(--rot); }
+html[data-design="brutal"] .design-wahl, html[data-design="brutal"] .akzent-wahl { border: 3px solid var(--surface2); }
+html[data-design="brutal"] .design-wahl[aria-pressed="true"], html[data-design="brutal"] .akzent-wahl[aria-pressed="true"] { border-color: var(--strich); box-shadow: 5px 5px 0 var(--akzent); }
+html[data-design="brutal"] :focus-visible { outline: 3px solid var(--akzent); outline-offset: 3px; }
+@media (max-width: 760px) {
+  html[data-design="brutal"] #haupt { box-shadow: none; padding: 0 0 calc(84px + env(safe-area-inset-bottom)); }
+  html[data-design="brutal"] .leiste { left: 10px; right: 14px; bottom: max(14px, env(safe-area-inset-bottom)); box-shadow: 5px 5px 0 var(--strich); }
+  html[data-design="brutal"] .ws-knopf { height: 46px; }
+  html[data-design="brutal"] .ws-knopf.an { transform: rotate(-3deg); }
+  html[data-design="brutal"] .handy-leiste { border-bottom-width: 3px; }
+  html[data-design="brutal"] .handy-titel { font: 900 20px/1 var(--sans); font-stretch: 75%; text-transform: uppercase; }
+  html[data-design="brutal"] .bereich-kopf h1 { font-size: 36px; }
+  html[data-design="brutal"] .willkommen-titel { font-size: 44px; }
+  html[data-design="brutal"] .blase { box-shadow: 4px 4px 0 var(--strich); }
+  html[data-design="brutal"] .freigabe-karte, html[data-design="brutal"] .fetch { box-shadow: 6px 6px 0 var(--ton, var(--akzent-2)); }
+  html[data-design="brutal"] .eingabe-rahmen { box-shadow: 5px 5px 0 var(--akzent); }
+  html[data-design="brutal"] .eingabe { padding-right: 12px; }
+}
+
+/* ============================================================================
+ * RUHIG -- kein Bild, feste Flaechen, weiche Ecken, viel Luft
+ * ========================================================================== */
+:root[data-design="ruhig"] {
+  --radius: 18px; --radius-kachel: 28px; --luecke: 20px;
+  --crust: #101216; --base: #181b20; --mantle: #1f2228; --mantle-fest: #1f2228;
+  --surface0: #262a31; --surface1: #30343c; --surface2: #3e434c;
+  --text: #e8eaee; --subtext: #b2b8c2; --overlay: #8d939e;
+  --glas: #181b20; --glas-blur: none;
+  --rand-inaktiv: transparent;
+  --schatten: 0 1px 2px rgb(0 0 0 / .25), 0 12px 32px -18px rgb(0 0 0 / .6);
+  --sanft: color-mix(in srgb, var(--akzent) 12%, var(--mantle));
+}
+html[data-design="ruhig"] body { background: var(--crust); letter-spacing: 0; }
+/* Ruhe: keine Raender, ausser waehrend Claude arbeitet -- dann laeuft ein weicher Lichtbogen. */
+html[data-design="ruhig"] #seite::before, html[data-design="ruhig"] #haupt::before { --rand-aktiv: transparent; }
+html[data-design="ruhig"] #app:has(.chat.an.laeuft:not(.wartet)) #haupt::before {
+  padding: 2px; --rand-aktiv: linear-gradient(var(--winkel), transparent 15%, var(--akzent) 50%, transparent 85%);
+}
+html[data-design="ruhig"] #haupt { box-shadow: var(--schatten); }
+/* Die Chatliste liegt offen auf dem Grund, nur das Fenster ist eine Flaeche. */
+html[data-design="ruhig"] #seite { background: none; box-shadow: none; padding: 8px 4px; }
+html[data-design="ruhig"] .leiste { background: none; box-shadow: none; padding-inline: 4px; height: 52px; }
+html[data-design="ruhig"] .leiste::before { display: none; }
+html[data-design="ruhig"] :is(.marke-logo, .ws-knopf, .uhr, .modul, .seite-titel, .gruppe, .chat-titel, .prompt-zeile, .antwort-kopf, .blase, .eingabe-feld, .fetch, .bereich-kopf h1, .schritte-gruppe > summary, .werkzeug > summary, .schlange-titel, .ordner-chip, .meta-teil) {
+  font-family: var(--sans); letter-spacing: 0;
+}
+html[data-design="ruhig"] .marke-logo { font-weight: 600; font-size: 15px; }
+html[data-design="ruhig"] .ws { gap: 4px; }
+html[data-design="ruhig"] .ws-knopf { border-radius: 999px; height: 36px; padding: 0 14px; font-size: 14px; font-weight: 500; }
+html[data-design="ruhig"] .ws-nr { display: none; }
+html[data-design="ruhig"] .ws-knopf:hover { background: var(--surface0); }
+html[data-design="ruhig"] .ws-knopf.an { background: var(--surface1); color: var(--text); font-weight: 600; }
+html[data-design="ruhig"] .ws-knopf.an .sym { color: var(--akzent); }
+html[data-design="ruhig"] #app.dran .ws-knopf[data-bereich="chat"]::after { box-shadow: 0 0 0 2px var(--crust); }
+html[data-design="ruhig"] .uhr { font-weight: 500; color: var(--subtext); }
+html[data-design="ruhig"] .modul { border-radius: 999px; background: var(--base); height: 32px; padding: 0 12px; }
+/* Typo: ruhig, normale Schreibweise, keine ~/-Praefixe */
+html[data-design="ruhig"] :is(.bereich-kopf h1, .chat-titel, .seite-titel, .gruppe, .code-kopf, .agent-abschnitt) { text-transform: none; }
+html[data-design="ruhig"] .bereich-kopf h1::before, html[data-design="ruhig"] .chat-titel::before { content: none; }
+html[data-design="ruhig"] .bereich-kopf { padding: 36px 48px 8px; }
+html[data-design="ruhig"] .bereich-inhalt { padding: 12px 48px 48px; }
+html[data-design="ruhig"] .bereich-kopf h1 { font-size: 30px; font-weight: 500; letter-spacing: -.015em; }
+html[data-design="ruhig"] .einst-gruppe { margin: 32px 0 44px; }
+html[data-design="ruhig"] .einst-gruppe h2 { font-size: 19px; font-weight: 550; font-stretch: 100%; }
+html[data-design="ruhig"] .einst-zeile { padding: 18px 22px; }
+html[data-design="ruhig"] .einst-zeile + .einst-zeile, html[data-design="ruhig"] .einst-zeile + .rollen-liste, html[data-design="ruhig"] .rollen-liste + .einst-zeile { border-top-color: var(--surface0); }
+html[data-design="ruhig"] .chat-titel { font-size: 15px; font-weight: 600; }
+html[data-design="ruhig"] .chat-kopf { border-bottom: 0; padding: 14px 28px; }
+html[data-design="ruhig"] .md :is(h1, h2, h3) { color: var(--text); font-weight: 600; font-stretch: 100%; }
+html[data-design="ruhig"] .md { line-height: 1.75; }
+html[data-design="ruhig"] .md strong { color: var(--text); }
+html[data-design="ruhig"] .willkommen-titel { font-weight: 500; font-stretch: 100%; font-size: 34px; letter-spacing: -.02em; }
+html[data-design="ruhig"] .gruppe { font-size: 12px; font-weight: 600; padding: 18px 12px 6px; }
+/* Flaechen: weich, ohne Rand */
+html[data-design="ruhig"] :is(.karte, .kachel, .n-karte, .a-lauf, .t-eintrag, .pc-karte, .einst-karte, .guthaben-gesamt, .codeblock, .tabelle, .live-todos, .arbeitet, .meta-teil, .hinweis, .schritte-gruppe > summary, .w-inhalt, .option, .vorschlag, .dialog, .meldung, .eintrag-menue) {
+  border-color: transparent;
+}
+html[data-design="ruhig"] :is(.karte, .kachel, .n-karte, .a-lauf, .t-eintrag, .einst-karte, .codeblock) { border-radius: 20px; }
+html[data-design="ruhig"] .code-kopf { background: var(--surface0); border-bottom: 0; }
+html[data-design="ruhig"] .fetch { background: var(--mantle); border: 0; border-radius: 24px; padding: 24px 28px; font-size: 13.5px; }
+html[data-design="ruhig"] .fetch-kopf { border-bottom-color: var(--surface1); }
+html[data-design="ruhig"] .fetch-zeilen dt { color: var(--subtext); font-weight: 500; }
+html[data-design="ruhig"] .fetch-logo { border-radius: 22px; }
+html[data-design="ruhig"] .farbblock { border-radius: 999px; width: 22px; height: 22px; }
+html[data-design="ruhig"] .vorschlag { border-radius: 999px; background: var(--mantle); }
+html[data-design="ruhig"] .willkommen { gap: 30px; }
+/* Knoepfe: Pillen */
+html[data-design="ruhig"] .neu-chat { border-radius: 999px; height: 44px; padding-inline: 18px; font-weight: 600; }
+html[data-design="ruhig"] .neu-chat kbd { display: none; }
+html[data-design="ruhig"] .suche-box { border-radius: 999px; background: var(--base); border-color: transparent; height: 40px; padding-left: 14px; }
+html[data-design="ruhig"] .chat-eintrag { border-radius: 14px; padding: 9px 14px; }
+html[data-design="ruhig"] .chat-eintrag:hover { background: var(--base); }
+html[data-design="ruhig"] .chat-eintrag.an { background: var(--mantle); }
+html[data-design="ruhig"] .chat-eintrag.an .chat-eintrag-titel { color: var(--text); }
+html[data-design="ruhig"] .knopf { border-radius: 999px; border-color: transparent; background: var(--surface0); padding: 0 18px; }
+html[data-design="ruhig"] .knopf:hover:not(:disabled) { border-color: transparent; background: var(--surface1); }
+html[data-design="ruhig"] .knopf.primaer { background: var(--akzent); }
+html[data-design="ruhig"] .chip { border-radius: 999px; border-color: transparent; background: var(--surface0); }
+html[data-design="ruhig"] .chip:hover:not(:disabled) { border-color: transparent; background: var(--surface1); }
+/* Chat: deine Nachrichten rechts wie im Messenger, Claude links ohne Kasten */
+html[data-design="ruhig"] .verlauf { gap: 30px; }
+html[data-design="ruhig"] .verlauf-innen { padding: 40px 32px 20px; }
+html[data-design="ruhig"] .nutzer { align-items: flex-end; }
+html[data-design="ruhig"] .prompt-pfeil, html[data-design="ruhig"] .prompt-ort { display: none; }
+html[data-design="ruhig"] .prompt-zeile { gap: 10px; }
+html[data-design="ruhig"] .prompt-zeit { margin-left: 0; order: 2; }
+html[data-design="ruhig"] .prompt-wer { color: var(--subtext); font-weight: 600; }
+html[data-design="ruhig"] .blase {
+  max-width: 82%; background: var(--surface0); border: 0; border-radius: 22px 22px 6px 22px; padding: 12px 18px;
+  font-size: 15.5px; line-height: 1.6;
+}
+html[data-design="ruhig"] .antwort-kopf { font-size: 13px; }
+html[data-design="ruhig"] .antwort-kopf > span:nth-child(2) { color: var(--text); font-weight: 600; }
+html[data-design="ruhig"] .claude-marke { border-radius: 50%; transform: none; background: var(--akzent); }
+html[data-design="ruhig"] .schritte::before { background: var(--surface0); }
+html[data-design="ruhig"] .schritte-gruppe > summary { border-radius: 14px; background: var(--base); }
+html[data-design="ruhig"] .hinweis { background: var(--base); }
+html[data-design="ruhig"] .hinweis.fehler { background: color-mix(in srgb, var(--rot) 13%, var(--base)); }
+html[data-design="ruhig"] .arbeitet { background: var(--base); border-radius: 999px; }
+html[data-design="ruhig"] .freigabe-karte {
+  border: 0; border-radius: 22px; padding: 20px 22px; gap: 14px;
+  background: color-mix(in srgb, var(--ton) 13%, var(--mantle)); box-shadow: inset 0 4px 0 var(--ton), var(--schatten);
+}
+html[data-design="ruhig"] .schlange-rahmen { border: 0; border-radius: 22px; background: var(--sanft); padding: 14px 14px 14px 20px; }
+html[data-design="ruhig"] .schlange-titel { color: var(--akzent-hell); }
+html[data-design="ruhig"] .schlange-eintrag { border-radius: 14px; background: var(--mantle); }
+html[data-design="ruhig"] .eingabe-rahmen { border: 0; border-radius: 28px; background: var(--mantle); padding: 14px 12px 10px 20px; }
+html[data-design="ruhig"] .eingabe-rahmen:focus-within { box-shadow: var(--schatten), 0 0 0 2px color-mix(in srgb, var(--akzent) 45%, transparent); }
+html[data-design="ruhig"] .eingabe.diktat-hoert .eingabe-rahmen { box-shadow: var(--schatten), 0 0 0 2px color-mix(in srgb, var(--rot) 60%, transparent); }
+html[data-design="ruhig"] .feld-huelle::before { content: none; }
+html[data-design="ruhig"] .eingabe-feld { padding-left: 0; font-size: 15px; }
+html[data-design="ruhig"] .design-wahl, html[data-design="ruhig"] .akzent-wahl { border-color: transparent; border-radius: 18px; background: var(--base); }
+html[data-design="ruhig"] .design-wahl[aria-pressed="true"], html[data-design="ruhig"] .akzent-wahl[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--akzent); }
+@media (max-width: 760px) {
+  html[data-design="ruhig"] #haupt { box-shadow: none; }
+  html[data-design="ruhig"] #seite { background: var(--base); padding: 16px 12px 8px; padding-top: max(16px, env(safe-area-inset-top)); }
+  html[data-design="ruhig"] .leiste { background: var(--mantle); border-radius: 28px; box-shadow: var(--schatten); height: 64px; }
+  html[data-design="ruhig"] .ws-knopf { padding: 0; height: 48px; border-radius: 999px; }
+  html[data-design="ruhig"] .ws-knopf.an { background: var(--akzent); color: var(--auf-akzent); }
+  html[data-design="ruhig"] .ws-knopf.an .sym { color: var(--auf-akzent); }
+  /* Oben kein Strich, bis Claude arbeitet -- dann laeuft er. */
+  html[data-design="ruhig"] .handy-leiste { border-image: none; border-bottom-color: transparent; }
+  html[data-design="ruhig"] #app:has(.chat.an.laeuft:not(.wartet)) .handy-leiste { border-image: var(--rand-aktiv) 1; }
+  html[data-design="ruhig"] .bereich-kopf { padding: 22px 20px 6px; }
+  html[data-design="ruhig"] .bereich-inhalt { padding: 8px 16px 26px; }
+  html[data-design="ruhig"] .verlauf-innen { padding: 22px 16px 12px; }
+  html[data-design="ruhig"] .blase { max-width: 90%; }
+  html[data-design="ruhig"] .willkommen-titel { font-size: 28px; }
+  html[data-design="ruhig"] .fetch { padding: 16px 18px; }
+}
+
+/* Weniger Bewegung: nichts kippt und nichts springt beim Zeigen. */
+@media (prefers-reduced-motion: reduce) {
+  html[data-design="brutal"] :is(.knopf, .neu-chat, .vorschlag):hover { transform: none !important; }
+  .design-wahl, .fetch-design { transition: none; }
+}
