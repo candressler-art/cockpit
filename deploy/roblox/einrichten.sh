@@ -25,6 +25,9 @@ case "${1:-}" in
   *) echo "Unbekannte Angabe: $1 (siehe --help)"; exit 2 ;;
 esac
 
+# Linux und macOS: perl statt grep -P, open statt xdg-open.
+. "$(dirname "${BASH_SOURCE[0]}")/../hilfen.sh"
+
 SERVER="${COCKPIT_SERVER:-192.168.2.193}"
 KEY="${COCKPIT_SSH_KEY:-$HOME/.ssh/id_ed25519_claude}"
 SSH=(ssh -i "$KEY" -o ConnectTimeout=10 "claude@$SERVER")
@@ -126,11 +129,9 @@ HINWEIS
   SPIEGEL="$(mktemp)"
   (
     for _ in $(seq 1 60); do
-      URL=$(grep -aoP '\x1b\]8;[^;]*;\Khttps://claude\.com/[^\x07\x1b]+' "$SPIEGEL" 2>/dev/null | head -1)
-      [ -z "$URL" ] && URL=$(sed 's/\x1b\[[0-9;]*[a-zA-Z]//g; s/\x1b\][^\x07]*\x07//g' "$SPIEGEL" 2>/dev/null |
-            tr -d '\r' | awk '/^https:\/\/claude\.com\//{f=1} f&&NF{printf "%s",$0} f&&!NF{exit}')
+      URL=$(anmelde_url "$SPIEGEL")
       if [ -n "$URL" ]; then
-        command -v xdg-open >/dev/null && xdg-open "$URL" >/dev/null 2>&1 &
+        url_oeffnen "$URL" >/dev/null 2>&1 &
         printf '\n   [Anmeldeseite im Browser geoeffnet -- Code von dort holen]\n' > /dev/tty
         break
       fi
@@ -148,8 +149,8 @@ HINWEIS
   fi
 fi
 "${SSH[@]}" "sudo chmod -R go-rwx /home/roblox/.claude" 2>/dev/null
-R_EMAIL=$("${SSH[@]}" "$ALS_ROBLOX $CLAUDE_R auth status 2>/dev/null" | grep -oP '"email":\s*"\K[^"]+')
-H_EMAIL=$("${SSH[@]}" 'claude auth status 2>/dev/null' | grep -oP '"email":\s*"\K[^"]+')
+R_EMAIL=$("${SSH[@]}" "$ALS_ROBLOX $CLAUDE_R auth status 2>/dev/null" | json_feld email)
+H_EMAIL=$("${SSH[@]}" 'claude auth status 2>/dev/null' | json_feld email)
 if [ -n "$R_EMAIL" ] && [ "$R_EMAIL" = "$H_EMAIL" ]; then
   fehlt "Roblox-Cockpit ist mit dem HAUPTKONTO ($H_EMAIL) angemeldet -- auf dem Server 'sudo -u roblox -H $CLAUDE_R auth logout' und Skript erneut starten"
   exit 1
@@ -164,7 +165,7 @@ schritt "6/9  Konto 2 im Haupt-Cockpit"
 # Anmeldung bleibt, ein Umlegen des Schalters reicht.
 GEFUNDEN=0
 for VERZ in $("${SSH[@]}" "ls -1 /home/claude/.claude-konten 2>/dev/null"); do
-  A_EMAIL=$("${SSH[@]}" "CLAUDE_CONFIG_DIR='/home/claude/.claude-konten/$VERZ' claude auth status 2>/dev/null" | grep -oP '"email":\s*"\K[^"]+')
+  A_EMAIL=$("${SSH[@]}" "CLAUDE_CONFIG_DIR='/home/claude/.claude-konten/$VERZ' claude auth status 2>/dev/null" | json_feld email)
   if [ -n "$R_EMAIL" ] && [ "$A_EMAIL" = "$R_EMAIL" ]; then
     GEFUNDEN=1
     if "${SSH[@]}" "touch '/home/claude/.claude-konten/$VERZ/cockpit-geteilt'"; then
@@ -183,7 +184,7 @@ if "${SSH[@]}" "$ALS_ROBLOX test -x /home/roblox/.local/bin/rojo"; then
 else
   ARCH=$("${SSH[@]}" 'uname -m')
   ZIP=$(curl -fsSL https://api.github.com/repos/rojo-rbx/rojo/releases/latest |
-        grep -oP '"browser_download_url":\s*"\K[^"]+linux-'"$ARCH"'\.zip' | head -1)
+        release_url "linux-$ARCH.zip")
   if [ -z "$ZIP" ]; then
     fehlt "kein Rojo-Download fuer linux-$ARCH gefunden"
   elif "${SSH[@]}" "$ALS_ROBLOX bash -c 'cd /tmp && curl -fsSL -o rojo.zip \"$ZIP\" && unzip -o -q rojo.zip rojo -d /home/roblox/.local/bin && chmod +x /home/roblox/.local/bin/rojo && rm rojo.zip'"; then

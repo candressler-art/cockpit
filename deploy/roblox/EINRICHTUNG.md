@@ -58,7 +58,38 @@ Das Einrichtungsskript prüft am Ende, dass all das wirklich gesperrt ist.
 
 ## 1. Ausrollen
 
-Vom Desktop aus:
+### Vom Mac aus
+
+Die beiden Server-Skripte laufen auch auf dem Mac. Nur `pc-einrichten.sh`
+gehört auf den Linux-Desktop (Schritt 4), weil es genau den Rechner
+einrichtet, auf dem es läuft.
+
+Einmalig auf dem Mac:
+
+```bash
+xcode-select --install                 # git, falls noch nicht da
+brew install node                      # Node 22 oder neuer (node --version)
+git clone https://github.com/candressler-art/cockpit.git ~/cockpit
+cd ~/cockpit && git checkout claude/nifty-wozniak-6o2fls
+```
+
+Der Mac braucht denselben SSH-Schlüssel wie der Desktop, um auf servertwo zu
+kommen. Am einfachsten vom Desktop kopieren:
+
+```bash
+# am Mac, Desktop-Adresse anpassen:
+scp <du>@<desktop>:.ssh/id_ed25519_claude ~/.ssh/ && chmod 600 ~/.ssh/id_ed25519_claude
+ssh -i ~/.ssh/id_ed25519_claude claude@192.168.2.193 true && echo "SSH geht"
+```
+
+Die Skripte sprechen den Server unter `192.168.2.193` an, also im Heimnetz.
+Bist du unterwegs, mit Tailscale auf dem Mac:
+`export COCKPIT_SERVER=servertwo.tail9c8a2b.ts.net`.
+
+Danach wie unten, im Ordner `~/cockpit`. Das Anmeldefenster öffnet sich auf
+dem Mac im Standardbrowser.
+
+### Die Skripte
 
 ```bash
 ./deploy/server-einrichten.sh          # aktueller Code nach /opt/cockpit
@@ -140,11 +171,16 @@ Roblox-Cockpits.
 
 ## 4. Deinen PC einrichten (Aufwecken, Herunterfahren, Blender, Vault)
 
-Auf deinem PC, nachdem `einrichten.sh` durch ist:
+Am **Linux-Desktop** (nicht am Mac), nachdem `einrichten.sh` durch ist:
 
 ```bash
+cd ~/projekte/cockpit && git fetch && git checkout claude/nifty-wozniak-6o2fls
 ./deploy/roblox/pc-einrichten.sh
 ```
+
+Sitzt du am Mac, geht es auch per SSH auf den Desktop, das Skript fragt
+zwischendurch nach deinem sudo-Passwort:
+`ssh -t <du>@<desktop> 'cd ~/projekte/cockpit && ./deploy/roblox/pc-einrichten.sh'`
 
 Das Skript:
 

@@ -29,6 +29,9 @@ if [ "$NAME" = "haupt" ]; then
   exit 2
 fi
 
+# Linux und macOS: perl statt grep -P, open statt xdg-open.
+. "$(dirname "${BASH_SOURCE[0]}")/hilfen.sh"
+
 SERVER="${COCKPIT_SERVER:-192.168.2.193}"
 KEY="${COCKPIT_SSH_KEY:-$HOME/.ssh/id_ed25519_claude}"
 SSH=(ssh -i "$KEY" -o ConnectTimeout=10 "claude@$SERVER")
@@ -144,11 +147,9 @@ HINWEIS
   SPIEGEL="$(mktemp)"
   (
     for _ in $(seq 1 60); do
-      URL=$(grep -aoP '\x1b\]8;[^;]*;\Khttps://claude\.com/[^\x07\x1b]+' "$SPIEGEL" 2>/dev/null | head -1)
-      [ -z "$URL" ] && URL=$(sed 's/\x1b\[[0-9;]*[a-zA-Z]//g; s/\x1b\][^\x07]*\x07//g' "$SPIEGEL" 2>/dev/null |
-            tr -d '\r' | awk '/^https:\/\/claude\.com\//{f=1} f&&NF{printf "%s",$0} f&&!NF{exit}')
+      URL=$(anmelde_url "$SPIEGEL")
       if [ -n "$URL" ]; then
-        command -v xdg-open >/dev/null && xdg-open "$URL" >/dev/null 2>&1 &
+        url_oeffnen "$URL" >/dev/null 2>&1 &
         printf '\n   [Anmeldeseite im Browser geoeffnet -- Code von dort holen]\n' > /dev/tty
         break
       fi
@@ -177,8 +178,8 @@ fi
 # --- 5. Gegenprobe: dieselbe E-Mail wie ein vorhandenes Konto? --------------
 schritt "5/5  Gegenprobe gegen vorhandene Konten"
 STATUS=$("${SSH[@]}" "CLAUDE_CONFIG_DIR='$KONTO_DIR' claude auth status 2>/dev/null")
-NEUE_EMAIL=$(printf '%s' "$STATUS" | grep -oP '"email":\s*"\K[^"]+')
-NEUES_ABO=$(printf '%s' "$STATUS" | grep -oP '"subscriptionType":\s*"\K[^"]+')
+NEUE_EMAIL=$(printf '%s' "$STATUS" | json_feld email)
+NEUES_ABO=$(printf '%s' "$STATUS" | json_feld subscriptionType)
 
 if [ -z "$NEUE_EMAIL" ]; then
   warn "E-Mail des neuen Kontos nicht ermittelbar -- claude auth status lieferte kein 'email'-Feld"
@@ -186,7 +187,7 @@ else
   ok "Konto '$NAME': $NEUE_EMAIL${NEUES_ABO:+ ($NEUES_ABO)}"
 fi
 
-HAUPT_EMAIL=$("${SSH[@]}" "claude auth status 2>/dev/null" | grep -oP '"email":\s*"\K[^"]+')
+HAUPT_EMAIL=$("${SSH[@]}" "claude auth status 2>/dev/null" | json_feld email)
 DOPPELT=0
 if [ -n "$NEUE_EMAIL" ] && [ "$NEUE_EMAIL" = "$HAUPT_EMAIL" ]; then
   warn "Dieselbe E-Mail wie das Hauptkonto ($HAUPT_EMAIL) -- das bringt keine zusaetzliche Kapazitaet, beide teilen sich ein Limit"
@@ -194,7 +195,7 @@ if [ -n "$NEUE_EMAIL" ] && [ "$NEUE_EMAIL" = "$HAUPT_EMAIL" ]; then
 fi
 for VERZ in $("${SSH[@]}" "ls -1 '$KONTEN_WURZEL' 2>/dev/null"); do
   [ "$VERZ" = "$NAME" ] && continue
-  ANDERE_EMAIL=$("${SSH[@]}" "CLAUDE_CONFIG_DIR='$KONTEN_WURZEL/$VERZ' claude auth status 2>/dev/null" | grep -oP '"email":\s*"\K[^"]+')
+  ANDERE_EMAIL=$("${SSH[@]}" "CLAUDE_CONFIG_DIR='$KONTEN_WURZEL/$VERZ' claude auth status 2>/dev/null" | json_feld email)
   if [ -n "$NEUE_EMAIL" ] && [ "$NEUE_EMAIL" = "$ANDERE_EMAIL" ]; then
     warn "Dieselbe E-Mail wie Konto '$VERZ' -- vermutlich aus Versehen doppelt angemeldet"
     DOPPELT=1

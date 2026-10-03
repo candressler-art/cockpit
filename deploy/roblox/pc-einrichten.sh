@@ -22,6 +22,15 @@
 
 set -u
 
+# Richtet DIESEN Rechner als den PC ein, den das Cockpit weckt -- also nur auf
+# dem Linux-Desktop sinnvoll, nicht auf dem Mac, von dem aus der Rest laeuft.
+if [ "$(uname -s)" != Linux ]; then
+  echo "Dieses Skript gehoert auf den Linux-Desktop, den das Cockpit wecken soll -- nicht auf diesen Rechner."
+  echo "Am Desktop:  cd ~/projekte/cockpit && ./deploy/roblox/pc-einrichten.sh"
+  echo "Oder vom Mac aus per SSH:  ssh -t <du>@<desktop> 'cd ~/projekte/cockpit && ./deploy/roblox/pc-einrichten.sh'"
+  exit 2
+fi
+
 SERVER="${COCKPIT_SERVER:-192.168.2.193}"
 KEY="${COCKPIT_SSH_KEY:-$HOME/.ssh/id_ed25519_claude}"
 SSH=(ssh -i "$KEY" -o ConnectTimeout=10 "claude@$SERVER")

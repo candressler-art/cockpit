@@ -9,6 +9,9 @@
 # hier durch. Das Token wird dabei nie angezeigt und landet direkt in einer
 # Datei mit Rechten 600 auf dem Server.
 
+# Linux und macOS: perl statt grep -P, open statt xdg-open.
+. "$(dirname "${BASH_SOURCE[0]}")/hilfen.sh"
+
 SERVER="${COCKPIT_SERVER:-192.168.2.193}"
 KEY="${COCKPIT_SSH_KEY:-$HOME/.ssh/id_ed25519_claude}"
 SSH=(ssh -i "$KEY" -o ConnectTimeout=10 "claude@$SERVER")
@@ -73,11 +76,9 @@ HINWEIS
     # Sobald die URL im Strom auftaucht, lokal oeffnen. Die CLI laeuft auf dem
     # Server und kann dort keinen Browser starten.
     for _ in $(seq 1 60); do
-      URL=$(grep -aoP '\x1b\]8;[^;]*;\Khttps://claude\.com/[^\x07\x1b]+' "$SPIEGEL" 2>/dev/null | head -1)
-      [ -z "$URL" ] && URL=$(sed 's/\x1b\[[0-9;]*[a-zA-Z]//g; s/\x1b\][^\x07]*\x07//g' "$SPIEGEL" 2>/dev/null |
-            tr -d '\r' | awk '/^https:\/\/claude\.com\//{f=1} f&&NF{printf "%s",$0} f&&!NF{exit}')
+      URL=$(anmelde_url "$SPIEGEL")
       if [ -n "$URL" ]; then
-        command -v xdg-open >/dev/null && xdg-open "$URL" >/dev/null 2>&1 &
+        url_oeffnen "$URL" >/dev/null 2>&1 &
         printf '\n   [Anmeldeseite im Browser geoeffnet -- Code von dort holen]\n' > /dev/tty
         break
       fi
@@ -103,6 +104,8 @@ fi
 schritt "4/7  Code nach /opt/cockpit"
 # Hier bauen, nicht dort: tsc ist eine Dev-Abhaengigkeit, und auf dem Server
 # sollen nur Laufzeitpakete liegen. Das fertige dist/ faehrt mit.
+# Frischer Checkout (z.B. auf dem Mac): erst die Pakete holen.
+[ -d "$WURZEL/node_modules" ] || (cd "$WURZEL" && npm install --silent >/dev/null 2>&1)
 if (cd "$WURZEL" && npm run build >/dev/null 2>&1); then
   ok "lokal gebaut"
 else
@@ -113,7 +116,8 @@ fi
 # Uebertragung per tar statt rsync: rsync ist auf dem Server nicht installiert,
 # und tar gibt es ueberall. Der Preis ist, dass jedes Mal alles uebertragen
 # wird -- bei diesem Projekt sind das ein paar hundert Kilobyte.
-if tar czf - -C "$WURZEL" \
+# COPYFILE_DISABLE: der tar des Macs packt sonst ._-Dateien mit Finder-Metadaten ein.
+if COPYFILE_DISABLE=1 tar czf - -C "$WURZEL" \
      --exclude=node_modules --exclude=.git --exclude=src-tauri/target \
      --exclude='*.db' --exclude='*.db-wal' --exclude='*.db-shm' . 2>/dev/null |
    "${SSH[@]}" 'rm -rf /opt/cockpit/src /opt/cockpit/web /opt/cockpit/deploy /opt/cockpit/dist /opt/cockpit/rollen /opt/cockpit/varianten && tar xzf - -C /opt/cockpit'; then
