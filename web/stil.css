@@ -59,6 +59,7 @@
 :root[data-akzent="gruvbox"]    { --akzent: #fabd2f; --akzent-2: #b8bb26; }
 :root[data-akzent="dracula"]    { --akzent: #bd93f9; --akzent-2: #ff79c6; }
 :root[data-akzent="blau"]       { --akzent: #3b82f6; --akzent-2: #06b6d4; }
+:root[data-akzent="lila"]       { --akzent: #a855f7; --akzent-2: #e879f9; }
 :root[data-akzent="nord"] { --akzent: #88c0d0; --akzent-2: #81a1c1; }
 :root[data-akzent="everforest"] { --akzent: #a7c080; --akzent-2: #dbbc7f; }
 :root[data-akzent="kanagawa"] { --akzent: #7e9cd8; --akzent-2: #e6c384; }

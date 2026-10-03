@@ -17,6 +17,7 @@ export const AKZENTE = [
   { id: 'gruvbox', name: 'Gruvbox', a: '#fabd2f', b: '#b8bb26' },
   { id: 'dracula', name: 'Dracula', a: '#bd93f9', b: '#ff79c6' },
   { id: 'blau', name: 'Blau', a: '#3b82f6', b: '#06b6d4' },
+  { id: 'lila', name: 'Lila', a: '#a855f7', b: '#e879f9' },
   { id: 'nord', name: 'Nord', a: '#88c0d0', b: '#81a1c1' },
   { id: 'everforest', name: 'Everforest', a: '#a7c080', b: '#dbbc7f' },
   { id: 'kanagawa', name: 'Kanagawa', a: '#7e9cd8', b: '#e6c384' },
