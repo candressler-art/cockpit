@@ -1,0 +1,12 @@
+{
+  "name": "Roblox-Cockpit",
+  "bereicheAus": ["notizen", "terminal", "server"],
+  "sessionSpiegel": false,
+  "arbeitsWurzel": "~/spiele",
+  "nutzer": "spieler",
+  "vorschlaege": [
+    "Lass uns ein neues Spiel anfangen. Frag mich erst nach meiner Idee.",
+    "Welche Spiele gibt es schon, und wo waren wir stehengeblieben?",
+    "Verbinde das Spiel mit Roblox Studio (Rojo)."
+  ]
+}

@@ -1,0 +1,43 @@
+#!/usr/sbin/nft -f
+# Netzsperre fuer den Benutzer 'roblox': das Roblox-Cockpit und jeder Agent,
+# den es startet, laufen unter diesem Benutzer.
+#
+# Warum ueberhaupt: Das Haupt-Cockpit hat keine Anmeldung. Es lauscht auf
+# 127.0.0.1:8765 und nimmt jede Anfrage ohne Origin-Kopf an -- ein `curl` von
+# einem Roblox-Agenten dorthin koennte einen Chat mit "Alles erlauben" auf dem
+# Hauptkonto starten. Dasselbe gilt fuer andere Dienste auf dem Server, im
+# Heimnetz und im Tailnet. Deshalb darf 'roblox' ins Internet (Anthropic-API,
+# Doku, Pakete), aber nicht an den Rest.
+#
+# Geladen von cockpit-roblox-netz.service. Faellt das Laden aus, startet das
+# Roblox-Cockpit gar nicht (Requires=) -- lieber aus als offen.
+
+table inet cockpit_roblox
+delete table inet cockpit_roblox
+
+table inet cockpit_roblox {
+  chain ausgang {
+    type filter hook output priority 0; policy accept;
+
+    # Alle anderen Benutzer: unveraendert.
+    meta skuid != "roblox" accept
+
+    # Antworten auf Verbindungen, die von aussen kamen (tailscale serve ->
+    # Daemon bzw. Rojo), und Folgepakete eigener Verbindungen.
+    ct state established,related accept
+
+    # Namensaufloesung, egal wo der Resolver sitzt (127.0.0.53 oder Router).
+    udp dport 53 accept
+    tcp dport 53 accept
+
+    # Auf dem Server selbst nur, was das Roblox-Cockpit braucht:
+    #   8766 eigener Daemon, 34873 eigener Rojo,
+    #   10200 Piper, 10300 Whisper, 2700 Vosk (Sprache).
+    oifname "lo" tcp dport { 8766, 34873, 10200, 10300, 2700 } accept
+    oifname "lo" reject
+
+    # Heimnetz, Tailnet und sonstige private Netze: gesperrt.
+    ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16 } reject
+    ip6 daddr { fc00::/7, fe80::/10 } reject
+  }
+}

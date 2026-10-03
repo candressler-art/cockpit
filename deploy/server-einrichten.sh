@@ -116,7 +116,7 @@ fi
 if tar czf - -C "$WURZEL" \
      --exclude=node_modules --exclude=.git --exclude=src-tauri/target \
      --exclude='*.db' --exclude='*.db-wal' --exclude='*.db-shm' . 2>/dev/null |
-   "${SSH[@]}" 'rm -rf /opt/cockpit/src /opt/cockpit/web /opt/cockpit/deploy /opt/cockpit/dist /opt/cockpit/rollen && tar xzf - -C /opt/cockpit'; then
+   "${SSH[@]}" 'rm -rf /opt/cockpit/src /opt/cockpit/web /opt/cockpit/deploy /opt/cockpit/dist /opt/cockpit/rollen /opt/cockpit/varianten && tar xzf - -C /opt/cockpit'; then
   ok "uebertragen (tar)"
 else
   fehlt "Uebertragung fehlgeschlagen"

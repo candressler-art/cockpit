@@ -1,0 +1,67 @@
+# systemd-Unit fuer das Roblox-Cockpit: dieselbe Software wie cockpit.service,
+# als eigener Benutzer 'roblox' mit eigenem Claude-Konto und COCKPIT_VARIANTE=roblox
+# (varianten/roblox/: nur Roblox-Spiele, kein Vault, kein Terminal, keine
+# Serveransicht, Arbeit nur unter ~/spiele).
+#
+# Die Trennung vom Haupt-Cockpit steht auf drei Beinen:
+#   1. eigener Linux-Benutzer -- kommt nicht an /home/claude, die Anmeldung
+#      des Hauptkontos, den Vault und die Datenbank des Haupt-Cockpits,
+#   2. diese Unit -- blendet /home (ausser /home/roblox), /var/lib/cockpit und
+#      /etc/cockpit zusaetzlich aus und macht das System schreibgeschuetzt,
+#   3. cockpit-roblox-netz.service -- nur Internet, nichts im Heimnetz, im
+#      Tailnet oder auf dem Server selbst (ausser Sprache und eigenem Rojo).
+#
+# Eingerichtet von deploy/roblox/einrichten.sh.
+
+[Unit]
+Description=Roblox-Cockpit -- Claude Code fuer Roblox-Spiele (Konto 2)
+After=network-online.target tailscaled.service cockpit-roblox-netz.service
+Wants=network-online.target
+Requires=cockpit-roblox-netz.service
+StartLimitBurst=5
+StartLimitIntervalSec=120
+
+[Service]
+Type=simple
+User=roblox
+Group=roblox
+WorkingDirectory=/opt/cockpit
+ExecStart=/usr/bin/node --disable-warning=ExperimentalWarning /opt/cockpit/dist/daemon.js
+Environment=NODE_ENV=production
+Environment=HOME=/home/roblox
+Environment=PATH=/home/roblox/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=COCKPIT_VARIANTE=roblox
+Environment=COCKPIT_HOST=127.0.0.1
+Environment=COCKPIT_PORT=8766
+Environment=COCKPIT_DB=/var/lib/cockpit-roblox/cockpit.db
+# Kein Zusatzkonto: dieses Cockpit kennt nur die Anmeldung unter ~/.claude.
+Environment=COCKPIT_KONTEN_DIR=/home/roblox/.keine-zusatzkonten
+Environment=COCKPIT_CLAUDE_CLI=/home/roblox/.local/bin/claude
+
+Restart=on-failure
+RestartSec=5
+
+# Das Haupt-Cockpit hat Vorrang: weniger CPU-Gewicht und eine Speichergrenze,
+# damit ein ausufernder Lauf hier nicht servertwo lahmlegt (7,5 GB gesamt).
+CPUWeight=50
+MemoryMax=3G
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=tmpfs
+BindPaths=/home/roblox
+InaccessiblePaths=-/var/lib/cockpit -/etc/cockpit -/opt/stacks
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+StateDirectory=cockpit-roblox
+StateDirectoryMode=0700
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cockpit-roblox
+
+[Install]
+WantedBy=multi-user.target

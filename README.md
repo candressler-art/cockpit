@@ -106,6 +106,7 @@ von sich aus einen beschleunigten Kontext anzulegen (damals fuer die
 | `WHISPER_TIMEOUT_MS` | `20000` | wie lange auf Whisper gewartet wird |
 | `COCKPIT_MCP_BROWSER` | — | ueberschreibt den Browser-MCP-Server |
 | `COCKPIT_KONTEN_DIR` | `~/.claude-konten` | Verzeichnis der Zusatzkonten (siehe unten) |
+| `COCKPIT_VARIANTE` | — | Variante unter `varianten/<name>/`, z.B. `roblox` (siehe unten) |
 
 ## Aufbau
 
@@ -140,6 +141,7 @@ von sich aus einen beschleunigten Kontext anzulegen (damals fuer die
 | `src/wyoming.ts` | Wyoming-Rahmen schreiben/zerlegen, ohne Netzwerk -- von hoeren.ts genutzt |
 | `src/audio.ts` | PCM auf 16 kHz resampeln |
 | `src/konsole.ts` | Befehle mit Freigabepflicht |
+| `src/variante.ts` | Varianten: Name, abgeschaltete Bereiche, Arbeitswurzel, eigene Anweisungen und Rollen |
 | `src/konten.ts` | mehrere Claude-Code-Konten: Erkennung, Wahl, Sperrung bei Limit |
 | `src/kontenNutzung.ts` | Limits und Guthaben je Konto abfragen |
 | `src/discord.ts` | Status- und Freigabekanal ueber Discord |
@@ -219,6 +221,22 @@ mit dem naechsten freien Konto weiter, statt in `waiting_ratelimit` zu parken
 sind, gilt das alte Warteverhalten. `GET /api/konten` und `POST /api/konten`
 lesen bzw. setzen den Vorzug; der Bereich Nutzung zeigt je Konto Woche und
 5 Stunden, den Modus (ausgeglichen/manuell) und wer als naechstes drankaeme.
+
+## Varianten
+
+Dieselbe Software laesst sich als zweite Instanz fuer einen anderen Zweck
+betreiben. `COCKPIT_VARIANTE=<name>` liest `varianten/<name>/`:
+`variante.json` (Name, abgeschaltete Bereiche `notizen`/`terminal`/`server`,
+Arbeitswurzel, Absender und Vorschlaege der Oberflaeche), `anweisungen.md`
+(ersetzt die Einleitung des Chat-Systemprompts) und `rollen/` (eigene
+Fachrollen). Abgeschaltete Bereiche fehlen auch in der API, nicht nur in der
+Oberflaeche; ausserhalb der Arbeitswurzel startet kein Chat und kein
+Team-Auftrag, und die Ordnerwahl zeigt nichts davon. Ohne die Variable bleibt
+alles wie bisher.
+
+Einzige Variante bisher: das **Roblox-Cockpit** (`varianten/roblox/`), das
+mit Konto 2 nur Roblox-Spiele baut und mitbenutzt wird. Es laeuft als eigener
+Linux-Benutzer hinter einer Netzsperre, siehe `deploy/roblox/EINRICHTUNG.md`.
 
 ## Fachrollen
 
