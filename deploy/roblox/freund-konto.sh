@@ -23,6 +23,14 @@ HAUPT=$("${ALS_ROBLOX[@]}" "$CLI" auth status 2>/dev/null | grep -oP '"email":\s
 sudo chmod -R go-rwx "$DIR"
 echo "     angemeldet als $MAIL"
 
+# Chat-Dateien teilen sich alle Konten (wie deploy/konto-hinzufuegen.sh): sonst
+# fehlen Chats in der Liste und lassen sich nach einem Kontowechsel nicht fortsetzen.
+"${ALS_ROBLOX[@]}" install -d -m 700 /home/roblox/.claude/projects
+if [ ! -L "$DIR/$NAME/projects" ]; then
+  "${ALS_ROBLOX[@]}" rm -rf "$DIR/$NAME/projects"
+  "${ALS_ROBLOX[@]}" ln -s /home/roblox/.claude/projects "$DIR/$NAME/projects"
+fi
+
 echo "3/4  Roblox-Cockpit auf den Konten-Ordner umstellen"
 sudo sed -i "s|^Environment=COCKPIT_KONTEN_DIR=.*|Environment=COCKPIT_KONTEN_DIR=$DIR|" /etc/systemd/system/cockpit-roblox.service
 sudo systemctl daemon-reload
