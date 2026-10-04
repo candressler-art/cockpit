@@ -14,7 +14,8 @@
 import * as bus from '../bus.js'
 import { h, symbol, api, leeren, uhrzeit, pfadKurz, modellName, melden, fehlerText } from './dom.js'
 import { markdown } from './markdown.js'
-import { werkzeugZeichnen, rollenSetzen, todoListe, kopfDaten } from './werkzeuge.js'
+import { werkzeugZeichnen, rollenSetzen, todoListe, kopfDaten, rolle } from './werkzeuge.js'
+import { begruessung, arbeitsWort, hatArbeitsWort, STERNE } from './sprueche.js'
 import { aktuelleTodos } from './taskliste.js'
 import { eingabeBauen, einstellungenHolen, NUR_ANHANG_TEXT } from './eingabe.js'
 import { AKZENTE, akzentLesen, akzentSetzen } from '../akzent.js'
@@ -46,6 +47,14 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
   let optionenGeholt = false // gemerkte Chat-Optionen nur beim Oeffnen, nicht nach jedem Zug
   let warteschlange = []  // Nachrichten, die nach dem laufenden Zug rausgehen (daemon.ts)
   let letzterSchlangenStart = null // startSeq -- Bus und Antwort melden denselben Start
+  // Statuszeile, solange Claude arbeitet: wechselndes Arbeitswort, Sternchen, Dauer.
+  // Ein Klick darauf klappt den Einblick auf (Gedanken, Notizen, Schritte dieses Zugs).
+  let zugBild = { beginn: null, eintraege: [], gerade: null }
+  let zugStart = null      // ts des ersten Ereignisses dieses Zugs (Server-Uhr)
+  let zugStartLokal = null
+  let wort = null, wortFuer = null, wortSeit = 0
+  let einblickOffen = localStorage.getItem('cockpit.einblick') === 'an'
+  let einblickPos = { top: 0, klebt: true }
 
   // --- Geruest --------------------------------------------------------------
   const titelEl = h('div.chat-titel')
@@ -101,6 +110,9 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
     optionenGeholt = false
     warteschlange = []
     letzterSchlangenStart = null
+    zugBild = { beginn: null, eintraege: [], gerade: null }
+    zugStart = null
+    tickerAus()
     schlangeZeichnen()
     schreibend.clear()
     vorschau.zuruecksetzen()
@@ -184,7 +196,7 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
     if (nr !== ladeNr) return
     for (const f of d.freigaben ?? []) freigabeAufnehmen(f)
     if (nurFreigaben) return
-    const agent = (d.agenten ?? []).find((a) => a.agentId === 'chat')
+    const agent = (d.agenten ?? []).find((a) => (a.agentId ?? a.agent_id) === 'chat')
     if (agent) status = agent.status
     for (const e of d.ereignisse ?? []) ereignisVerarbeiten(e, false)
   }
@@ -236,6 +248,7 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
   })
 
   function ereignisVerarbeiten(e, zeichnen) {
+    if (zugStart == null && laeuft && typeof e.ts === 'number') zugStart = e.ts
     if (e.nachricht) {
       const n = e.nachricht
       if (n.id && ids.has(n.id)) return
@@ -301,6 +314,7 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
     endeTimer = setTimeout(() => {
       if (id !== x || !ENDZUSTAENDE.has(status)) return
       laeuftSetzen(false)
+      zugStart = null
       live = { text: '', denken: '' }
       liveZeichnen()
       const schonFehler = hinweise.some((h0) => h0.art === 'fehler' || h0.art === 'limit')
@@ -316,8 +330,10 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
   }
 
   function laeuftSetzen(an) {
+    if (an && !laeuft) { zugStartLokal = Date.now(); wort = null; einblickPos = { top: 0, klebt: true } }
     laeuft = an
     if (an) eingabe.vorschlagWeg()
+    else tickerAus()
     eingabe.laeuftSetzen(an)
     el.classList.toggle('laeuft', an)
     schlangeZeichnen()
@@ -342,6 +358,7 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
       eingabe.ordnerFestlegen(r.cwd)
       nachrichten = [vorlaeufig]
       hinweise = []
+      zugStart = null
       laeuftSetzen(true)
       status = 'starting'
       kopfZeichnen()
@@ -361,6 +378,7 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
       // Lag noch etwas in der Warteschlange, ging es vorneweg mit raus.
       if (r.prompt) vorlaeufig.bloecke[0].text = r.prompt
       nachrichten.push(vorlaeufig)
+      zugStart = null
       laeuftSetzen(true)
       status = 'starting'
       neuZeichnen()
@@ -379,6 +397,7 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
     // startet sofort, und zugBeendet kommt dann nicht mehr zum Zug.
     hinweise = hinweise.filter((x) => x.art === 'fehler' || x.art === 'limit')
     nachrichten.push({ id: '', rolle: 'user', ts: Date.now(), bloecke: [{ typ: 'text', text: g.prompt }], modell: null, eltern: null, vorlaeufig: true })
+    zugStart = null
     laeuftSetzen(true)
     status = 'starting'
     neuZeichnen()
@@ -487,7 +506,7 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
     farbenZeichnen()
     fetchLaden(zeilen)
     return h('div.willkommen', {},
-      h('div.willkommen-titel', {}, 'Womit fangen wir an?'),
+      h('div.willkommen-titel', {}, begruessung(variante.id === 'haupt' ? 'Boss' : null)),
       h('div.fetch', {},
         logoBauen(),
         h('div.fetch-kopf', {}, variante.nutzer, h('span', {}, '@'), variante.id === 'haupt' ? 'cockpit' : variante.id),
@@ -571,6 +590,7 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
         unter.get(n.eltern).push(n)
       } else haupt.push(n)
     }
+    zugBild = zugBildBauen(haupt, ergebnisse, unter)
 
     const kinder = []
     if (gekuerzt) kinder.push(h('div.hinweis', {}, symbol('info', 14), 'Ältere Nachrichten sind ausgeblendet -- der Chat ist sehr lang.'))
@@ -755,30 +775,165 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
     tool: 'Claude arbeitet mit Werkzeugen …', writing: 'Claude schreibt …',
     waiting_permission: 'Wartet auf deine Freigabe', waiting_ratelimit: 'Wartet auf ein freies Konto …',
   }
+  const ruhig = matchMedia('(prefers-reduced-motion: reduce)')
+
+  const istAgent = (b) => b.name === 'Agent' || b.name === 'Task'
+  const spezialist = (b) => rolle(b.eingabe?.subagent_type)?.name ?? b.eingabe?.subagent_type ?? 'Spezialist'
+  /** [Symbol, Titel, Ziel] eines Schritts -- ein Spezialist mit Namen und Auftrag. */
+  const schrittDaten = (b) => (istAgent(b)
+    ? ['person', spezialist(b), b.eingabe?.description ?? '']
+    : kopfDaten(b.name, b.eingabe ?? {}, todoStand.namen))
+
+  /**
+   * Was der laufende Zug getan hat und gerade tut: Gedanken, Zwischennotizen
+   * und Schritte, die eines Spezialisten eingerueckt darunter. `gerade` ist
+   * der zuletzt begonnene Schritt ohne Ergebnis -- bei einem Spezialisten
+   * dessen eigener. Der Zug beginnt mit seinem ersten Ereignis; ohne das
+   * (gerade erst gesendet) nach Cans letzter Nachricht. Nicht einfach nach der
+   * letzten Nutzernachricht: eingeschobene Meldungen der CLI stehen als
+   * Nutzernachricht mitten im Zug, live nachgereicht sogar am Ende.
+   */
+  function zugBildBauen(haupt, ergebnisse, unter) {
+    let ab = haupt.length
+    while (ab > 0 && !(haupt[ab - 1].rolle === 'user' && haupt[ab - 1].bloecke.some((b) => b.typ === 'text'))) ab--
+    const imZug = zugStart != null ? haupt.filter((n) => n.ts == null || n.ts >= zugStart - 2000) : haupt.slice(ab)
+    const eintraege = []
+    let gerade = null
+    const aufnehmen = (n, tiefe, wer) => {
+      for (const b of n.bloecke) {
+        if (b.typ === 'denken' || (b.typ === 'text' && n.rolle === 'assistant')) eintraege.push({ b, tiefe })
+        if (b.typ !== 'werkzeug') continue
+        const erg = ergebnisse.get(b.id)
+        eintraege.push({ b, tiefe, zustand: erg ? (erg.fehler ? 'fehler' : 'ok') : 'laeuft' })
+        if (!erg) gerade = { b, wer }
+        if (istAgent(b)) for (const u of unter.get(b.id) ?? []) aufnehmen(u, tiefe + 1, spezialist(b))
+      }
+    }
+    for (const n of imZug) aufnehmen(n, 0, null)
+    return { beginn: zugStart ?? haupt[ab - 1]?.ts ?? null, eintraege, gerade }
+  }
+
+  function dauer() {
+    const s = Math.max(0, Math.floor((Date.now() - (zugBild.beginn ?? zugStartLokal ?? Date.now())) / 1000))
+    return s < 60 ? `${s} s` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')} min`
+  }
+
+  /** Neues Arbeitswort: beim Wechsel denken/werkeln/schreiben (nicht oefter als alle 4 s) und sonst alle 9 s. */
+  function wortPruefen() {
+    const seit = Date.now() - wortSeit
+    if (wort !== null && seit < 9000 && (wortFuer === status || seit < 4000)) return false
+    wort = arbeitsWort(status, wort)
+    wortFuer = status
+    wortSeit = Date.now()
+    return true
+  }
+
+  // Sternchen und Uhr laufen, ohne den Live-Bereich neu zu bauen.
+  let ticker = null
+  let sternNr = 0
+  function tickerAn() {
+    if (ticker) return
+    ticker = setInterval(() => {
+      if (document.hidden || !laeuft) return
+      const stern = liveEl.querySelector('.arbeit-stern')
+      if (stern && !ruhig.matches) stern.textContent = STERNE[sternNr = (sternNr + 1) % STERNE.length]
+      const zeit = liveEl.querySelector('.arbeit-zeit')
+      if (zeit) { const t = dauer(); if (zeit.textContent !== t) zeit.textContent = t }
+      const huelle = liveEl.querySelector('.arbeit-wort-huelle')
+      if (huelle && wortPruefen()) {
+        huelle.firstChild.textContent = `${wort} …`
+        huelle.classList.remove('neu'); void huelle.offsetWidth; huelle.classList.add('neu')
+      }
+    }, 120)
+  }
+  function tickerAus() { clearInterval(ticker); ticker = null }
 
   function liveZeichnen() {
     // Wartet Claude auf Can, steht der drehende Rand der Kachel still (stil.css).
     el.classList.toggle('wartet', laeuft && (status === 'waiting_permission' || freigaben.size > 0))
-    if (!laeuft) { leeren(liveEl); return }
+    if (!laeuft) { leeren(liveEl); tickerAus(); return }
     const teile = []
-    if (live.denken && !live.text) {
+    if (live.denken && !live.text && !einblickOffen) {
       teile.push(h('div.live-denken', {}, symbol('denken', 14), h('span', {}, live.denken.slice(-280))))
     }
     if (live.text) teile.push(markdown(live.text))
     // Aktuelle To-do-Liste des Chats sichtbar halten, solange er arbeitet --
     // das ist die Antwort auf "was hat er noch vor".
     const todo = letzteTodos()
+    // Warten (Freigabe, Rueckfrage, Konto) bleibt nuechtern, alles andere bekommt ein Arbeitswort.
+    const lustig = hatArbeitsWort(status) && !freigaben.size
+    const nuechtern = status === 'waiting_permission' && [...freigaben.values()].every((f) => f.toolName === 'AskUserQuestion') && freigaben.size
+      ? 'Wartet auf deine Antwort' : STATUS_TEXT[status] ?? 'Claude arbeitet …'
+    if (lustig) wortPruefen()
+    const g = zugBild.gerade
+    const [gSym, gTitel, gZiel] = g ? schrittDaten(g.b) : []
+    const detail = g ? `${g.wer ? `${g.wer} · ` : ''}${gTitel}${gZiel ? ` · ${String(gZiel).split('\n')[0]}` : ''}` : ''
     teile.push(h('div.arbeitet', {},
-      h('span.puls-punkt'),
-      h('span', {}, status === 'waiting_permission' && [...freigaben.values()].every((f) => f.toolName === 'AskUserQuestion') && freigaben.size
-        ? 'Wartet auf deine Antwort' : STATUS_TEXT[status] ?? 'Claude arbeitet …'),
-      todo ? h('span.leise', {}, ` · ${todo.fertig}/${todo.gesamt} erledigt`) : null,
-      h('button.knopf-klein.stopp-text', { type: 'button', onclick: anhalten, title: 'Anhalten (Esc)' }, symbol('stopp', 12), 'Anhalten')))
+      h('button.arbeit-knopf', {
+        type: 'button', 'aria-expanded': String(einblickOffen), 'aria-label': `${nuechtern} – Denkprozess ${einblickOffen ? 'zuklappen' : 'ansehen'}`,
+        title: einblickOffen ? 'Zuklappen' : 'Antippen: Gedanken und Schritte dieses Zugs ansehen',
+        onclick: () => {
+          einblickOffen = !einblickOffen
+          localStorage.setItem('cockpit.einblick', einblickOffen ? 'an' : 'aus')
+          einblickPos = { top: 0, klebt: true }
+          liveZeichnen()
+        },
+      },
+        lustig ? h('span.arbeit-stern', { 'aria-hidden': 'true' }, ruhig.matches ? '✻' : STERNE[sternNr]) : h('span.puls-punkt'),
+        lustig ? h('span.arbeit-wort-huelle', {}, h('span.arbeit-wort', {}, `${wort} …`)) : h('span', {}, nuechtern),
+        h('span.arbeit-zeit', {}, dauer()),
+        detail ? h('span.arbeit-detail', { title: detail }, symbol(gSym, 12), h('span', {}, detail)) : null,
+        todo ? h('span.arbeit-todo', {}, `${todo.fertig}/${todo.gesamt} erledigt`) : null,
+        h('span.arbeit-auf', {}, h('span.arbeit-auf-text', {}, 'Denkprozess'), symbol('pfeil', 13))),
+      h('button.knopf-klein.stopp-text', { type: 'button', onclick: anhalten, title: 'Anhalten (Esc)', 'aria-label': 'Anhalten' }, symbol('stopp', 12), h('span.stopp-wort', {}, 'Anhalten'))))
+    if (einblickOffen) teile.push(einblickBauen())
     // Die Liste selbst nur, solange noch etwas offen ist: TaskCreate/TaskUpdate
     // zeigen im Verlauf nur einzelne Zeilen, das Ganze sieht man sonst nirgends.
     if (todo && todo.fertig < todo.gesamt) teile.push(h('div.live-todos', {}, todoListe(todoStand.todos)))
     leeren(liveEl, teile)
+    // Neu gebaut steht die Liste wieder oben -- dorthin zurueck, wo Can war (oder ans Ende).
+    const liste = liveEl.querySelector('.einblick-liste')
+    if (liste) {
+      liste.scrollTop = einblickPos.klebt ? liste.scrollHeight : einblickPos.top
+      liste.addEventListener('scroll', () => {
+        einblickPos = { top: liste.scrollTop, klebt: liste.scrollHeight - liste.scrollTop - liste.clientHeight < 40 }
+      }, { passive: true })
+    }
+    tickerAn()
     nachUnten()
+  }
+
+  /** Einblick in den laufenden Zug: was gerade passiert, darunter Gedanken, Notizen und Schritte. */
+  function einblickBauen() {
+    const { eintraege, gerade } = zugBild
+    const zeilen = eintraege.slice(-80).map((x) => {
+      const stufe = { style: { '--tiefe': x.tiefe } }
+      if (x.b.typ === 'denken') return h('div.eb.eb-denken', stufe, symbol('denken', 13), h('div.eb-text', {}, x.b.text))
+      if (x.b.typ === 'text') {
+        const t = x.b.text.length > 700 ? `${x.b.text.slice(0, 700)} …` : x.b.text
+        return h('div.eb.eb-notiz', stufe, symbol('chat', 13), h('div.eb-text', {}, t))
+      }
+      const [sym, titel, ziel] = schrittDaten(x.b)
+      return h(`div.eb.eb-schritt.${x.zustand}`, stufe, symbol(sym, 13),
+        h('span.eb-titel', {}, titel),
+        ziel ? h('span.eb-ziel', { title: String(ziel) }, String(ziel).split('\n')[0]) : null,
+        h('span.w-zustand'))
+    })
+    if (live.denken) zeilen.push(h('div.eb.eb-denken.live', {}, symbol('denken', 13), h('div.eb-text', {}, live.denken)))
+    const mitGedanken = live.denken || eintraege.some((x) => x.b.typ === 'denken')
+    let geradeEl = null
+    if (gerade) {
+      const [sym, titel, ziel] = schrittDaten(gerade.b)
+      geradeEl = h('div.einblick-gerade', {},
+        h('div.eb-kopf', {}, h('span.eb-label', {}, 'gerade'), symbol(sym, 13),
+          h('strong', {}, gerade.wer ? `${gerade.wer} · ${titel}` : titel)),
+        ziel ? h('pre.eb-ziel-voll', {}, String(ziel)) : null)
+    }
+    return h('div.einblick', {},
+      geradeEl,
+      zeilen.length ? h('div.einblick-liste', {}, zeilen) : h('div.einblick-leer', {}, 'Noch kein Schritt – Claude legt gerade los.'),
+      mitGedanken ? null : h('div.einblick-hinweis', {}, symbol('info', 12),
+        h('span', {}, 'Ausgeschriebene Gedanken liefert das Modell in diesem Zug nicht mit – zu sehen sind alle Schritte und Zwischennotizen.')))
   }
 
   function letzteTodos() {

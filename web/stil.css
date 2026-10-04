@@ -518,13 +518,77 @@ pre.diff { white-space: pre; overflow-wrap: normal; }
 .live-denken { display: flex; gap: 8px; font-size: 13px; color: var(--overlay); font-style: italic; }
 .live-denken .sym { margin-top: 3px; }
 .arbeitet {
-  display: flex; align-items: center; gap: 9px; font-size: 13px; color: var(--subtext);
-  padding: 5px 5px 5px 12px; border-radius: 10px; border: 1px solid var(--surface0); background: var(--mantle);
+  display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--subtext);
+  padding: 4px; border-radius: 10px; border: 1px solid var(--surface0); background: var(--mantle);
 }
-.arbeitet > .leise { font-family: var(--mono); font-size: 12px; }
+/* Die Statuszeile ist ein Knopf: antippen klappt den Einblick auf. */
+.arbeit-knopf {
+  flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 9px; min-height: 30px; padding: 3px 8px;
+  border: 0; border-radius: 7px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.arbeit-knopf:hover { background: var(--surface0); }
+.arbeit-knopf:focus-visible { outline: 2px solid var(--akzent); outline-offset: 1px; }
+/* Wie Claude Code: Sternchen, das sich "dreht", und ein schimmerndes Arbeitswort. */
+.arbeit-stern { flex: none; width: 1.15em; text-align: center; font: 600 15px/1 var(--mono); color: var(--akzent); }
+.arbeit-wort-huelle { flex: none; }
+.arbeit-wort-huelle.neu { animation: wort-neu .4s ease-out; }
+@keyframes wort-neu { from { opacity: 0; } to { opacity: 1; } }
+.arbeit-wort {
+  font: 600 13px/1.3 var(--mono); color: var(--akzent);
+  background: linear-gradient(100deg, var(--akzent) 38%, color-mix(in oklab, var(--akzent) 25%, white) 50%, var(--akzent) 62%) 0 0 / 300% 100%;
+  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+  animation: schimmer 2.6s linear infinite;
+}
+@keyframes schimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
+.arbeit-zeit, .arbeit-todo { flex: none; font: 12px/1 var(--mono); color: var(--overlay); font-variant-numeric: tabular-nums; }
+.arbeit-detail { flex: 0 1 auto; min-width: 0; display: flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--overlay); }
+.arbeit-detail > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.arbeit-auf { flex: none; margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--subtext); }
+.arbeit-auf .sym { transition: transform .15s; }
+.arbeit-knopf[aria-expanded="true"] .arbeit-auf .sym { transform: rotate(90deg); }
+.arbeit-knopf:hover .arbeit-auf { color: var(--text); }
+
+/* Einblick in den laufenden Zug: was gerade passiert, Gedanken, Notizen, Schritte. */
+.einblick {
+  display: flex; flex-direction: column; gap: 11px; padding: 12px 14px; margin-top: -4px;
+  border: 1px solid var(--akzent-rand); border-radius: var(--radius); background: var(--mantle);
+}
+.einblick-gerade { display: flex; flex-direction: column; gap: 7px; }
+.eb-kopf { display: flex; align-items: center; gap: 7px; font-size: 13px; min-width: 0; }
+.eb-kopf > strong { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.eb-label {
+  flex: none; font: 650 10px/1 var(--mono); text-transform: uppercase; letter-spacing: .06em;
+  padding: 4px 6px; border-radius: 5px; color: var(--auf-akzent); background: var(--akzent);
+}
+.eb-ziel-voll {
+  margin: 0; padding: 8px 10px; max-height: 9.5em; overflow: auto; border-radius: 8px; background: var(--crust);
+  font: 12px/1.5 var(--mono); color: var(--subtext); white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.einblick-liste {
+  display: flex; flex-direction: column; gap: 8px; max-height: min(46vh, 440px); overflow: auto; overscroll-behavior: contain;
+  padding-top: 10px; border-top: 1px solid var(--surface0);
+}
+.einblick-gerade + .einblick-liste { margin-top: 1px; }
+.einblick > .einblick-liste:first-child { padding-top: 0; border-top: 0; }
+.eb { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; line-height: 1.5; padding-left: calc(var(--tiefe, 0) * 18px); }
+.eb > .sym { margin-top: 3px; color: var(--overlay); }
+.eb-text { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.eb-denken .eb-text { font-style: italic; color: var(--subtext); }
+.eb-denken > .sym { color: var(--akzent); }
+.eb-denken.live .eb-text::after { content: "▍"; font-style: normal; color: var(--akzent); animation: puls 1s steps(2) infinite; }
+.eb-notiz .eb-text { color: var(--text); }
+.eb-schritt { align-items: center; }
+.eb-schritt > .sym { margin-top: 0; }
+.eb-titel { flex: none; color: var(--subtext); }
+.eb-ziel { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 12px var(--mono); color: var(--overlay); }
+.eb-schritt.ok .w-zustand { background: color-mix(in srgb, var(--gruen) 75%, var(--surface2)); }
+.eb-schritt.fehler .w-zustand { background: var(--rot); }
+.eb-schritt.laeuft .w-zustand { background: var(--akzent); animation: puls 1.4s ease-in-out infinite; }
+.einblick-hinweis, .einblick-leer { display: flex; gap: 6px; align-items: flex-start; font-size: 12px; line-height: 1.45; color: var(--overlay); }
+.einblick-hinweis .sym { margin-top: 2px; }
 .live-todos { margin-top: 2px; border: 1px solid var(--surface0); border-radius: var(--radius); background: var(--mantle); max-width: 540px; }
 .live-todos .todos { padding: 9px 13px; }
-.stopp-text { margin-left: auto; border: 1px solid var(--surface1); background: var(--base); color: var(--subtext); }
+.stopp-text { flex: none; margin-left: auto; border: 1px solid var(--surface1); background: var(--base); color: var(--subtext); }
 .stopp-text:hover { border-color: color-mix(in srgb, var(--rot) 45%, var(--surface1)); color: var(--rot); }
 
 /* Freigaben: hier ist Can dran -- die Karten muessen auffallen. */
@@ -983,7 +1047,9 @@ select.chip option { background: var(--mantle-fest); color: var(--text); }
 /* Weniger Bewegung gewuenscht: Zustaende bleiben an Farbe und Text erkennbar. */
 @media (prefers-reduced-motion: reduce) {
   .puls-punkt, .laeuft > summary .w-zustand, .kreisel { animation-duration: 2.4s; }
-  .puls-punkt, .laeuft > summary .w-zustand { animation: none; }
+  .puls-punkt, .laeuft > summary .w-zustand, .eb-schritt.laeuft .w-zustand, .eb-denken.live .eb-text::after { animation: none; }
+  .arbeit-wort { animation: none; -webkit-text-fill-color: currentColor; background: none; }
+  .arbeit-wort-huelle.neu { animation: none; }
   #seite, .sg-pfeil, .neu-chat, .ws-knopf, .knopf, .senden, .eingabe-rahmen { transition: none; }
 }
 
@@ -996,4 +1062,13 @@ select.chip option { background: var(--mantle-fest); color: var(--text); }
     color: var(--text); font: inherit; font-size: 14px; font-style: italic;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
+}
+
+/* Statuszeile am Handy: Sternchen, Wort, Zeit, Pfeil -- der Rest steht im Einblick. */
+@media (max-width: 760px) {
+  .arbeit-auf-text, .arbeit-todo, .stopp-wort { display: none; }
+  .stopp-text { width: 32px; padding: 0; justify-content: center; }
+  .arbeit-knopf { gap: 7px; padding: 3px 6px; }
+  .einblick { padding: 11px 12px; }
+  .einblick-liste { max-height: 52vh; }
 }
