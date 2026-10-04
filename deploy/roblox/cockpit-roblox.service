@@ -35,6 +35,7 @@ Environment=COCKPIT_HOST=127.0.0.1
 Environment=COCKPIT_PORT=8766
 Environment=COCKPIT_DB=/var/lib/cockpit-roblox/cockpit.db
 # Kein Zusatzkonto: dieses Cockpit kennt nur die Anmeldung unter ~/.claude.
+# Zusatzkonten (z. B. das des Freundes) legt deploy/roblox/freund-konto.sh an und stellt dies um.
 Environment=COCKPIT_KONTEN_DIR=/home/roblox/.keine-zusatzkonten
 Environment=COCKPIT_CLAUDE_CLI=/home/roblox/.local/bin/claude
 # PC zum Wecken/Herunterfahren (COCKPIT_PC_MAC, _HOST, _NUTZER), geschrieben

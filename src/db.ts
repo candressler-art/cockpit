@@ -98,6 +98,13 @@ CREATE TABLE IF NOT EXISTS konten_schalter (
   an   INTEGER NOT NULL
 );
 
+-- Obergrenzen je Konto (konten.ts KontoGrenze): Anteil 0..1, NULL = keine.
+CREATE TABLE IF NOT EXISTS konten_grenzen (
+  name  TEXT PRIMARY KEY,
+  fuenf REAL,
+  woche REAL
+);
+
 -- Letzter bekannter Nutzungsstand je Konto (siehe kontenNutzung.ts, konten.ts
 -- nutzungMelden). Bisher reiner In-Memory-Zustand: ein Daemon-Neustart liess
 -- jedes Konto ohne jede Messung dastehen -- balanciert wie ein nie genutztes
@@ -491,6 +498,27 @@ export class CockpitDb {
          ON CONFLICT (name) DO UPDATE SET an = excluded.an`,
       )
       .run(name, an ? 1 : 0)
+  }
+
+  kontoGrenzenLesen(): Record<string, { fuenf: number | null; woche: number | null }> {
+    const rows = this.db.prepare(`SELECT name, fuenf, woche FROM konten_grenzen`).all() as
+      { name: string; fuenf: number | null; woche: number | null }[]
+    const out: Record<string, { fuenf: number | null; woche: number | null }> = {}
+    for (const r of rows) out[r.name] = { fuenf: r.fuenf, woche: r.woche }
+    return out
+  }
+
+  kontoGrenzeSetzen(name: string, grenze: { fuenf: number | null; woche: number | null } | null): void {
+    if (!grenze) {
+      this.db.prepare(`DELETE FROM konten_grenzen WHERE name = ?`).run(name)
+      return
+    }
+    this.db
+      .prepare(
+        `INSERT INTO konten_grenzen (name, fuenf, woche) VALUES (?, ?, ?)
+         ON CONFLICT (name) DO UPDATE SET fuenf = excluded.fuenf, woche = excluded.woche`,
+      )
+      .run(name, grenze.fuenf, grenze.woche)
   }
 
   /** Gespeicherte Einstellungen als rohes Objekt, oder null, wenn nie gespeichert (oder unlesbar). */

@@ -291,6 +291,33 @@ export function nutzungBauen() {
     await kontenLaden()
   }
 
+  async function grenzeSetzen(name, fuenf, woche) {
+    try {
+      await api('/api/konten/grenze', { body: { name, fuenf, woche } })
+    } catch (e) {
+      melden(`Grenze nicht gespeichert: ${fehlerText(e)}`, 'fehler')
+    }
+    await kontenLaden()
+  }
+
+  /** Zwei Felder "Höchstens … %" je Fenster; leer heißt keine Grenze. */
+  function grenzeZeile(k) {
+    const feld = (art, wert, label) => h('input.grenze-feld', {
+      type: 'number', min: 1, max: 100, step: 1, inputmode: 'numeric', placeholder: '–',
+      value: wert === null || wert === undefined ? '' : Math.round(wert * 100),
+      'aria-label': `${label}: Obergrenze in Prozent für Konto ${k.name}`,
+    })
+    const f5 = feld('fuenf', k.grenze?.fuenf, '5 Stunden')
+    const f7 = feld('woche', k.grenze?.woche, 'Woche')
+    const speichern = () => grenzeSetzen(k.name, f5.value.trim(), f7.value.trim())
+    f5.addEventListener('change', speichern)
+    f7.addEventListener('change', speichern)
+    return h('div.konto-grenze', { title: 'Bis zu diesem Anteil nimmt das Cockpit das Konto, danach nicht mehr. Leer = keine Grenze. Geprüft wird beim Start jedes Auftrags.' },
+      h('span', {}, 'Höchstens'),
+      f5, h('span.leise', {}, '% / 5 Std.'),
+      f7, h('span.leise', {}, '% / Woche'))
+  }
+
   function kontenInhalt(d) {
     const modus = d.modus === 'manuell'
       ? h('div.konten-modus', {}, symbol('stern', 14), h('span', {}, `Vorzug: ${d.konten.find((k) => k.bevorzugt)?.name}. Das Cockpit nimmt dieses Konto, solange es nicht im Limit ist.`),
@@ -307,6 +334,9 @@ export function nutzungBauen() {
     if (!k.angemeldet) marken.push(h('span.marke-klein.aus', {}, 'nicht angemeldet'))
     else if (gesperrt) marken.push(h('span.marke-klein.warn', { title: `bis ${new Date(k.gesperrtBis).toLocaleString('de-DE')}` },
       k.sperrGrund === 'anmeldung' ? 'Anmeldung prüfen' : `im Limit bis ${resetText(k.gesperrtBis)}`))
+    if (k.angemeldet && !gesperrt && k.grenzeErreicht) marken.push(h('span.marke-klein.warn', {
+      title: 'Eigene Obergrenze erreicht: das Cockpit nimmt dieses Konto nicht mehr, bis das Fenster zurückgesetzt ist.',
+    }, `Grenze erreicht${k.grenzeErreicht.bisMs ? ` bis ${resetText(k.grenzeErreicht.bisMs)}` : ''}`))
     if (k.name === d.naechstesKonto) marken.push(h('span.marke-klein.an', {}, 'als Nächstes'))
     if (k.bevorzugt) marken.push(h('span.marke-klein.stern', {}, 'Vorzug'))
     if (k.geteilt) marken.push(h('span.marke-klein', { title: 'Wird mit jemandem geteilt (z.B. im Roblox-Cockpit). Ohne Schalter nimmt dieses Cockpit es nicht.' }, 'geteilt'))
@@ -331,6 +361,8 @@ export function nutzungBauen() {
     } else {
       zeilen.push(h('div.leise.klein', {}, 'Auf dem Server mit ', h('code', {}, `CLAUDE_CONFIG_DIR=${k.configDir} claude /login`), ' anmelden.'))
     }
+
+    if (k.angemeldet) zeilen.push(grenzeZeile(k))
 
     // Schalter "im Cockpit nutzen" fuer jedes Zusatzkonto; das Hauptkonto ist immer an.
     if (k.name !== 'haupt' && k.aktiv !== undefined) {
