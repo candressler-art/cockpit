@@ -346,7 +346,13 @@ export class Supervisor extends EventEmitter {
     // exakt das Verhalten von vor den Konten.
     let konto = this.konten.waehlen()
     const versuchteKonten = new Set<string>()
-    let resumeSessionId = o.resume
+    // Eine feste Id (neuer Chat) darf nur beim ALLERERSTEN Start vergeben
+    // werden. Liegt die Sitzung auf dem gewaehlten Konto schon (ein frueherer
+    // Versuch derselben Nachricht kam bis zur ersten Zeile und scheiterte,
+    // z.B. im Limit), lehnt die CLI --session-id mit "Session ID ... is
+    // already in use" ab -- dann wird stattdessen fortgesetzt.
+    let resumeSessionId = o.resume ??
+      (o.sessionId && konto && sitzungsdateiVorhanden(konto.configDir, o.sessionId) ? o.sessionId : undefined)
     // Nur ab dem ZWEITEN Versuch (also nach einem echten Kontowechsel) geht
     // der kurze Fortsetzungsprompt raus statt o.prompt -- der allererste
     // Versuch bekommt immer den echten Auftrag, ob mit oder ohne aeusseres
