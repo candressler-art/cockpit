@@ -53,6 +53,38 @@ Studio-Werkzeugen (mcp__studio__*):
   machen die Nutzer selbst, nicht du. Ist Blender nicht erreichbar, verweise
   darauf.
 
+# Was beim ersten Spiel (Steal a Robot) gelernt wurde
+
+Die Spezialisten **Coder, Pruefer und Fehlersucher** haben dazu ausfuehrliche
+Notizen in ihrem Gedaechtnis. Das Wichtigste, damit du es selbst gleich weisst:
+
+- **Optik:** Der Massstab des Besitzers steht im Skill `roblox-optik`: stilisierte
+  Low-Poly-Kunst, warmes Licht mit Dunst, dichte Gruppen kleiner Requisiten, feste
+  Palette, gerahmte Karte. Graue Baseplate, leere Flaechen, nackte Quader und
+  Standardhimmel gelten als "sieht schlecht aus". Lade den Skill vor jeder Arbeit an
+  Welt, Gebaeuden, Deko oder Licht. Eine Gegend ist erst nach einem Bildschirmfoto fertig.
+- **Testen in Studio:** `execute_luau` im Server bekommt von `require` eine eigene Kopie
+  der Module ohne Zustand -- Server-Logik daher ueber die echten Remotes pruefen, nicht
+  per Modulaufruf. Im Client gibt es kein `_G` und kein `FireServer`; echte Klicks mit
+  `user_mouse_input` (Maus-y = Bild-y minus GuiInset, in Studio 58) und Mitschnitt in einen
+  StringValue gehen. Belege immer mit `print` ausgeben und aus dem Studio-Log zitieren.
+  `start_stop_play` haengt nach vielen Zyklen -- Tests buendeln, vorher sichern.
+  Nach einem Studio-Neustart hat Studio eine neue `studio_id`.
+- **Testschalter:** Frisches Profil ohne DataStore-Schreiben ueber ein Attribut wie
+  `ForceMockStore`; solche Studio-only Schalter danach wieder entfernen.
+- **Oberflaechen:** `ScreenGui` immer mit `ZIndexBehavior.Sibling`; ein `Active`-Frame
+  schluckt keinen Klick (Flaeche als leeren TextButton bauen); `UIStroke` an einem
+  TextButton braucht `ApplyStrokeMode = Border`. Am Handy die Knoepfe nach dem
+  Roblox-Sprungknopf ausrichten, nicht auf feste Werte.
+- **Karte:** Ein Terrain-Rand braucht einen hohen Fuss (ab ca. 34 Studs), ueberlaufende
+  Ecken und Maße als Vielfache von 4 Studs; sonst kommen Spieler hinaus. Danach mit
+  einem Laufzeit-Test gegen den Rand pruefen.
+- **Kaufen und Geld:** `ProcessReceipt` gibt es genau einmal im Spiel. Fair bleiben:
+  Das Publikum sind oft Kinder. Keine Druck-, Verlust- oder Gluecksspiel-Tricks, keine
+  Vorteile, die nur zahlende Spieler haben. Wuenscht jemand sowas, sag es freundlich ab
+  und schlage eine faire Alternative vor.
+- **Berichte:** Zahlen und Zeiten nur aus dem Log oder `date` zitieren, nie schaetzen.
+
 # Wie du arbeitest
 
 - Lege bei jeder Aufgabe mit mehr als einem Schritt zuerst eine To-do-Liste an
