@@ -141,6 +141,20 @@ a.tag-eintrag:hover { background: var(--surface0); }
 .konto.abgeschaltet > :not(.konto-schalter):not(.konto-kopf) { opacity: .55; }
 .konto-grenze { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 13px; color: var(--subtext); padding-top: 4px; border-top: 1px solid var(--surface0); margin-top: 2px; }
 .grenze-feld { width: 58px; padding: 4px 6px; border-radius: 6px; border: 1px solid var(--surface1); background: var(--crust); color: var(--text); font: inherit; text-align: right; }
+.konto-regeln { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--subtext); padding-top: 4px; border-top: 1px solid var(--surface0); margin-top: 2px; }
+.regeln-kopf { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.regeln-liste { display: flex; flex-direction: column; gap: 6px; }
+.regeln-liste:empty { display: none; }
+.regel { position: relative; display: flex; flex-direction: column; gap: 5px; padding: 7px 8px; border-radius: 8px; border: 1px solid var(--surface0); background: var(--mantle); }
+.regel.aktiv { border-color: color-mix(in srgb, var(--gruen) 40%, var(--surface0)); }
+.regel-reihe:first-child { padding-right: 22px; }
+.regel-reihe { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; }
+.regel-fenster, .regel-zeit { padding: 4px 6px; border-radius: 6px; border: 1px solid var(--surface1); background: var(--crust); color: var(--text); font: inherit; }
+.regel-zeit { width: 92px; color-scheme: dark; }
+.regel-rest { width: 52px; }
+.regel-weg { position: absolute; top: 5px; right: 6px; font-size: 17px; line-height: 1; padding: 2px 4px; text-decoration: none; }
+.regel-tag { min-width: 31px; padding: 3px 0; border-radius: 6px; border: 1px solid var(--surface1); background: transparent; color: var(--overlay); font: 12px var(--mono); cursor: pointer; }
+.regel-tag[aria-pressed="true"] { background: color-mix(in srgb, var(--akzent, var(--blau)) 22%, transparent); border-color: color-mix(in srgb, var(--akzent, var(--blau)) 55%, var(--surface1)); color: var(--text); }
 .konto-schalter { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; color: var(--subtext); padding-top: 4px; border-top: 1px solid var(--surface0); margin-top: 2px; }
 .konto-kopf { display: flex; align-items: flex-start; gap: 8px; }
 .konto-name { flex: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }

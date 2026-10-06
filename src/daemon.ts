@@ -55,6 +55,7 @@ import {
   rueckblickGruppieren, nutzungGesamt, type SitzungsArt,
 } from './nutzung.js'
 import { kontenLesen, grenzeProzentLesen } from './konten.js'
+import { regelnLesen } from './kontoRegeln.js'
 import { VARIANTE, bereichAn, cwdInWurzel, varianteFuerOberflaeche } from './variante.js'
 import { pcKonfigLesen, wecken, herunterfahren, pcErreichbar } from './pc.js'
 import { mcpAufloesen } from './mcp.js'
@@ -1582,6 +1583,16 @@ const server = createServer(async (req, res) => {
       const woche = grenzeProzentLesen(k?.woche)
       if (fuenf === undefined || woche === undefined) return json(400, { fehler: 'Grenze muss eine Zahl von 1 bis 100 sein (oder leer)' })
       const ok = supervisor.kontoGrenzeSetzen(name, { fuenf, woche })
+      return json(ok ? 200 : 404, { ok, ...supervisor.kontenUebersicht() })
+    }
+
+    if (pfad === '/api/konten/regeln' && req.method === 'POST') {
+      // Zeitregeln je Konto: "von Limit X sollen zu dieser Zeit Y % uebrig bleiben".
+      const k = (await koerperLesen(req)) as Record<string, unknown> | null
+      const name = textFeld(k, 'name') ?? ''
+      const regeln = regelnLesen(k?.regeln)
+      if (typeof regeln === 'string') return json(400, { fehler: regeln })
+      const ok = supervisor.kontoRegelnSetzen(name, regeln)
       return json(ok ? 200 : 404, { ok, ...supervisor.kontenUebersicht() })
     }
 

@@ -9,6 +9,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { AgentState, CockpitEvent, LimitStand, PermissionRequest } from './typen.js'
+import type { KontoRegel } from './kontoRegeln.js'
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -103,6 +104,12 @@ CREATE TABLE IF NOT EXISTS konten_grenzen (
   name  TEXT PRIMARY KEY,
   fuenf REAL,
   woche REAL
+);
+
+-- Zeitregeln je Konto (kontoRegeln.ts KontoRegel) als JSON-Liste.
+CREATE TABLE IF NOT EXISTS konten_regeln (
+  name   TEXT PRIMARY KEY,
+  regeln TEXT NOT NULL
 );
 
 -- Letzter bekannter Nutzungsstand je Konto (siehe kontenNutzung.ts, konten.ts
@@ -519,6 +526,29 @@ export class CockpitDb {
          ON CONFLICT (name) DO UPDATE SET fuenf = excluded.fuenf, woche = excluded.woche`,
       )
       .run(name, grenze.fuenf, grenze.woche)
+  }
+
+  kontoRegelnLesen(): Record<string, KontoRegel[]> {
+    const rows = this.db.prepare(`SELECT name, regeln FROM konten_regeln`).all() as { name: string; regeln: string }[]
+    const out: Record<string, KontoRegel[]> = {}
+    // Beim Speichern schon geprueft (regelnLesen); eine kaputte Zeile gilt als keine Regel.
+    for (const r of rows) {
+      try { out[r.name] = JSON.parse(r.regeln) as KontoRegel[] } catch { /* keine Regeln */ }
+    }
+    return out
+  }
+
+  kontoRegelnSetzen(name: string, regeln: KontoRegel[]): void {
+    if (regeln.length === 0) {
+      this.db.prepare(`DELETE FROM konten_regeln WHERE name = ?`).run(name)
+      return
+    }
+    this.db
+      .prepare(
+        `INSERT INTO konten_regeln (name, regeln) VALUES (?, ?)
+         ON CONFLICT (name) DO UPDATE SET regeln = excluded.regeln`,
+      )
+      .run(name, JSON.stringify(regeln))
   }
 
   /** Gespeicherte Einstellungen als rohes Objekt, oder null, wenn nie gespeichert (oder unlesbar). */

@@ -5,6 +5,7 @@
 // eines Workers erkennt der Supervisor an den task_started-Nachrichten und
 // haengt sie als Kinder in den Graphen.
 
+import type { KontoRegel } from './kontoRegeln.js'
 import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import {
@@ -221,6 +222,13 @@ export class Supervisor extends EventEmitter {
   kontoGrenzeSetzen(name: string, grenze: { fuenf: number | null; woche: number | null }): boolean {
     if (!this.konten.konto(name)) return false
     this.konten.grenzeSetzen(name, grenze)
+    return true
+  }
+
+  /** Zeitregeln eines Kontos ersetzen. false bei unbekanntem Konto. */
+  kontoRegelnSetzen(name: string, regeln: KontoRegel[]): boolean {
+    if (!this.konten.konto(name)) return false
+    this.konten.regelnSetzen(name, regeln)
     return true
   }
 

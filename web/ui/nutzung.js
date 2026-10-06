@@ -237,12 +237,16 @@ export function nutzungBauen() {
   let frischAngekommen = -1
   let messung = null
 
-  async function kontenLaden(frisch = false) {
+  async function kontenLaden(frisch = false, erzwingen = false) {
     const gestartet = performance.now()
     const veraltet = () => !frisch && gestartet < frischAngekommen
     try {
       const d = await (frisch ? api('/api/konten/messen', { method: 'POST' }) : api('/api/konten'))
       if (veraltet()) return
+      // Nicht mitten ins Tippen neu zeichnen (die Messung kommt jede Minute);
+      // nach dem Speichern zeichnet erzwingen den neuen Stand.
+      const fokus = document.activeElement
+      if (!erzwingen && fokus && kontenOrt.contains(fokus) && fokus.matches('input, select')) return
       if (frisch) frischAngekommen = performance.now()
       leeren(kontenOrt, kontenInhalt(d))
       // Der Limit-Hinweis unten in der Seitenleiste soll dasselbe zeigen.
@@ -300,6 +304,84 @@ export function nutzungBauen() {
     await kontenLaden()
   }
 
+  async function regelnSetzen(name, regeln) {
+    try {
+      await api('/api/konten/regeln', { body: { name, regeln } })
+    } catch (e) {
+      melden(`Regel nicht gespeichert: ${fehlerText(e)}`, 'fehler')
+    }
+    await kontenLaden(false, true)
+  }
+
+  const TAGE = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So']
+  const uhrText = (min) => (min === null || min === undefined ? '' : `${String(Math.floor(min / 60)).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`)
+
+  /** Eine Regel: welches Limit, wie viel % übrig, an welchen Tagen, von–bis. */
+  function regelZeile(r, aktiv, speichern) {
+    const fenster = h('select.regel-fenster', { 'aria-label': 'Limit' },
+      h('option', { value: 'woche', selected: r.fenster === 'woche' }, 'Woche'),
+      h('option', { value: 'fuenf', selected: r.fenster === 'fuenf' }, '5 Std.'))
+    const rest = h('input.grenze-feld.regel-rest', {
+      type: 'number', min: 0, max: 99, step: 1, inputmode: 'numeric', placeholder: '%',
+      value: r.rest === null || r.rest === undefined ? '' : Math.round(r.rest * 100),
+      'aria-label': 'Prozent, die übrig bleiben sollen',
+    })
+    const alle = !r.tage || r.tage.length === 0
+    const tage = TAGE.map((t, i) => h('button.regel-tag', {
+      type: 'button', 'aria-pressed': String(alle || r.tage.includes(i + 1)), title: t,
+      onclick: (e) => {
+        const b = e.currentTarget
+        b.setAttribute('aria-pressed', String(b.getAttribute('aria-pressed') !== 'true'))
+        speichern()
+      },
+    }, t))
+    const von = h('input.regel-zeit', { type: 'time', value: uhrText(r.von), 'aria-label': 'von (leer = ab 0:00)' })
+    const bis = h('input.regel-zeit', { type: 'time', value: uhrText(r.bis), 'aria-label': 'bis (leer = bis 24:00)' })
+    for (const el of [fenster, rest, von, bis]) el.addEventListener('change', speichern)
+    const zeile = h(`div.regel${aktiv ? '.aktiv' : ''}`, {},
+      h('div.regel-reihe', {}, fenster, h('span', {}, 'mind.'), rest, h('span', {}, '% übrig'),
+        h('button.link.regel-weg', { type: 'button', title: 'Regel löschen', 'aria-label': 'Regel löschen',
+          onclick: () => { zeile.remove(); speichern() } }, '×')),
+      h('div.regel-reihe', {}, ...tage),
+      h('div.regel-reihe', {}, h('span', {}, 'von'), von, h('span', {}, 'bis'), bis),
+      aktiv || (r.von === null && r.bis === null) ? h('div.regel-reihe', {},
+        aktiv ? h('span.marke-klein.an', { title: 'Diese Regel gilt gerade.' }, 'gilt jetzt') : null,
+        r.von === null && r.bis === null ? h('span.leise.klein', {}, 'ohne Uhrzeit: ganzer Tag') : null) : null)
+    // Gelesen wird beim Speichern direkt aus den Feldern.
+    zeile.regelLesen = () => {
+      const an = tage.map((b, i) => (b.getAttribute('aria-pressed') === 'true' ? i + 1 : 0)).filter(Boolean)
+      return {
+        fenster: fenster.value, rest: rest.value.trim(),
+        tage: an.length === 7 ? [] : an, von: von.value, bis: bis.value,
+      }
+    }
+    return zeile
+  }
+
+  /** Regeln je Konto: "von Limit X sollen zu dieser Zeit Y % übrig bleiben". */
+  function regelnBlock(k) {
+    const liste = h('div.regeln-liste')
+    const speichern = () => {
+      const regeln = [...liste.children].map((z) => z.regelLesen())
+      // Eine neue Zeile ohne Prozent ist noch ein Entwurf -- erst speichern, wenn sie ausgefüllt ist.
+      if (regeln.some((r) => r.rest === '')) return
+      regelnSetzen(k.name, regeln)
+    }
+    k.regeln.forEach((r, i) => liste.append(regelZeile(r, k.regelnAktiv?.[i], speichern)))
+    const neu = h('button.link', { type: 'button', onclick: () => {
+      const z = regelZeile({ fenster: 'woche', rest: null, tage: [], von: null, bis: null }, false, speichern)
+      liste.append(z)
+      z.querySelector('.regel-rest').focus()
+    } }, '+ Regel')
+    const w = k.grenzeWirksam
+    const jetzt = [w?.fuenf != null ? `5 Std. bis ${Math.round(w.fuenf * 100)} %` : null, w?.woche != null ? `Woche bis ${Math.round(w.woche * 100)} %` : null].filter(Boolean)
+    return h('div.konto-regeln', {},
+      h('div.regeln-kopf', { title: 'Zu den eingestellten Zeiten nimmt das Cockpit das Konto nur, solange mindestens so viel vom Limit übrig ist. Gelten mehrere Regeln, zählt die strengste. Geprüft wird beim Start jedes Auftrags.' },
+        h('span', {}, 'So viel soll übrig bleiben'), neu),
+      liste,
+      jetzt.length ? h('div.leise.klein', {}, `Gerade nutzbar: ${jetzt.join(', ')}.`) : null)
+  }
+
   /** Zwei Felder "Höchstens … %" je Fenster; leer heißt keine Grenze. */
   function grenzeZeile(k) {
     const feld = (art, wert, label) => h('input.grenze-feld', {
@@ -335,8 +417,10 @@ export function nutzungBauen() {
     else if (gesperrt) marken.push(h('span.marke-klein.warn', { title: `bis ${new Date(k.gesperrtBis).toLocaleString('de-DE')}` },
       k.sperrGrund === 'anmeldung' ? 'Anmeldung prüfen' : `im Limit bis ${resetText(k.gesperrtBis)}`))
     if (k.angemeldet && !gesperrt && k.grenzeErreicht) marken.push(h('span.marke-klein.warn', {
-      title: 'Eigene Obergrenze erreicht: das Cockpit nimmt dieses Konto nicht mehr, bis das Fenster zurückgesetzt ist.',
-    }, `Grenze erreicht${k.grenzeErreicht.bisMs ? ` bis ${resetText(k.grenzeErreicht.bisMs)}` : ''}`))
+      title: k.grenzeErreicht.regel
+        ? 'Eine Regel will, dass gerade mehr übrig bleibt: das Cockpit nimmt dieses Konto erst wieder, wenn die Regel endet oder das Fenster zurückgesetzt ist.'
+        : 'Eigene Obergrenze erreicht: das Cockpit nimmt dieses Konto nicht mehr, bis das Fenster zurückgesetzt ist.',
+    }, `${k.grenzeErreicht.regel ? 'Regel greift' : 'Grenze erreicht'}${k.grenzeErreicht.bisMs ? ` bis ${resetText(k.grenzeErreicht.bisMs)}` : ''}`))
     if (k.name === d.naechstesKonto) marken.push(h('span.marke-klein.an', {}, 'als Nächstes'))
     if (k.bevorzugt) marken.push(h('span.marke-klein.stern', {}, 'Vorzug'))
     if (k.geteilt) marken.push(h('span.marke-klein', { title: 'Wird mit jemandem geteilt (z.B. im Roblox-Cockpit). Ohne Schalter nimmt dieses Cockpit es nicht.' }, 'geteilt'))
@@ -362,7 +446,8 @@ export function nutzungBauen() {
       zeilen.push(h('div.leise.klein', {}, 'Auf dem Server mit ', h('code', {}, `CLAUDE_CONFIG_DIR=${k.configDir} claude /login`), ' anmelden.'))
     }
 
-    if (k.angemeldet) zeilen.push(grenzeZeile(k))
+    // regeln fehlt, solange der Server die Regeln noch nicht kennt (Oberfläche schon neu, Daemon noch alt).
+    if (k.angemeldet) zeilen.push(grenzeZeile(k), k.regeln ? regelnBlock(k) : null)
 
     // Schalter "im Cockpit nutzen" fuer jedes Zusatzkonto; das Hauptkonto ist immer an.
     if (k.name !== 'haupt' && k.aktiv !== undefined) {

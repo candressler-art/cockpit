@@ -11,6 +11,7 @@
 // bei jedem Aufruf neu, damit ein frisch angemeldetes Konto ohne
 // Daemon-Neustart auftaucht -- das war ausdruecklich das Ziel.
 
+import { type KontoRegel, freiAb, regelnAktiv, wirksameGrenze } from './kontoRegeln.js'
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import type { LimitStand } from './typen.js'
@@ -64,7 +65,13 @@ export interface KontoMitZustand extends Konto {
   /** Eingestellte Obergrenzen (Anteil 0..1) oder null, wenn keine gesetzt ist. */
   grenze: KontoGrenze | null
   /** Welches Fenster die Obergrenze gerade erreicht hat; das Konto kommt dann nicht in die Wahl. */
-  grenzeErreicht: { fenster: 'fuenf' | 'woche'; bisMs: number | null } | null
+  grenzeErreicht: { fenster: 'fuenf' | 'woche'; bisMs: number | null; regel: boolean } | null
+  /** Zeitregeln "so viel soll uebrig bleiben" (siehe kontoRegeln.ts). */
+  regeln: KontoRegel[]
+  /** Welche Regeln gerade gelten (gleiche Reihenfolge). */
+  regelnAktiv: boolean[]
+  /** Strengste Obergrenze, die gerade gilt (feste Grenze + gueltige Regeln). */
+  grenzeWirksam: KontoGrenze
 }
 
 /** Obergrenze je Konto: bis zu diesem Anteil nimmt das Cockpit das Konto, danach nicht mehr (null = keine Grenze). */
@@ -338,6 +345,9 @@ export interface KontenPersistenz {
   /** Obergrenzen je Konto (siehe KontoGrenze); optional wie die Schalter. */
   kontoGrenzenLesen?(): Record<string, KontoGrenze>
   kontoGrenzeSetzen?(name: string, grenze: KontoGrenze | null): void
+  /** Zeitregeln je Konto (siehe kontoRegeln.ts); optional wie die Grenzen. */
+  kontoRegelnLesen?(): Record<string, KontoRegel[]>
+  kontoRegelnSetzen?(name: string, regeln: KontoRegel[]): void
   kontoNutzungLesen(): Record<string, { stand: LimitStand; quelle: 'usage_api' | 'rate_limit_event' }>
   kontoNutzungSpeichern(name: string, stand: LimitStand, quelle: 'usage_api' | 'rate_limit_event'): void
 }
@@ -398,16 +408,24 @@ export function fensterNachReset(stand: LimitStand, jetzt: number): LimitStand {
 export function grenzeErreicht(
   stand: LimitStand | null,
   grenze: KontoGrenze | null,
-): { fenster: 'fuenf' | 'woche'; bisMs: number | null } | null {
-  if (!stand || !grenze) return null
+  regeln: readonly KontoRegel[] = [],
+  jetzt = Date.now(),
+): { fenster: 'fuenf' | 'woche'; bisMs: number | null; regel: boolean } | null {
+  if (!stand || (!grenze && regeln.length === 0)) return null
+  const g = wirksameGrenze(grenze, regeln, jetzt)
+  const pruefen = (fenster: 'fuenf' | 'woche', anteil: number | null, resetSek: number | null) => {
+    const oben = g[fenster]
+    if (oben === null || anteil === null || anteil < oben) return null
+    const reset = resetSek ? resetSek * 1000 : null
+    // Kommt die Sperre (auch) von einer Regel, kann sie vor dem Reset enden.
+    const fest = grenze?.[fenster] ?? null
+    const regel = fest === null || oben < fest
+    const frei = regel ? freiAb(grenze, regeln, fenster, anteil, jetzt, reset) : null
+    return { fenster, bisMs: frei ?? reset, regel }
+  }
   // Die Woche zuerst: sie haelt am laengsten, und bis zu ihrem Reset ist das Konto sowieso weg.
-  if (grenze.woche !== null && stand.siebenTageAnteil !== null && stand.siebenTageAnteil >= grenze.woche) {
-    return { fenster: 'woche', bisMs: stand.siebenTageResetsAt ? stand.siebenTageResetsAt * 1000 : null }
-  }
-  if (grenze.fuenf !== null && stand.fuenfStundenAnteil !== null && stand.fuenfStundenAnteil >= grenze.fuenf) {
-    return { fenster: 'fuenf', bisMs: stand.fuenfStundenResetsAt ? stand.fuenfStundenResetsAt * 1000 : null }
-  }
-  return null
+  return pruefen('woche', stand.siebenTageAnteil, stand.siebenTageResetsAt)
+    ?? pruefen('fuenf', stand.fuenfStundenAnteil, stand.fuenfStundenResetsAt)
 }
 
 /** Eine Grenze aus der Oberflaeche (Prozent) pruefen: null/leer = keine, sonst 1..100. */
@@ -445,6 +463,7 @@ export class KontenVerwaltung {
   /** Schalter "im Cockpit nutzen" je Konto, nur die ausdruecklich gesetzten. */
   private schalter = new Map<string, boolean>()
   private grenzen = new Map<string, KontoGrenze>()
+  private regeln = new Map<string, KontoRegel[]>()
   private gesperrtBis = new Map<string, number>()
   private sperrGrund = new Map<string, SperrGrund>()
   /**
@@ -489,6 +508,7 @@ export class KontenVerwaltung {
     this.bevorzugt = persistenz.kontoVorzugLesen()
     for (const [name, an] of Object.entries(persistenz.kontoSchalterLesen?.() ?? {})) this.schalter.set(name, an)
     for (const [name, g] of Object.entries(persistenz.kontoGrenzenLesen?.() ?? {})) this.grenzen.set(name, g)
+    for (const [name, r] of Object.entries(persistenz.kontoRegelnLesen?.() ?? {})) this.regeln.set(name, r)
     for (const [name, { stand, quelle }] of Object.entries(persistenz.kontoNutzungLesen())) {
       const gefiltert = nutzungBeimLadenFiltern(stand, jetzt)
       if (gefiltert) this.nutzung.set(name, { stand: gefiltert, quelle })
@@ -520,8 +540,16 @@ export class KontenVerwaltung {
     this.persistenz?.kontoGrenzeSetzen?.(name, leer ? null : grenze)
   }
 
+  /** Zeitregeln eines Kontos ersetzen; eine leere Liste entfernt sie. */
+  regelnSetzen(name: string, regeln: KontoRegel[]): void {
+    if (regeln.length === 0) this.regeln.delete(name)
+    else this.regeln.set(name, regeln)
+    this.persistenz?.kontoRegelnSetzen?.(name, regeln)
+  }
+
   private grenzeDes(name: string, jetzt: number): ReturnType<typeof grenzeErreicht> {
-    return grenzeErreicht(this.nutzungLesen(name, jetzt)?.stand ?? null, this.grenzen.get(name) ?? null)
+    return grenzeErreicht(this.nutzungLesen(name, jetzt)?.stand ?? null, this.grenzen.get(name) ?? null,
+      this.regeln.get(name) ?? [], jetzt)
   }
 
   /** Angemeldet, eingeschaltet und unter der eigenen Obergrenze -- nur diese Konten kommen in die Wahl. */
@@ -633,6 +661,9 @@ export class KontenVerwaltung {
         wochePrognose: n ? wochenPrognose(n.stand.siebenTageAnteil, n.stand.siebenTageResetsAt, jetzt) : null,
         grenze: this.grenzen.get(k.name) ?? null,
         grenzeErreicht: this.grenzeDes(k.name, jetzt),
+        regeln: this.regeln.get(k.name) ?? [],
+        regelnAktiv: regelnAktiv(this.regeln.get(k.name) ?? [], jetzt),
+        grenzeWirksam: wirksameGrenze(this.grenzen.get(k.name) ?? null, this.regeln.get(k.name) ?? [], jetzt),
       }
     })
   }
