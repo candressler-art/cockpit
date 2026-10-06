@@ -552,6 +552,28 @@ export class KontenVerwaltung {
       this.regeln.get(name) ?? [], jetzt)
   }
 
+  /** Hat das Konto gerade seine Grenze (fest oder per Regel) erreicht? */
+  grenzeErreichtFuer(name: string): ReturnType<typeof grenzeErreicht> {
+    return this.grenzeDes(name, Date.now())
+  }
+
+  /** Sind fuer das Konto eine Obergrenze oder Regeln eingestellt? */
+  hatGrenzen(name: string): boolean {
+    return this.grenzen.has(name) || (this.regeln.get(name)?.length ?? 0) > 0
+  }
+
+  /**
+   * Kein Konto waehlbar, und mindestens eines nur wegen seiner Grenze? Dann
+   * Namen der Konten an der Grenze, sonst null (z. B. ohne Anmeldung -- dort
+   * bleibt es beim alten Weg ueber die geerbte Umgebung).
+   */
+  grenzeSperrtAlle(): string | null {
+    const jetzt = Date.now()
+    const an = kontenLesen().filter((k) => k.angemeldet && kontoAktiv(k, this.schalter))
+    const anGrenze = an.filter((k) => this.grenzeDes(k.name, jetzt))
+    return anGrenze.length ? anGrenze.map((k) => k.name).join(', ') : null
+  }
+
   /** Angemeldet, eingeschaltet und unter der eigenen Obergrenze -- nur diese Konten kommen in die Wahl. */
   private waehlbar(konten: readonly Konto[]): Konto[] {
     const jetzt = Date.now()

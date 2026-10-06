@@ -692,6 +692,14 @@ function kontenFrischMessen(): Promise<void> {
 void kontenMessen()
 setInterval(() => void kontenMessen(), 10 * 60_000).unref()
 
+// Grenzen und Regeln hart durchsetzen: jede Minute pruefen (eine Regel kann
+// zur vollen Minute beginnen) und, solange ein Zug auf einem begrenzten Konto
+// laeuft, frisch messen -- die 10-Minuten-Messung waere zu grob.
+setInterval(() => {
+  const messen = supervisor.begrenztesKontoLaeuft() ? kontenFrischMessen() : Promise.resolve()
+  void messen.catch(() => {}).then(() => supervisor.grenzenDurchsetzen())
+}, 60_000).unref()
+
 // Nutzungsguthaben je Konto (nur Anzeige -- einschalten geht nur in
 // claude.ai). Stuendlich; ein Fehlschlag laesst den alten Stand stehen.
 const guthaben = new Map<string, Guthaben>()

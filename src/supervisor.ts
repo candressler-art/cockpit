@@ -150,11 +150,31 @@ function kontoUmgebung(konto: Konto | null): Record<string, string | undefined> 
 /** Pseudo-Lauf fuer alles, was zu keinem Agentenlauf gehoert. */
 export const KONSOLE_LAUF = 'konsole'
 
+type GrenzeTreffer = NonNullable<ReturnType<KontenVerwaltung['grenzeErreichtFuer']>>
+
+/** Ein einzelner Versuch eines laufenden Agenten: auf welchem Konto, und ob eine Grenze ihn abgebrochen hat. */
+interface VersuchLage {
+  runId: string
+  agentId: string
+  konto: string | null
+  abort: AbortController
+  grenze: GrenzeTreffer | null
+}
+
+/** "Woche bis 60 %, frei ab Mo 16:00" -- kurz fuer Protokoll und Fehlertext. */
+function grenzeText(g: GrenzeTreffer): string {
+  const fenster = g.fenster === 'woche' ? 'Woche' : '5 Std.'
+  const bis = g.bisMs
+    ? `, frei ab ${new Date(g.bisMs).toLocaleString('de-DE', { timeZone: process.env.COCKPIT_ZEITZONE ?? 'Europe/Berlin', weekday: 'short', hour: '2-digit', minute: '2-digit' })}`
+    : ''
+  return `${g.regel ? 'Regel' : 'Obergrenze'} ${fenster}${bis}`
+}
+
 export class Supervisor extends EventEmitter {
   private db: CockpitDb
   private seq = new Map<string, number>()
   private agenten = new Map<string, AgentState>()
-  private laufende = new Map<string, { abort: AbortController }>()
+  private laufende = new Map<string, { abort: AbortController; versuch?: VersuchLage }>()
   /** Womit der letzte Zug je Agent lief -- fuer die Modellwahl (Prompt-Cache, modellwahl.ts). Nur im Speicher. */
   private cacheLagen = new Map<string, CacheLage>()
   /**
@@ -198,6 +218,7 @@ export class Supervisor extends EventEmitter {
    */
   nutzungMelden(name: string, stand: LimitStand, quelle: 'usage_api' | 'rate_limit_event'): void {
     this.konten.nutzungMelden(name, stand, quelle)
+    this.grenzenDurchsetzen()
     // Meldet der Poll ein volles Fenster, gleich sperren -- sonst ginge der
     // naechste Agentenstart erst auf dieses Konto, liefe sofort ins Limit
     // und wechselte dann. rate_limit_event braucht das nicht: dort kommt
@@ -210,6 +231,35 @@ export class Supervisor extends EventEmitter {
       // Konto nach dem Fehler per /login neu angemeldet).
       console.log(`[konten] Anmeldesperre fuer '${name}' aufgehoben: Nutzungsabfrage wieder erfolgreich`)
     }
+  }
+
+  /**
+   * Grenzen und Regeln hart durchsetzen: Laeuft ein Zug auf einem Konto, das
+   * seine Grenze gerade erreicht hat (neue Messung oder eine Regel beginnt),
+   * wird der Versuch abgebrochen. agentStarten setzt ihn dann auf einem
+   * anderen Konto fort oder beendet ihn wie ein Limit (waiting_ratelimit).
+   * Aufgerufen bei jeder Messung und jede Minute aus daemon.ts.
+   */
+  grenzenDurchsetzen(): void {
+    for (const l of this.laufende.values()) {
+      const v = l.versuch
+      if (!v?.konto || v.grenze || v.abort.signal.aborted) continue
+      const g = this.konten.grenzeErreichtFuer(v.konto)
+      if (!g) continue
+      v.grenze = g
+      this.melden(v.runId, v.agentId, 'protocol',
+        `Grenze erreicht: ${v.konto} (${grenzeText(g)}), der Zug wird unterbrochen`,
+        { konto: v.konto, grenze: g })
+      // Erst abbrechen, dann die Freigaben aufloesen -- sonst denkt das
+      // Modell nach der Ablehnung noch einen Schritt weiter (wie agentAbbrechen).
+      v.abort.abort()
+      this.freigabenAufloesen(v.runId, v.agentId, 'Kontogrenze erreicht')
+    }
+  }
+
+  /** Laeuft gerade ein Zug auf einem Konto mit Grenze oder Regeln? Dann misst daemon.ts jede Minute. */
+  begrenztesKontoLaeuft(): boolean {
+    return [...this.laufende.values()].some((l) => l.versuch?.konto && this.konten.hatGrenzen(l.versuch.konto))
   }
 
   /** Schalter "im Cockpit nutzen". false bei unbekanntem Konto oder 'haupt'. */
@@ -353,6 +403,16 @@ export class Supervisor extends EventEmitter {
     // bleibt env unten weg -- der Subprozess erbt process.env unveraendert,
     // exakt das Verhalten von vor den Konten.
     let konto = this.konten.waehlen()
+    // Kein Konto frei, weil Grenzen greifen: nicht auf die geerbte Anmeldung
+    // (= Hauptkonto) ausweichen, sonst liefe der Auftrag an der Grenze vorbei.
+    const gesperrtDurchGrenze = konto ? null : this.konten.grenzeSperrtAlle()
+    if (gesperrtDurchGrenze) {
+      this.laufende.delete(k)
+      const text = `Alle Konten an ihrer Grenze oder im Limit (${gesperrtDurchGrenze})`
+      this.melden(o.runId, o.agentId, 'rate_limit', text, { fehler: text, istLimit: true, quelle: 'grenze' })
+      this.endzustandSetzen(o.runId, o.agentId, { status: 'waiting_ratelimit', endedAt: Date.now(), lastError: text })
+      return { ergebnis: null, volltext: '', fehler: text }
+    }
     const versuchteKonten = new Set<string>()
     // Eine feste Id (neuer Chat) darf nur beim ALLERERSTEN Start vergeben
     // werden. Liegt die Sitzung auf dem gewaehlten Konto schon (ein frueherer
@@ -399,9 +459,18 @@ export class Supervisor extends EventEmitter {
         const schonGeantwortet = textBloecke.some(
           (t) => !istKontoFehlertext(t, USAGE_LIMIT_ERROR_PREFIXES),
         )
+        // Eigener Abbruch je Versuch: grenzenDurchsetzen bricht nur diesen
+        // Versuch ab, Cans Stopp (abort) bricht alles ab.
+        const lage: VersuchLage = { runId: o.runId, agentId: o.agentId, konto: konto?.name ?? null, abort: new AbortController(), grenze: null }
+        const durchreichen = () => lage.abort.abort()
+        if (abort.signal.aborted) durchreichen()
+        abort.signal.addEventListener('abort', durchreichen, { once: true })
+        this.laufende.set(k, { abort, versuch: lage })
+        // Schon an der Grenze, bevor es losgeht (Messung kam zwischen Wahl und Start).
+        this.grenzenDurchsetzen()
         const versuch = await this.einzelnerVersuch(
-          o, abort, textBloecke, konto, resumeSessionId, istKontowechsel, schonGeantwortet,
-        )
+          o, lage.abort, textBloecke, konto, resumeSessionId, istKontowechsel, schonGeantwortet, () => lage.grenze,
+        ).finally(() => abort.signal.removeEventListener('abort', durchreichen))
         ergebnis = versuch.ergebnis
         fehler = versuch.fehler
 
@@ -426,7 +495,9 @@ export class Supervisor extends EventEmitter {
         // Grund -- der naechste erfolgreiche Nutzungs-Poll darf ihn wieder
         // aufheben (siehe nutzungMelden), eine Limitsperre nicht.
         const grund = kontoFehlerLabel(fehler ?? '', USAGE_LIMIT_ERROR_PREFIXES) === 'Anmeldefehler' ? 'anmeldung' : 'limit'
-        this.konten.sperren(konto.name, reset, grund)
+        // Eine eigene Grenze ist kein Limit: das Konto faellt ohnehin aus der
+        // Wahl, solange sie greift, und ist danach sofort wieder frei.
+        if (!lage.grenze) this.konten.sperren(konto.name, reset, grund)
         const naechstes = this.konten.waehlen(versuchteKonten)
         if (!naechstes) break // alle Konten gesperrt -- altes Wartevehalten bleibt
 
@@ -443,7 +514,7 @@ export class Supervisor extends EventEmitter {
         istKontowechsel = true
         this.melden(
           o.runId, o.agentId, 'protocol',
-          `Kontowechsel: ${konto.name} nicht nutzbar (${kontoFehlerLabel(fehler ?? '', USAGE_LIMIT_ERROR_PREFIXES)}), weiter mit ${naechstes.name}`,
+          `Kontowechsel: ${konto.name} nicht nutzbar (${lage.grenze ? grenzeText(lage.grenze) : kontoFehlerLabel(fehler ?? '', USAGE_LIMIT_ERROR_PREFIXES)}), weiter mit ${naechstes.name}`,
           { von: konto.name, nach: naechstes.name, gesperrtBis: reset },
         )
         // endedAt/lastError zuruecksetzen -- einzelnerVersuch hat sie gerade
@@ -548,6 +619,7 @@ export class Supervisor extends EventEmitter {
     resumeSessionId: string | undefined,
     istKontowechsel: boolean,
     schonGeantwortet: boolean,
+    grenzeGriff: () => GrenzeTreffer | null = () => null,
   ): Promise<{ ergebnis: string | null; fehler: string | null; istLimit: boolean }> {
     let ergebnis: string | null = null
     let fehler: string | null = null
@@ -685,10 +757,16 @@ export class Supervisor extends EventEmitter {
           }
         }
       }
+      // Von grenzenDurchsetzen abgebrochen, ohne dass der Strom geworfen hat.
+      const g = grenzeGriff()
+      if (g) {
+        istLimit = true
+        fehler = `Grenze erreicht${konto ? ` (${konto.name})` : ''}: ${grenzeText(g)}`
+      }
       if (istLimit) {
         this.melden(
           o.runId, o.agentId, 'rate_limit',
-          `${kontoFehlerLabel(fehler ?? '', USAGE_LIMIT_ERROR_PREFIXES)}${konto ? ` (${konto.name})` : ''}: ${(fehler ?? '').slice(0, 180)}`,
+          g ? (fehler ?? '') : `${kontoFehlerLabel(fehler ?? '', USAGE_LIMIT_ERROR_PREFIXES)}${konto ? ` (${konto.name})` : ''}: ${(fehler ?? '').slice(0, 180)}`,
           { fehler, istLimit, konto: konto?.name ?? null, quelle: 'result' },
         )
       }
@@ -698,17 +776,20 @@ export class Supervisor extends EventEmitter {
         lastError: fehler,
       })
     } catch (e) {
-      const text = e instanceof Error ? e.message : String(e)
+      const g = grenzeGriff()
+      const text = g
+        ? `Grenze erreicht${konto ? ` (${konto.name})` : ''}: ${grenzeText(g)}`
+        : e instanceof Error ? e.message : String(e)
       // Ein Ratenlimit ist kein Absturz, sondern ein Wartezustand -- die
       // Unterscheidung macht den Unterschied zwischen "Lauf ist tot" und
       // "Lauf schlaeft", und genau die war in loop.py die haeufigste Fehldiagnose.
       // Ein Anmeldefehler (istKontoFehlertext) zaehlt hier bewusst genauso --
       // beide sind ein Kontoproblem, kein Auftragsproblem.
-      istLimit = istKontoFehlertext(text, USAGE_LIMIT_ERROR_PREFIXES)
+      istLimit = g !== null || istKontoFehlertext(text, USAGE_LIMIT_ERROR_PREFIXES)
       fehler = text
       this.melden(
         o.runId, o.agentId, istLimit ? 'rate_limit' : 'error',
-        istLimit
+        g ? text : istLimit
           ? `${kontoFehlerLabel(text, USAGE_LIMIT_ERROR_PREFIXES)}${konto ? ` (${konto.name})` : ''}: ${text.slice(0, 180)}`
           : `Fehler: ${text.slice(0, 180)}`,
         { fehler: text, istLimit, konto: konto?.name ?? null },
@@ -766,6 +847,7 @@ export class Supervisor extends EventEmitter {
         this.limitStand = stand
         if (kontoName) this.konten.nutzungMelden(kontoName, stand, 'rate_limit_event')
         this.emit('limit', stand)
+        this.grenzenDurchsetzen()
       }
     }
 

@@ -376,7 +376,7 @@ export function nutzungBauen() {
     const w = k.grenzeWirksam
     const jetzt = [w?.fuenf != null ? `5 Std. bis ${Math.round(w.fuenf * 100)} %` : null, w?.woche != null ? `Woche bis ${Math.round(w.woche * 100)} %` : null].filter(Boolean)
     return h('div.konto-regeln', {},
-      h('div.regeln-kopf', { title: 'Zu den eingestellten Zeiten nimmt das Cockpit das Konto nur, solange mindestens so viel vom Limit übrig ist. Gelten mehrere Regeln, zählt die strengste. Geprüft wird beim Start jedes Auftrags.' },
+      h('div.regeln-kopf', { title: 'Zu den eingestellten Zeiten nimmt das Cockpit das Konto nur, solange mindestens so viel vom Limit übrig ist. Gelten mehrere Regeln, zählt die strengste. Läuft gerade ein Auftrag auf dem Konto, wird er unterbrochen und auf einem anderen Konto fortgesetzt, sonst wartet er.' },
         h('span', {}, 'So viel soll übrig bleiben'), neu),
       liste,
       jetzt.length ? h('div.leise.klein', {}, `Gerade nutzbar: ${jetzt.join(', ')}.`) : null)
@@ -394,7 +394,7 @@ export function nutzungBauen() {
     const speichern = () => grenzeSetzen(k.name, f5.value.trim(), f7.value.trim())
     f5.addEventListener('change', speichern)
     f7.addEventListener('change', speichern)
-    return h('div.konto-grenze', { title: 'Bis zu diesem Anteil nimmt das Cockpit das Konto, danach nicht mehr. Leer = keine Grenze. Geprüft wird beim Start jedes Auftrags.' },
+    return h('div.konto-grenze', { title: 'Bis zu diesem Anteil nimmt das Cockpit das Konto, danach nicht mehr. Leer = keine Grenze. Läuft gerade ein Auftrag auf dem Konto, wird er unterbrochen und auf einem anderen Konto fortgesetzt, sonst wartet er.' },
       h('span', {}, 'Höchstens'),
       f5, h('span.leise', {}, '% / 5 Std.'),
       f7, h('span.leise', {}, '% / Woche'))
@@ -419,7 +419,7 @@ export function nutzungBauen() {
     if (k.angemeldet && !gesperrt && k.grenzeErreicht) marken.push(h('span.marke-klein.warn', {
       title: k.grenzeErreicht.regel
         ? 'Eine Regel will, dass gerade mehr übrig bleibt: das Cockpit nimmt dieses Konto erst wieder, wenn die Regel endet oder das Fenster zurückgesetzt ist.'
-        : 'Eigene Obergrenze erreicht: das Cockpit nimmt dieses Konto nicht mehr, bis das Fenster zurückgesetzt ist.',
+        : 'Eigene Obergrenze erreicht: das Cockpit nimmt dieses Konto nicht mehr und unterbricht laufende Aufträge darauf, bis das Fenster zurückgesetzt ist.',
     }, `${k.grenzeErreicht.regel ? 'Regel greift' : 'Grenze erreicht'}${k.grenzeErreicht.bisMs ? ` bis ${resetText(k.grenzeErreicht.bisMs)}` : ''}`))
     if (k.name === d.naechstesKonto) marken.push(h('span.marke-klein.an', {}, 'als Nächstes'))
     if (k.bevorzugt) marken.push(h('span.marke-klein.stern', {}, 'Vorzug'))
