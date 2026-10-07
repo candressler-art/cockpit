@@ -26,6 +26,7 @@ import { serverBauen } from './ui/server.js'
 import { notizenBauen } from './ui/notizen.js'
 import { terminalBauen } from './ui/terminal.js'
 import { pcBauen } from './ui/pc.js'
+import { modelleBauen } from './ui/modelle.js'
 import { wallpaperSetzen } from './wallpaper.js'
 import { variante } from './variante.js'
 
@@ -63,6 +64,8 @@ const BEREICHE = [
   { id: 'terminal', titel: 'Terminal', symbol: 'terminal', bauen: terminalBauen },
   // Nur, wenn der Daemon einen PC kennt (src/pc.ts).
   ...(variante.pc ? [{ id: 'pc', titel: 'PC', symbol: 'pc', bauen: pcBauen }] : []),
+  // Galerie der Blender-Modelle (Tankstellen-Tycoon), fuer Can und seinen Freund.
+  { id: 'modelle', titel: 'Modelle', symbol: 'modelle', bauen: modelleBauen },
   { id: 'einstellungen', titel: 'Einstellungen', symbol: 'einstellungen', bauen: einstellungenBauen },
 ].filter((b) => !variante.bereicheAus?.includes(b.id))
 const bereichNach = new Map(BEREICHE.map((b) => [b.id, b]))

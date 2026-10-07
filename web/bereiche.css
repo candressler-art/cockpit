@@ -435,3 +435,11 @@ details[open] > summary .a-pfeil { transform: rotate(90deg); }
 .pc-punkt.an { background: var(--gruen, #a6e3a1); }
 .pc-knoepfe { display: flex; gap: 10px; flex-wrap: wrap; }
 .pc-karte p { margin: 0; font-size: 13px; }
+
+/* Modelle: die Galerie fuellt den ganzen Bereich */
+.modelle { display: flex; overflow: hidden; }
+.modelle .bereich-kopf { display: flex; align-items: center; gap: 12px; }
+.modelle-extern { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; color: var(--subtext); font-size: .85rem; text-decoration: none; }
+.modelle-extern:hover { color: var(--akzent); }
+.modelle-rahmen { flex: 1; width: 100%; min-height: 0; border: 0; background: transparent; }
+@media (max-width: 760px) { .modelle .bereich-kopf { display: none; } }
