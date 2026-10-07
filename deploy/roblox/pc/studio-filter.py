@@ -95,6 +95,60 @@ def studio_id_von(studio):
     return None
 
 
+# Ausgaben knapp halten (07.10.): Jede Ausgabe bleibt im Chat und wird bei jedem weiteren Schritt neu
+# gelesen. Konsole: Wiederholungen zusammenfassen, nur die letzten Zeilen. Bilder: verkleinert als JPEG.
+KONSOLE_ZEILEN = 60
+KONSOLE_ZEICHEN = 5000
+BILD_KANTE = 1024
+
+
+def konsole_kuerzen(text):
+    zeilen = text.splitlines()
+    gefaltet = []
+    for z in zeilen:
+        if gefaltet and gefaltet[-1][0] == z:
+            gefaltet[-1][1] += 1
+        else:
+            gefaltet.append([z, 1])
+    aus = [z if n == 1 else f"{z}  (x{n})" for z, n in gefaltet]
+    weg = max(0, len(aus) - KONSOLE_ZEILEN)
+    aus = aus[weg:]
+    t = "\n".join(aus)
+    if len(t) > KONSOLE_ZEICHEN:
+        t = t[-KONSOLE_ZEICHEN:]
+        weg = weg or 1
+    return (f"[gekuerzt: {len(zeilen)} Zeilen, letzte {len(aus)} gezeigt, Wiederholungen zusammengefasst]\n" if weg or
+            len(aus) < len(zeilen) else "") + t
+
+
+def bild_verkleinern(eintrag):
+    try:
+        import base64
+        import io
+        from PIL import Image
+        bild = Image.open(io.BytesIO(base64.b64decode(eintrag["data"])))
+        bild.thumbnail((BILD_KANTE, BILD_KANTE))
+        puffer = io.BytesIO()
+        bild.convert("RGB").save(puffer, "JPEG", quality=72)
+        return {**eintrag, "data": base64.b64encode(puffer.getvalue()).decode(), "mimeType": "image/jpeg"}
+    except Exception:  # noqa: BLE001 -- lieber das Original als gar kein Bild
+        return eintrag
+
+
+def knapp(art, res):
+    inhalt = res.get("content") if isinstance(res, dict) else None
+    if not isinstance(inhalt, list):
+        return res
+    neu = []
+    for c in inhalt:
+        if art == "konsole" and isinstance(c, dict) and c.get("type") == "text":
+            c = {**c, "text": konsole_kuerzen(c.get("text", ""))}
+        elif art == "bild" and isinstance(c, dict) and c.get("type") == "image" and c.get("data"):
+            c = bild_verkleinern(c)
+        neu.append(c)
+    return {**res, "content": neu}
+
+
 def text_von(ergebnis):
     return "".join(c.get("text", "") for c in (ergebnis or {}).get("content", []) if isinstance(c, dict))
 
@@ -165,6 +219,8 @@ class Filter:
             if art == "tools/list" and isinstance(msg.get("result"), dict):
                 werkzeuge = [w for w in msg["result"].get("tools", []) if w.get("name") not in GESPERRT]
                 msg["result"]["tools"] = werkzeuge + [EIGENES]
+            elif art in ("konsole", "bild") and isinstance(msg.get("result"), dict):
+                msg["result"] = knapp(art, msg["result"])
             elif art == "studios" and isinstance(msg.get("result"), dict):
                 plaetze = {o["placeId"] for o in orte_lesen()}
                 try:
@@ -199,6 +255,10 @@ class Filter:
             return self.antworten(mid, ergebnis(
                 "Diese studio_id gehoert zu keinem freigegebenen Spiel. Erst list_roblox_studios aufrufen; "
                 "ist die Liste leer, mit studio_oeffnen das Spiel oeffnen.", True))
+        if name == "get_console_output":
+            self.offen[mid] = "konsole"
+        elif name == "screen_capture":
+            self.offen[mid] = "bild"
         self.an_bruecke(msg)
 
     def oeffnen(self, args):
