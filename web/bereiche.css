@@ -437,7 +437,7 @@ details[open] > summary .a-pfeil { transform: rotate(90deg); }
 .pc-karte p { margin: 0; font-size: 13px; }
 
 /* Modelle: die Galerie fuellt den ganzen Bereich */
-.modelle { display: flex; overflow: hidden; }
+.modelle { overflow: hidden; }  /* angezeigt wird ueber .flaeche.an */
 .modelle .bereich-kopf { display: flex; align-items: center; gap: 12px; }
 .modelle-extern { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; color: var(--subtext); font-size: .85rem; text-decoration: none; }
 .modelle-extern:hover { color: var(--akzent); }
