@@ -90,6 +90,9 @@ export function nutzungBauen() {
   const tagOrt = h('div.tag-detail')
   let bericht = null
   let gewaehlt = null
+  // Zeitraum fuer Herkunft und Modelle -- ueber Neuladen hinweg gemerkt.
+  let zeitraum = localStorage.getItem('cockpit.nutzung.zeitraum') || 'gesamt'
+  const aufteilungOrt = h('div')
   let sichtbar = false
   let uhr = null
 
@@ -126,14 +129,34 @@ export function nutzungBauen() {
         kachel('Serie', `${k.serie} ${k.serie === 1 ? 'Tag' : 'Tage'}`, `längste: ${k.laengsteSerie}`),
         kachel('Aktivster Tag', k.aktivsterTag ? kurzZahl(k.aktivsterTag.tokens) : '–', k.aktivsterTag ? tagKurz(k.aktivsterTag.tag) : 'noch keiner'),
         gesamtKachel(b.gesamt)),
+      // Aeltere Server kennen die Aufteilung noch nicht: dann wie bisher.
+      b.aufteilung && aufteilungOrt,
       karte('Aktivität', `${k.aktiveTage} aktive Tage im letzten Jahr`, raster(b, nachTag), tagOrt),
       karte('Konten', kontenStatus, kontenOrt),
       h('div.zwei-spalten', {},
-        karte('Tageszeit', 'Wann du arbeitest (letztes Jahr)', stundenBild(b.stunden)),
-        karte('Modelle', null, balkenListe(b.modelle.map((m) => ({ name: modellName(m.modell) || m.modell, wert: m.tokens, zusatz: `${zahl(m.antworten)} Antworten` }))))),
+        karte('Tageszeit', 'Wann gearbeitet wird (letztes Jahr)', stundenBild(b.stunden)),
+        b.aufteilung ? null : karte('Modelle', null, balkenListe(b.modelle.map((m) => ({ name: modellName(m.modell) || m.modell, wert: m.tokens, zusatz: `${zahl(m.antworten)} Antworten` }))))),
       karte('Projekte', 'Nach Tokens, letztes Jahr', balkenListe(b.projekte.map((p) => ({ name: p.projekt === '?' ? 'ohne Projekt' : p.projekt, wert: p.tokens, zusatz: `${zahl(p.antworten)} Antworten` })))),
     )
+    if (b.aufteilung) aufteilungZeigen()
     tagZeigen(gewaehlt, nachTag)
+  }
+
+  // --- Herkunft und Modelle -------------------------------------------------------
+  const ZEITRAEUME = [['heute', 'Heute'], ['sieben', '7 Tage'], ['dreissig', '30 Tage'], ['gesamt', 'Gesamt']]
+
+  function aufteilungZeigen() {
+    const b = bericht
+    const a = b.aufteilung[zeitraum] ?? b.aufteilung.gesamt
+    const umschalter = h('div.zeitraum', { role: 'group', 'aria-label': 'Zeitraum' }, ZEITRAEUME.map(([id, text]) =>
+      h('button.zeitraum-knopf', { type: 'button', 'aria-pressed': String(id === zeitraum), onclick: () => {
+        zeitraum = id
+        localStorage.setItem('cockpit.nutzung.zeitraum', id)
+        aufteilungZeigen()
+      } }, text)))
+    leeren(aufteilungOrt,
+      karte('Tokens nach Herkunft', umschalter, herkunft(a, b.quellenNamen ?? {}, b.fremd ?? [])),
+      karte('Modelle: Eingabe zu Ausgabe', 'Eingabe = neu gelesen + aus dem Cache', modellTabelle(a.modelle, b.quellenNamen ?? {})))
   }
 
   // --- Raster -------------------------------------------------------------------
@@ -591,6 +614,61 @@ export function nutzungBauen() {
     },
     verbergen() { sichtbar = false; clearInterval(uhr) },
   }
+}
+
+/** Reihenfolge und Farbe je Quelle -- immer gleich, damit man sie wiedererkennt. */
+const QUELLEN = ['haupt', 'pc', 'roblox', 'loop']
+
+/**
+ * Gesamtzahl, ein gestapelter Balken und die Liste je Quelle. Die Liste
+ * traegt die Zahlen, der Balken nur das Verhaeltnis.
+ */
+function herkunft(a, namen, fremd) {
+  const summe = a.quellen.reduce((s, q) => s + q.tokens, 0)
+  const sortiert = QUELLEN.map((id) => a.quellen.find((q) => q.quelle === id)).filter((q) => q && q.tokens > 0)
+  const anteil = (q) => (summe > 0 ? q.tokens / summe : 0)
+  const prozent = (q) => { const p = anteil(q) * 100; return p > 0 && p < 1 ? '<1 %' : `${Math.round(p)} %` }
+  const hinweise = fremd.filter((f) => !f.ok && f.fehler).map((f) =>
+    h('div.herkunft-hinweis', {}, symbol('info', 14), h('span', {}, `${namen[f.name] ?? f.name} fehlt noch, ${f.fehler}`)))
+  if (!summe) return h('div', {}, h('div.leise.pad', {}, 'In diesem Zeitraum keine Tokens.'), hinweise)
+  return h('div.herkunft', {},
+    h('div.herkunft-summe', {}, h('span.herkunft-zahl', { title: `${zahl(summe)} Tokens` }, kurzZahl(summe)), h('span.leise', {}, 'Tokens')),
+    h('div.herkunft-balken', { role: 'img', 'aria-label': sortiert.map((q) => `${namen[q.quelle] ?? q.quelle} ${prozent(q)}`).join(', ') },
+      sortiert.map((q) => h(`span.q-${q.quelle}`, { style: { flexGrow: String(anteil(q)) }, title: `${namen[q.quelle] ?? q.quelle}: ${kurzZahl(q.tokens)}` }))),
+    h('div.herkunft-liste', {}, sortiert.map((q) => h('div.herkunft-zeile', {
+      title: `Eingabe ${zahl(q.ein)} · Cache geschrieben ${zahl(q.cacheSchreiben)} · Ausgabe ${zahl(q.aus)}\nCache gelesen (nicht mitgezählt) ${zahl(q.cacheLesen)}`,
+    },
+    h(`span.herkunft-punkt.q-${q.quelle}`),
+    h('span.herkunft-name', {}, namen[q.quelle] ?? q.quelle),
+    h('span.herkunft-wert', {}, kurzZahl(q.tokens)),
+    h('span.herkunft-anteil', {}, prozent(q)),
+    h('span.herkunft-antworten', {}, `${zahl(q.antworten)} Antworten`)))),
+    hinweise)
+}
+
+/** "208 : 1" -- wie viele Eingabe-Tokens auf ein Ausgabe-Token kommen. */
+export function verhaeltnis(ein, aus) {
+  if (!aus) return ein ? '∞' : '–'
+  const r = ein / aus
+  return `${r >= 10 ? Math.round(r).toLocaleString('de-DE') : r.toLocaleString('de-DE', { maximumFractionDigits: 1 })} : 1`
+}
+
+function modellTabelle(modelle, namen) {
+  if (!modelle.length) return h('div.leise.pad', {}, 'In diesem Zeitraum keine Antworten.')
+  const kopf = h('div.mt-zeile.mt-kopf', {},
+    h('span', {}, 'Modell'), h('span', {}, 'Eingabe'), h('span', {}, 'davon Cache'), h('span', {}, 'Ausgabe'), h('span', {}, 'Ein : Aus'))
+  return h('div.modell-tabelle', { role: 'table', 'aria-label': 'Eingabe und Ausgabe je Modell' }, kopf, modelle.map((m) => {
+    const ein = m.ein + m.cacheSchreiben + m.cacheLesen
+    const cache = ein ? Math.round((m.cacheLesen / ein) * 100) : 0
+    const herkunftText = QUELLEN.filter((q) => m.quellen.includes(q)).map((q) => namen[q] ?? q).join(', ')
+    return h('div.mt-zeile', { role: 'row', title: `Neu: Eingabe ${zahl(m.ein)} + Cache geschrieben ${zahl(m.cacheSchreiben)}\nAus dem Cache gelesen: ${zahl(m.cacheLesen)}\nAusgabe: ${zahl(m.aus)}` },
+      h('span.mt-modell', { role: 'cell' }, h('strong', {}, modellName(m.modell) || m.modell),
+        h('span.leise', {}, `${zahl(m.antworten)} Antworten · ${herkunftText}`)),
+      h('span.mt-zahl', { role: 'cell', 'data-titel': 'Eingabe' }, kurzZahl(ein)),
+      h('span.mt-zahl.leise', { role: 'cell', 'data-titel': 'Cache' }, `${cache} %`),
+      h('span.mt-zahl', { role: 'cell', 'data-titel': 'Ausgabe' }, kurzZahl(m.aus)),
+      h('span.mt-zahl.mt-verh', { role: 'cell', 'data-titel': 'Ein : Aus' }, verhaeltnis(ein, m.aus)))
+  }))
 }
 
 /** Alles seit Beginn der Aufzeichnung -- die Aufschluesselung steht im Tooltip. */

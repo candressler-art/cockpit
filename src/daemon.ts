@@ -784,8 +784,16 @@ const nutzungLokal = (): Promise<unknown> =>
  */
 async function nutzungPuls(): Promise<void> {
   await nutzungLokal()
+  // Laeuft der Abruf gerade (Start und erster Seitenaufruf), auf ihn warten statt ohne Stand zu antworten.
+  if (fremdLaeuft) return fremdLaeuft
   if (VARIANTE.id !== 'haupt' || Date.now() - fremdZuletzt < 30_000) return
   fremdZuletzt = Date.now()
+  fremdLaeuft = fremdAbholen().finally(() => { fremdLaeuft = null })
+  return fremdLaeuft
+}
+let fremdLaeuft: Promise<void> | null = null
+
+async function fremdAbholen(): Promise<void> {
   for (const c of FREMDE_COCKPITS) {
     const st = fremdStatus.get(c.name)!
     try {

@@ -3,8 +3,11 @@
 // Lesen, Auswertung und Kennzahlen. Gegen dist/.
 import {
   zeileAuswerten, tagVon, stundeVon, nutzungIndizieren, nutzungLesen, kennzahlenBerechnen, tagVerschieben, tagSitzungen,
-  rueckblickGruppieren, nutzungGesamt,
+  rueckblickGruppieren, nutzungGesamt, aufteilungLesen, zeilenExportieren, zeilenUebernehmen, loopSitzungenMarkieren,
+  fremdStand,
 } from '../dist/nutzung.js'
+import { fremdeCockpitsLesen, quelleUmdeuten, fremdHolen, loopIdsLesen } from '../dist/nutzungFremd.js'
+import { DatabaseSync } from 'node:sqlite'
 import { mkdtempSync, mkdirSync, writeFileSync, appendFileSync, symlinkSync, copyFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -186,6 +189,94 @@ rmSync(wurzel, { recursive: true, force: true })
   pruefe('Gesamt: Cache-Lesen getrennt', g.cacheLesen === 1004)
   pruefe('Gesamt: seit erstem Tag', g.seit === '2026-01-02')
   pruefe('Gesamt: Antworten und Sitzungen', g.antworten === 2 && g.sitzungen === 2)
+  rmSync(dir, { recursive: true, force: true })
+}
+
+// --- Quellen, Austausch zwischen Cockpits, Loops ------------------------------
+{
+  const dir = mkdtempSync(join(tmpdir(), 'nutzung-quellen-'))
+  const db = join(dir, 'n.db')
+  const z = (id, sitzung, modell, u, extra = {}) => JSON.stringify({ type: 'assistant', timestamp: '2026-10-06T10:00:00Z',
+    requestId: 'r' + id, sessionId: sitzung, cwd: '/x/p', message: { id, model: modell, usage: u }, ...extra })
+  const u = (ein, aus, cs, cl) => ({ input_tokens: ein, output_tokens: aus, cache_creation_input_tokens: cs, cache_read_input_tokens: cl })
+  mkdirSync(join(dir, 'haupt', '-home-claude'), { recursive: true })
+  mkdirSync(join(dir, 'pc', '-home-x-projekte-autopilot'), { recursive: true })
+  mkdirSync(join(dir, 'pc', '-home-x-spiel'), { recursive: true })
+  writeFileSync(join(dir, 'haupt', '-home-claude', 'a.jsonl'), [
+    z('h1', 'sa', 'claude-opus-5-5', u(1, 10, 100, 1000)),
+    z('h2', 'sb', 'claude-sonnet-5-5', u(2, 20, 200, 2000), { entrypoint: 'sdk-cli' }),
+  ].join('\n') + '\n')
+  writeFileSync(join(dir, 'pc', '-home-x-projekte-autopilot', 'b.jsonl'), z('p1', 'sc', 'claude-opus-5-5', u(3, 30, 300, 3000)) + '\n')
+  writeFileSync(join(dir, 'pc', '-home-x-spiel', 'c.jsonl'), z('p2', 'sd', 'claude-opus-5-5', u(4, 40, 400, 4000)) + '\n')
+  await nutzungIndizieren(db, [{ pfad: join(dir, 'pc'), quelle: 'pc' }, { pfad: join(dir, 'haupt'), quelle: 'haupt' }])
+  const a = aufteilungLesen(db, null)
+  const q = Object.fromEntries(a.quellen.map((x) => [x.quelle, x]))
+  pruefe('Quelle: haupt', q.haupt?.antworten === 1 && q.haupt.aus === 10)
+  pruefe('Quelle: sdk-cli und Autopilot-Ordner sind Loops', q.loop?.antworten === 2 && q.loop.aus === 50)
+  pruefe('Quelle: PC', q.pc?.antworten === 1 && q.pc.aus === 40)
+  const opus = a.modelle.find((m) => m.modell === 'claude-opus-5-5')
+  pruefe('Modell: Eingabe, Cache und Ausgabe getrennt', opus?.ein === 8 && opus.cacheSchreiben === 800 && opus.cacheLesen === 8000 && opus.aus === 80)
+  pruefe('Modell: Quellen dabei', opus?.quellen.sort().join(',') === 'haupt,loop,pc')
+  pruefe('Aufteilung ab Tag filtert', aufteilungLesen(db, '2026-10-07').quellen.length === 0)
+
+  // Altbestand ohne Spalte quelle: wird nachgeruestet und beim naechsten Lesen gefuellt.
+  const alt = join(dir, 'alt.db')
+  const h = new DatabaseSync(alt)
+  h.exec(`CREATE TABLE nutzung_dateien (pfad TEXT PRIMARY KEY, versatz INTEGER NOT NULL, mtime INTEGER NOT NULL);
+    CREATE TABLE nutzung (schluessel TEXT PRIMARY KEY, tag TEXT NOT NULL, ts INTEGER NOT NULL, stunde INTEGER NOT NULL,
+      modell TEXT, projekt TEXT, sitzung TEXT, ein INTEGER NOT NULL, aus INTEGER NOT NULL, cache_schreiben INTEGER NOT NULL, cache_lesen INTEGER NOT NULL);
+    INSERT INTO nutzung VALUES ('h1:rh1','2026-10-06',1,12,'claude-opus-5-5','p','sa',1,10,100,1000);
+    INSERT INTO nutzung VALUES ('weg:x','2026-10-05',1,12,'claude-opus-5-5','p','sz',1,1,1,1);
+    INSERT INTO nutzung_dateien VALUES ('${join(dir, 'haupt', '-home-claude', 'a.jsonl')}', 999999, 1);`)
+  h.close()
+  await nutzungIndizieren(alt, [{ pfad: join(dir, 'pc'), quelle: 'pc' }, { pfad: join(dir, 'haupt'), quelle: 'haupt' }])
+  const qa = Object.fromEntries(aufteilungLesen(alt, null).quellen.map((x) => [x.quelle, x.antworten]))
+  pruefe('Nachruesten: alte Zeilen bekommen ihre Quelle, ohne Datei zaehlt haupt', qa.haupt === 2 && qa.loop === 2 && qa.pc === 1)
+  pruefe('Nachruesten: Summen unveraendert (keine Doppelten)', nutzungGesamt(alt).antworten === 5)
+
+  // Export -> Import: "haupt" dort ist "roblox" hier, Loops bleiben Loops.
+  const exp = zeilenExportieren(db, 0, '', 2)
+  pruefe('Export: seitenweise mit mehr', exp.zeilen.length === 2 && exp.mehr === true)
+  const rest = zeilenExportieren(db, exp.zeilen[1].ts, exp.zeilen[1].schluessel, 10)
+  pruefe('Export: zweite Seite ohne Doppelte', rest.zeilen.length === 2 && rest.mehr === false &&
+    new Set([...exp.zeilen, ...rest.zeilen].map((x) => x.schluessel)).size === 4)
+  const ziel = join(dir, 'ziel.db')
+  const n = zeilenUebernehmen(ziel, [...exp.zeilen, ...rest.zeilen, { kaputt: true }, { schluessel: 'x', ts: 'nein' }], quelleUmdeuten)
+  const qz = Object.fromEntries(aufteilungLesen(ziel, null).quellen.map((x) => [x.quelle, x.antworten]))
+  pruefe('Import: 4 uebernommen, Ungueltiges verworfen', n === 4)
+  pruefe('Import: haupt -> roblox, loop bleibt, pc bleibt', qz.roblox === 1 && qz.loop === 2 && qz.pc === 1)
+  pruefe('Import: zweimal = nichts neu', zeilenUebernehmen(ziel, exp.zeilen, quelleUmdeuten) === 0)
+
+  // Loop-Chats nachtraeglich markieren (Roblox-Sitzung sa wird Loop).
+  pruefe('Loop markieren', loopSitzungenMarkieren(ziel, ['sa', 'unbekannt']) === 1 &&
+    !aufteilungLesen(ziel, null).quellen.some((x) => x.quelle === 'roblox'))
+
+  // Abholen ueber HTTP (fetch untergeschoben), Stand wird gemerkt.
+  const ziel2 = join(dir, 'ziel2.db')
+  const anfragen = []
+  const abruf = async (url) => {
+    anfragen.push(url)
+    const p = new URL(url).searchParams
+    const d = zeilenExportieren(db, Number(p.get('seit')), p.get('nach') ?? '', Number(p.get('grenze')) > 3 ? 3 : Number(p.get('grenze')))
+    return { ok: true, status: 200, json: async () => d }
+  }
+  const neu = await fremdHolen(ziel2, { name: 'roblox', url: 'http://x' }, abruf)
+  pruefe('Abholen: alle Seiten, alles da', neu === 4 && anfragen.length === 2)
+  pruefe('Abholen: Stand gemerkt', fremdStand(ziel2, 'roblox') === Date.parse('2026-10-06T10:00:00Z'))
+  let fehler = null
+  try { await fremdHolen(ziel2, { name: 'roblox', url: 'http://x' }, async () => ({ ok: false, status: 404 })) } catch (e) { fehler = e.message }
+  pruefe('Abholen: altes Cockpit -> verstaendlicher Fehler', /Neustart/.test(fehler ?? ''))
+
+  pruefe('Fremde Cockpits: Vorgabe Roblox', fremdeCockpitsLesen(undefined)[0]?.url === 'http://127.0.0.1:8766')
+  pruefe('Fremde Cockpits: leer = keins, Unsinn verworfen', fremdeCockpitsLesen('').length === 0 && fremdeCockpitsLesen('a=ftp://x,B C=http://y').length === 0)
+
+  mkdirSync(join(dir, 'loop'))
+  writeFileSync(join(dir, 'loop', 'abend.json'), JSON.stringify({ chat: '4d1266e9-f300-4675-887c-80865b06464b', erklaert: ['35cd66e5-06f6-4d61-be7c-8b5f72dca039'] }))
+  writeFileSync(join(dir, 'loop', 'chats.txt'), 'aa2d8506-4899-4be3-bd8b-f7979aef8bc1\n')
+  writeFileSync(join(dir, 'loop', 'abend.log'), 'e305b706-f134-4f26-ad50-c8dd2673afb0')
+  const ids = await loopIdsLesen(join(dir, 'loop'))
+  pruefe('Loop-Ids aus json und chats.txt, nicht aus Logs', ids.length === 3 && !ids.includes('e305b706-f134-4f26-ad50-c8dd2673afb0'))
+  pruefe('Loop-Ids: fehlender Ordner -> leer', (await loopIdsLesen(join(dir, 'gibtsnicht'))).length === 0)
   rmSync(dir, { recursive: true, force: true })
 }
 

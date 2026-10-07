@@ -26,7 +26,9 @@ export interface FremdesCockpit {
  */
 export function fremdeCockpitsLesen(roh: string | undefined): FremdesCockpit[] {
   return (roh ?? 'roblox=http://127.0.0.1:8766').split(',').map((t) => t.trim()).filter(Boolean).flatMap((t) => {
-    const [name, url] = t.split('=', 2).map((x) => x?.trim() ?? '')
+    const i = t.indexOf('=')
+    const name = t.slice(0, i).trim()
+    const url = t.slice(i + 1).trim()
     return /^[a-z0-9-]{1,30}$/.test(name) && /^https?:\/\/[^\s]+$/.test(url) ? [{ name, url: url.replace(/\/+$/, '') }] : []
   })
 }
@@ -63,7 +65,7 @@ export async function fremdHolen(dbPfad: string, c: FremdesCockpit, abruf: typeo
   for (let seite = 0; seite < SEITEN_MAX; seite++) {
     const url = `${c.url}/api/nutzung/zeilen?seit=${seit}&grenze=${SEITE}${nach ? `&nach=${encodeURIComponent(nach)}` : ''}`
     const r = await abruf(url, { signal: AbortSignal.timeout(20_000) })
-    if (!r.ok) throw new Error(r.status === 404 ? 'kennt /api/nutzung/zeilen noch nicht (Neustart fehlt)' : `HTTP ${r.status}`)
+    if (!r.ok) throw new Error(r.status === 404 ? 'zählt erst nach seinem nächsten Neustart mit' : `HTTP ${r.status}`)
     const d = (await r.json()) as { zeilen?: unknown; mehr?: unknown }
     if (!Array.isArray(d.zeilen)) throw new Error('Antwort ohne zeilen')
     neu += zeilenUebernehmen(dbPfad, d.zeilen, quelleUmdeuten)

@@ -195,6 +195,42 @@ a.tag-eintrag:hover { background: var(--surface0); }
 .stunden-achse { position: absolute; left: 0; right: 0; bottom: 0; height: 16px; font-size: 11px; color: var(--overlay); }
 .stunden-achse span { position: absolute; transform: translateX(-50%); }
 
+/* Herkunft der Tokens und Modelle (Nutzung) */
+.zeitraum { display: inline-flex; margin-left: auto; border: 1px solid var(--surface1); border-radius: 8px; overflow: hidden; }
+.zeitraum-knopf { font: 500 12px/1 var(--mono); color: var(--subtext); background: none; border: 0; padding: 7px 10px; cursor: pointer; }
+.zeitraum-knopf + .zeitraum-knopf { border-left: 1px solid var(--surface1); }
+.zeitraum-knopf:hover { color: var(--text); background: var(--surface0); }
+.zeitraum-knopf[aria-pressed="true"] { color: var(--auf-akzent); background: var(--akzent); }
+.q-haupt { --q: var(--akzent); } .q-pc { --q: var(--akzent-2); } .q-roblox { --q: var(--gelb); } .q-loop { --q: var(--lila); }
+.herkunft-summe { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
+.herkunft-zahl { color: var(--akzent-hell); font-size: 34px; line-height: 1.1; font-weight: 700; font-stretch: 80%; font-variant-numeric: tabular-nums; }
+.herkunft-balken { display: flex; gap: 2px; height: 12px; border-radius: 6px; overflow: hidden; margin-bottom: 12px; background: var(--surface1); }
+.herkunft-balken > span { display: block; min-width: 3px; background: var(--q); }
+.herkunft-liste { display: flex; flex-direction: column; gap: 6px; }
+.herkunft-zeile { display: grid; grid-template-columns: 10px minmax(0, 1fr) 76px 46px 130px; gap: 10px; align-items: center; font-size: 13.5px; }
+.herkunft-punkt { width: 10px; height: 10px; border-radius: 3px; background: var(--q); }
+.herkunft-wert, .herkunft-anteil, .herkunft-antworten { text-align: right; font: 12.5px var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.herkunft-wert { color: var(--text); }
+.herkunft-anteil, .herkunft-antworten { color: var(--overlay); }
+.herkunft-hinweis { display: flex; gap: 8px; align-items: center; margin-top: 10px; font-size: 12.5px; color: var(--gelb); }
+.modell-tabelle { display: flex; flex-direction: column; }
+.mt-zeile { display: grid; grid-template-columns: minmax(0, 1fr) 84px 84px 84px 84px; gap: 10px; align-items: center; padding: 8px 0; border-top: 1px solid var(--surface0); }
+.mt-kopf { border-top: 0; padding-top: 0; font: 500 11.5px var(--mono); color: var(--overlay); text-transform: lowercase; }
+.mt-kopf > span:not(:first-child), .mt-zahl { text-align: right; }
+.mt-modell { display: flex; flex-direction: column; min-width: 0; }
+.mt-modell .leise { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mt-zahl { font: 13px var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mt-verh { color: var(--akzent-hell); }
+@media (max-width: 760px) {
+  .herkunft-zeile { grid-template-columns: 10px minmax(0, 1fr) 82px 40px; gap: 8px; }
+  .herkunft-antworten { display: none; }
+  .mt-kopf { display: none; }
+  .mt-zeile { grid-template-columns: repeat(4, minmax(0, 1fr)); row-gap: 6px; }
+  .mt-modell { grid-column: 1 / -1; }
+  .mt-zahl { text-align: left; font-size: 12px; }
+  .mt-zahl::before { content: attr(data-titel); display: block; font-size: 10.5px; color: var(--overlay); text-transform: lowercase; }
+}
+
 .balken-liste { display: flex; flex-direction: column; gap: 6px; }
 .balken-zeile { display: grid; grid-template-columns: minmax(80px, 38%) 1fr 64px; gap: 10px; align-items: center; font-size: 13px; }
 .balken-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
