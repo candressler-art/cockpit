@@ -52,8 +52,10 @@ import { EinstellungsSpeicher, auswahlListen, teamAuftragWerte, auftragTitel } f
 import { ordnerAuflisten, OrdnerFehler } from './verzeichnisse.js'
 import {
   nutzungIndizieren, nutzungLesen, kennzahlenBerechnen, tagVerschieben, tagVon, tagSitzungen,
-  rueckblickGruppieren, nutzungGesamt, type SitzungsArt,
+  rueckblickGruppieren, nutzungGesamt, aufteilungLesen, zeilenExportieren, type SitzungsArt, type NutzungsWurzel,
+  type Quelle,
 } from './nutzung.js'
+import { fremdeCockpitsLesen, fremdHolen, loopsMarkieren, type FremdStatus } from './nutzungFremd.js'
 import { kontenLesen, grenzeProzentLesen } from './konten.js'
 import { regelnLesen } from './kontoRegeln.js'
 import { VARIANTE, bereichAn, cwdInWurzel, varianteFuerOberflaeche } from './variante.js'
@@ -756,18 +758,60 @@ setInterval(
  * nutzungIndizieren ueber den echten Pfad. Bei jedem Lauf neu, damit ein
  * spaeter angelegtes Konto mitgezaehlt wird.
  */
-function nutzungsWurzeln(): string[] {
-  const w = new Set<string>([
-    process.env.COCKPIT_SESSIONS ?? '/var/lib/cockpit/sessions-desktop',
-    join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude'), 'projects'),
-  ])
-  for (const k of kontenLesen()) w.add(join(k.configDir, 'projects'))
-  return [...w]
+function nutzungsWurzeln(): NutzungsWurzel[] {
+  const w: NutzungsWurzel[] = [
+    { pfad: process.env.COCKPIT_SESSIONS ?? '/var/lib/cockpit/sessions-desktop', quelle: 'pc' },
+    { pfad: join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude'), 'projects'), quelle: 'haupt' },
+  ]
+  for (const k of kontenLesen()) w.push({ pfad: join(k.configDir, 'projects'), quelle: 'haupt' })
+  return w
 }
-const nutzungPuls = (): Promise<unknown> =>
+
+/** Andere Cockpits, deren Tokens hier mitzaehlen -- nur im Haupt-Cockpit. */
+const FREMDE_COCKPITS = VARIANTE.id === 'haupt' ? fremdeCockpitsLesen(process.env.COCKPIT_NUTZUNG_FREMD) : []
+/** Ordner des Loop-Treibers: welche Chats im Roblox-Cockpit Loops sind. */
+const LOOP_ORDNER = process.env.COCKPIT_LOOP_DIR ?? join(homedir(), 'roblox-loop')
+const fremdStatus = new Map<string, FremdStatus>(FREMDE_COCKPITS.map((c) => [c.name, { name: c.name, ok: false, abgeholtAm: null, fehler: null }]))
+let fremdZuletzt = 0
+
+const nutzungLokal = (): Promise<unknown> =>
   nutzungIndizieren(DB_PFAD, nutzungsWurzeln()).catch((e) => console.warn('[nutzung] Index fehlgeschlagen:', String(e)))
+
+/**
+ * Eigener Index, dann (hoechstens alle 30 s) die anderen Cockpits und die
+ * Loop-Chats. Ein anderes Cockpit, das
+ * gerade nicht antwortet, haelt nichts auf: es steht nur im Status.
+ */
+async function nutzungPuls(): Promise<void> {
+  await nutzungLokal()
+  if (VARIANTE.id !== 'haupt' || Date.now() - fremdZuletzt < 30_000) return
+  fremdZuletzt = Date.now()
+  for (const c of FREMDE_COCKPITS) {
+    const st = fremdStatus.get(c.name)!
+    try {
+      await fremdHolen(DB_PFAD, c)
+      Object.assign(st, { ok: true, abgeholtAm: Date.now(), fehler: null })
+    } catch (e) {
+      if (st.ok || st.fehler === null) console.warn(`[nutzung] ${c.name} nicht abgeholt:`, String(e))
+      Object.assign(st, { ok: false, fehler: e instanceof Error ? e.message : String(e) })
+    }
+  }
+  try {
+    await loopsMarkieren(DB_PFAD, LOOP_ORDNER)
+  } catch (e) {
+    console.warn('[nutzung] Zuordnung fehlgeschlagen:', String(e))
+  }
+}
 void nutzungPuls()
 setInterval(() => void nutzungPuls(), 10 * 60_000).unref()
+
+/** Wie die Quellen in der Oberflaeche heissen -- "haupt" ist immer dieses Cockpit. */
+const QUELLEN_NAMEN: Record<Quelle, string> = {
+  haupt: VARIANTE.id === 'haupt' ? 'Haupt-Cockpit' : VARIANTE.name,
+  pc: 'PC',
+  roblox: 'Roblox-Cockpit',
+  loop: 'Loops',
+}
 
 // Anhaenge nach ANHANG_TAGE wegraeumen -- beim Start und einmal am Tag.
 const anhaengeAufraeumen = (): void => {
@@ -1515,17 +1559,51 @@ const server = createServer(async (req, res) => {
       await nutzungPuls()
       const heute = tagVon(Date.now())
       const bericht = nutzungLesen(DB_PFAD, tagVerschieben(heute, -(tage - 1)))
-      return json(200, { ...bericht, kennzahlen: kennzahlenBerechnen(bericht.tage, bericht.heute), gesamt: nutzungGesamt(DB_PFAD) })
+      return json(200, {
+        ...bericht,
+        kennzahlen: kennzahlenBerechnen(bericht.tage, bericht.heute),
+        gesamt: nutzungGesamt(DB_PFAD),
+        // Woher die Tokens kommen und je Modell Eingabe zu Ausgabe, fuer die
+        // Zeitraeume der Kacheln (ein Umschalter, kein neuer Abruf).
+        aufteilung: {
+          heute: aufteilungLesen(DB_PFAD, heute),
+          sieben: aufteilungLesen(DB_PFAD, tagVerschieben(heute, -6)),
+          dreissig: aufteilungLesen(DB_PFAD, tagVerschieben(heute, -29)),
+          gesamt: aufteilungLesen(DB_PFAD, null),
+        },
+        quellenNamen: QUELLEN_NAMEN,
+        fremd: [...fremdStatus.values()],
+      })
+    }
+
+    if (pfad === '/api/nutzung/zeilen' && req.method === 'GET') {
+      // Fuer das Haupt-Cockpit: alle gezaehlten Antworten dieses Cockpits,
+      // seitenweise (nutzungFremd.ts). Nur Zahlen, Modell, Projekt- und
+      // Sitzungsname -- kein Inhalt.
+      const seit = zahlLesen(url.searchParams.get('seit'), 'seit', { min: 0, ganzzahlig: true })
+      if (seit.fehler) return json(400, { fehler: seit.fehler })
+      const grenze = zahlLesen(url.searchParams.get('grenze'), 'grenze', { min: 1, ganzzahlig: true })
+      if (grenze.fehler) return json(400, { fehler: grenze.fehler })
+      const nach = url.searchParams.get('nach') ?? ''
+      if (nach.length > 300) return json(400, { fehler: 'nach: zu lang' })
+      await nutzungLokal()
+      return json(200, zeilenExportieren(DB_PFAD, seit.zahl ?? 0, nach, Math.min(grenze.zahl ?? 5000, 10_000)))
     }
 
     if (pfad === '/api/nutzung/tag' && req.method === 'GET') {
       // Rueckblick: was war an diesem Tag los, je Chat.
       const tag = url.searchParams.get('tag') ?? ''
       if (!/^\d{4}-\d{2}-\d{2}$/.test(tag)) return json(400, { fehler: 'tag: JJJJ-MM-TT' })
-      const eintraege = rueckblickGruppieren(tagSitzungen(DB_PFAD, tag), (sitzung): SitzungsArt => {
+      const sitzungen = tagSitzungen(DB_PFAD, tag)
+      const quelleJe = new Map(sitzungen.map((x) => [x.sitzung, x.quelle]))
+      const eintraege = rueckblickGruppieren(sitzungen, (sitzung): SitzungsArt => {
         const b = sitzungBeschreiben(DB_PFAD, sitzung)
         const projekt = b?.projekt ?? null
         if (b?.chat) return { art: 'chat', chatId: b.chat.id, titel: b.chat.titel, projekt }
+        // Aus dem Roblox-Cockpit: hier gibt es keinen Chat dazu.
+        const quelle = quelleJe.get(sitzung)
+        if (!b && quelle === 'roblox') return { art: 'fremd', titel: QUELLEN_NAMEN.roblox }
+        if (!b && quelle === 'loop') return { art: 'fremd', titel: 'Loop im Roblox-Cockpit' }
         // sdk-cli ist `claude -p` -- die Nacht- und Umbau-Loops.
         if (b?.entrypoint === 'sdk-cli') return { art: 'loop', titel: b.titel, projekt }
         const lauf = db.laufFuerSitzung(sitzung)

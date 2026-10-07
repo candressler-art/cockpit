@@ -20,6 +20,10 @@
 // Eingelesen wird inkrementell: je Datei steht der Byte-Versatz der letzten
 // vollstaendigen Zeile in nutzung_dateien. Sitzungsdateien wachsen nur am
 // Ende; eine kuerzer gewordene Datei wird von vorn gelesen.
+//
+// Jede Antwort traegt ihre Quelle (Spalte quelle): haupt = dieses Cockpit,
+// pc = Desktop-Spiegel, roblox = das Roblox-Cockpit (vom Haupt-Cockpit
+// abgeholt, nutzungFremd.ts), loop = automatische Loops.
 
 import { DatabaseSync } from 'node:sqlite'
 import { open, readdir, realpath, stat } from 'node:fs/promises'
@@ -43,10 +47,37 @@ CREATE TABLE IF NOT EXISTS nutzung (
   ein             INTEGER NOT NULL,
   aus             INTEGER NOT NULL,
   cache_schreiben INTEGER NOT NULL,
-  cache_lesen     INTEGER NOT NULL
+  cache_lesen     INTEGER NOT NULL,
+  quelle          TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_nutzung_tag ON nutzung (tag);
+CREATE TABLE IF NOT EXISTS nutzung_fremd (
+  name  TEXT PRIMARY KEY,
+  stand INTEGER NOT NULL
+);
 `
+
+export const QUELLEN = ['haupt', 'pc', 'roblox', 'loop'] as const
+export type Quelle = (typeof QUELLEN)[number]
+
+/** Wo Sitzungsdateien liegen und wem sie zugerechnet werden. */
+export interface NutzungsWurzel {
+  pfad: string
+  quelle: Quelle
+  /** Ordnerebenen unter der Wurzel (Projekt/Sitzung/subagents = 4). */
+  tiefe?: number
+}
+
+/**
+ * Projektordner, in denen nur automatische Loops laufen: der Autopilot von
+ * Steal a Robot und die alte Nachtschicht auf dem PC. Am Ordner, nicht am cwd
+ * jeder Zeile -- ein Chat, der per cd kurz in ~/roblox-loop schaut, ist kein Loop.
+ */
+const LOOP_ORDNER = /-projekte-(autopilot|loop)$/
+
+/** Quelle fuer Zeilen aus der Zeit vor der Spalte (Dateien, die die CLI schon geloescht hat). */
+const QUELLE_SQL = "COALESCE(quelle, 'haupt')"
+
 
 /** Zeitzone fuer die Tagesgrenze -- Cans Tag endet um Mitternacht in Berlin, nicht in UTC. */
 const ZEITZONE = process.env.COCKPIT_ZEITZONE ?? 'Europe/Berlin'
@@ -84,6 +115,8 @@ export interface NutzungsZeile {
   aus: number
   cacheSchreiben: number
   cacheLesen: number
+  /** `claude -p` (entrypoint sdk-cli): die Nacht- und Umbau-Loops. */
+  loop: boolean
 }
 
 const zahl = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.round(v) : 0)
@@ -125,6 +158,7 @@ export function zeileAuswerten(roh: string): NutzungsZeile | null {
     aus: zahl(u.output_tokens),
     cacheSchreiben: zahl(u.cache_creation_input_tokens),
     cacheLesen: zahl(u.cache_read_input_tokens),
+    loop: d.entrypoint === 'sdk-cli',
   }
 }
 
@@ -138,6 +172,13 @@ function handle(pfad: string): DatabaseSync {
     dbPfadOffen = pfad
     db.exec('PRAGMA journal_mode = WAL')
     db.exec(SCHEMA)
+    const spalten = (db.prepare('PRAGMA table_info(nutzung)').all() as { name: string }[]).map((c) => c.name)
+    if (!spalten.includes('quelle')) {
+      db.exec('ALTER TABLE nutzung ADD COLUMN quelle TEXT')
+      // Alles einmal neu lesen: erst dabei erfahren die vorhandenen Zeilen
+      // ihre Quelle (die Entdoppelung haelt die Summen gleich).
+      db.exec('DELETE FROM nutzung_dateien')
+    }
   }
   return db
 }
@@ -183,7 +224,7 @@ async function neueZeilenLesen(pfad: string, versatz: number, groesse: number): 
  * dieselben Dateien zeigen (das projects/ eines Zusatzkontos ist ein Link auf
  * das des Hauptkontos) -- entdoppelt wird ueber den echten Pfad.
  */
-export function nutzungIndizieren(dbPfad: string, wurzeln: string[]): Promise<{ dateien: number; neu: number }> {
+export function nutzungIndizieren(dbPfad: string, wurzeln: (string | NutzungsWurzel)[]): Promise<{ dateien: number; neu: number }> {
   // Laeuft schon ein Durchgang (Start und Zeitgeber ueberlappen beim ersten
   // Mal, der erste liest Hunderte MB), denselben abwarten: ein zweites BEGIN
   // auf derselben Verbindung wuerde werfen.
@@ -194,7 +235,8 @@ export function nutzungIndizieren(dbPfad: string, wurzeln: string[]): Promise<{ 
 
 let laufend: Promise<{ dateien: number; neu: number }> | null = null
 
-async function indizieren(dbPfad: string, wurzeln: string[]): Promise<{ dateien: number; neu: number }> {
+async function indizieren(dbPfad: string, wurzelnRoh: (string | NutzungsWurzel)[]): Promise<{ dateien: number; neu: number }> {
+  const wurzeln = wurzelnRoh.map((w): NutzungsWurzel => (typeof w === 'string' ? { pfad: w, quelle: 'haupt' } : w))
   const h = handle(dbPfad)
   const bekannt = new Map<string, { versatz: number; mtime: number }>()
   for (const r of h.prepare('SELECT pfad, versatz, mtime FROM nutzung_dateien').all() as
@@ -202,37 +244,29 @@ async function indizieren(dbPfad: string, wurzeln: string[]): Promise<{ dateien:
     bekannt.set(r.pfad, { versatz: r.versatz, mtime: r.mtime })
   }
 
-  const gesehen = new Set<string>()
+  // Echter Pfad -> Quelle; die erste Wurzel, die eine Datei findet, gewinnt.
+  const gesehen = new Map<string, Quelle>()
   for (const w of wurzeln) {
-    for (const f of await dateienSammeln(w)) {
+    for (const f of await dateienSammeln(w.pfad, w.tiefe)) {
       try {
-        gesehen.add(await realpath(f))
+        const echt = await realpath(f)
+        if (gesehen.has(echt)) continue
+        const ordner = f.slice(w.pfad.length).split('/').filter(Boolean)[0] ?? ''
+        gesehen.set(echt, LOOP_ORDNER.test(ordner) ? 'loop' : w.quelle)
       } catch {
         // Datei zwischen readdir und realpath verschwunden -- naechstes Mal.
       }
     }
   }
 
-  const einfuegen = h.prepare(
-    `INSERT INTO nutzung (schluessel, tag, ts, stunde, modell, projekt, sitzung, ein, aus, cache_schreiben, cache_lesen)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?)
-     ON CONFLICT (schluessel) DO UPDATE SET
-       aus = MAX(aus, excluded.aus), ein = MAX(ein, excluded.ein),
-       cache_schreiben = MAX(cache_schreiben, excluded.cache_schreiben),
-       cache_lesen = MAX(cache_lesen, excluded.cache_lesen)
-     -- Nur wenn wirklich mehr drinsteht: sonst zaehlte jede schon bekannte
-     -- Zeile (kopierte Sitzungsdatei) als Aenderung und damit als "neu".
-     WHERE excluded.aus > nutzung.aus OR excluded.ein > nutzung.ein
-        OR excluded.cache_schreiben > nutzung.cache_schreiben
-        OR excluded.cache_lesen > nutzung.cache_lesen`,
-  )
+  const einfuegen = einfuegenVorbereiten(h)
   const dateiMerken = h.prepare(
     `INSERT INTO nutzung_dateien (pfad, versatz, mtime) VALUES (?,?,?)
      ON CONFLICT (pfad) DO UPDATE SET versatz = excluded.versatz, mtime = excluded.mtime`,
   )
 
   let neu = 0
-  for (const pfad of gesehen) {
+  for (const [pfad, quelle] of gesehen) {
     let s
     try {
       s = await stat(pfad)
@@ -256,7 +290,7 @@ async function indizieren(dbPfad: string, wurzeln: string[]): Promise<{ dateien:
         if (!n) continue
         const r = einfuegen.run(
           n.schluessel, n.tag, n.ts, n.stunde, n.modell, n.projekt, n.sitzung,
-          n.ein, n.aus, n.cacheSchreiben, n.cacheLesen,
+          n.ein, n.aus, n.cacheSchreiben, n.cacheLesen, n.loop ? 'loop' : quelle,
         )
         if (Number(r.changes) > 0) neu++
       }
@@ -268,6 +302,25 @@ async function indizieren(dbPfad: string, wurzeln: string[]): Promise<{ dateien:
     }
   }
   return { dateien: gesehen.size, neu }
+}
+
+function einfuegenVorbereiten(h: DatabaseSync) {
+  return h.prepare(
+    `INSERT INTO nutzung (schluessel, tag, ts, stunde, modell, projekt, sitzung, ein, aus, cache_schreiben, cache_lesen, quelle)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+     ON CONFLICT (schluessel) DO UPDATE SET
+       aus = MAX(aus, excluded.aus), ein = MAX(ein, excluded.ein),
+       cache_schreiben = MAX(cache_schreiben, excluded.cache_schreiben),
+       cache_lesen = MAX(cache_lesen, excluded.cache_lesen),
+       quelle = COALESCE(nutzung.quelle, excluded.quelle)
+     -- Nur wenn wirklich mehr drinsteht (oder die Quelle noch fehlt): sonst
+     -- zaehlte jede schon bekannte Zeile (kopierte Sitzungsdatei) als
+     -- Aenderung und damit als "neu".
+     WHERE excluded.aus > nutzung.aus OR excluded.ein > nutzung.ein
+        OR excluded.cache_schreiben > nutzung.cache_schreiben
+        OR excluded.cache_lesen > nutzung.cache_lesen
+        OR (nutzung.quelle IS NULL AND excluded.quelle IS NOT NULL)`,
+  )
 }
 
 export interface TagesNutzung {
@@ -348,6 +401,7 @@ export function nutzungLesen(dbPfad: string, abTag: string, jetzt = Date.now()):
 export interface TagesSitzung {
   sitzung: string
   projekt: string | null
+  quelle: Quelle
   tokens: number
   antworten: number
   /** Erste und letzte Antwort an diesem Tag (ms). */
@@ -362,12 +416,13 @@ export interface TagesSitzung {
  */
 export function tagSitzungen(dbPfad: string, tag: string): TagesSitzung[] {
   return (handle(dbPfad).prepare(
-    `SELECT sitzung, MAX(projekt) AS projekt, ${TOKENS_SQL} AS tokens, COUNT(*) AS antworten,
+    `SELECT sitzung, MAX(projekt) AS projekt, MAX(${QUELLE_SQL}) AS quelle, ${TOKENS_SQL} AS tokens, COUNT(*) AS antworten,
             MIN(ts) AS von, MAX(ts) AS bis
      FROM nutzung WHERE tag = ? AND sitzung IS NOT NULL GROUP BY sitzung ORDER BY von`,
   ).all(tag) as Record<string, number | string | null>[]).map((r) => ({
     sitzung: String(r.sitzung),
     projekt: r.projekt === null ? null : String(r.projekt),
+    quelle: String(r.quelle) as Quelle,
     tokens: Number(r.tokens ?? 0),
     antworten: Number(r.antworten ?? 0),
     von: Number(r.von),
@@ -444,6 +499,8 @@ export type SitzungsArt = (
   | { art: 'chat'; chatId: string; titel: string }
   | { art: 'loop'; titel: string }
   | { art: 'team'; runId: string; titel: string }
+  /** Aus dem anderen Cockpit -- je Titel ein Eintrag. */
+  | { art: 'fremd'; titel: string }
   | { art: 'sonst' }
 ) & {
   /**
@@ -456,7 +513,7 @@ export type SitzungsArt = (
 }
 
 export interface RueckblickEintrag {
-  art: 'chat' | 'loop' | 'team' | 'sonst'
+  art: 'chat' | 'loop' | 'team' | 'fremd' | 'sonst'
   titel: string
   /** Nur bei art 'chat': die Chat-Id zum Verlinken. */
   chat: string | null
@@ -491,7 +548,8 @@ export function rueckblickGruppieren(
     const schluessel = b.art === 'chat' ? `chat:${b.chatId}`
       : b.art === 'loop' ? `loop:${projekt ?? ''}:${b.titel}`
         : b.art === 'team' ? `team:${b.runId}`
-          : `sonst:${projekt ?? ''}`
+          : b.art === 'fremd' ? `fremd:${b.titel}:${projekt ?? ''}`
+            : `sonst:${projekt ?? ''}`
     const vorhanden = gruppen.get(schluessel)
     if (vorhanden) {
       vorhanden.tokens += s.tokens
@@ -551,4 +609,169 @@ export function nutzungGesamt(dbPfad: string): NutzungGesamt {
     sitzungen: Number(r.sitzungen ?? 0),
     seit: r.seit === null ? null : String(r.seit),
   }
+}
+
+// --- Aufteilung nach Quelle und Modell -------------------------------------------
+
+export interface Anteil {
+  /** Tokens wie ueberall: Eingabe + Ausgabe + Cache-Schreiben. */
+  tokens: number
+  ein: number
+  aus: number
+  cacheSchreiben: number
+  cacheLesen: number
+  antworten: number
+}
+
+export interface Aufteilung {
+  quellen: (Anteil & { quelle: Quelle })[]
+  /** Alle Modelle, nicht nur die groessten -- sortiert nach Tokens. */
+  modelle: (Anteil & { modell: string; quellen: Quelle[] })[]
+}
+
+const MODELL_SQL = "COALESCE(modell, '?')"
+
+const ANTEIL_SQL = `${TOKENS_SQL} AS tokens, SUM(ein) AS ein, SUM(aus) AS aus, SUM(cache_schreiben) AS cs,
+  SUM(cache_lesen) AS cl, COUNT(*) AS antworten`
+
+function anteil(r: Record<string, unknown>): Anteil {
+  return {
+    tokens: Number(r.tokens ?? 0),
+    ein: Number(r.ein ?? 0),
+    aus: Number(r.aus ?? 0),
+    cacheSchreiben: Number(r.cs ?? 0),
+    cacheLesen: Number(r.cl ?? 0),
+    antworten: Number(r.antworten ?? 0),
+  }
+}
+
+/** Je Quelle und je Modell, ab `abTag` (null = alles). */
+export function aufteilungLesen(dbPfad: string, abTag: string | null): Aufteilung {
+  const h = handle(dbPfad)
+  const wo = abTag ? 'WHERE tag >= ?' : ''
+  const arg = abTag ? [abTag] : []
+  const quellen = (h.prepare(
+    `SELECT ${QUELLE_SQL} AS quelle, ${ANTEIL_SQL} FROM nutzung ${wo} GROUP BY 1 ORDER BY tokens DESC`,
+  ).all(...arg) as Record<string, unknown>[]).map((r) => ({ quelle: String(r.quelle) as Quelle, ...anteil(r) }))
+  const modelle = (h.prepare(
+    `SELECT ${MODELL_SQL} AS modell, GROUP_CONCAT(DISTINCT ${QUELLE_SQL}) AS quellen, ${ANTEIL_SQL}
+     FROM nutzung ${wo} GROUP BY 1 ORDER BY tokens DESC`,
+  ).all(...arg) as Record<string, unknown>[]).map((r) => ({
+    modell: String(r.modell),
+    quellen: String(r.quellen ?? '').split(',').filter(Boolean) as Quelle[],
+    ...anteil(r),
+  }))
+  return { quellen, modelle }
+}
+
+// --- Austausch zwischen Cockpits ---------------------------------------------------
+
+/** Eine Antwort, wie ein Cockpit sie einem anderen gibt (GET /api/nutzung/zeilen). */
+export interface ExportZeile {
+  schluessel: string
+  ts: number
+  modell: string | null
+  projekt: string | null
+  sitzung: string | null
+  ein: number
+  aus: number
+  cacheSchreiben: number
+  cacheLesen: number
+  quelle: Quelle
+}
+
+/**
+ * Antworten nach (ts, schluessel) geordnet, ab einer Stelle -- zum
+ * seitenweisen Abholen. `nach` = schluessel der letzten schon gelesenen
+ * Zeile mit ts == seit ('' = auch die mit ts == seit).
+ */
+export function zeilenExportieren(dbPfad: string, seit: number, nach: string, grenze: number): { zeilen: ExportZeile[]; mehr: boolean } {
+  const roh = handle(dbPfad).prepare(
+    `SELECT schluessel, ts, modell, projekt, sitzung, ein, aus, cache_schreiben AS cs, cache_lesen AS cl, ${QUELLE_SQL} AS quelle
+     FROM nutzung WHERE ts > ? OR (ts = ? AND schluessel > ?) ORDER BY ts, schluessel LIMIT ?`,
+  ).all(seit, seit, nach, grenze + 1) as Record<string, number | string | null>[]
+  const zeilen = roh.slice(0, grenze).map((r) => ({
+    schluessel: String(r.schluessel),
+    ts: Number(r.ts),
+    modell: r.modell === null ? null : String(r.modell),
+    projekt: r.projekt === null ? null : String(r.projekt),
+    sitzung: r.sitzung === null ? null : String(r.sitzung),
+    ein: Number(r.ein),
+    aus: Number(r.aus),
+    cacheSchreiben: Number(r.cs),
+    cacheLesen: Number(r.cl),
+    quelle: String(r.quelle) as Quelle,
+  }))
+  return { zeilen, mehr: roh.length > grenze }
+}
+
+/** Zeile aus einem anderen Cockpit pruefen -- es ist eine Netzantwort, kein eigener Code. */
+function exportZeileGueltig(z: unknown): z is ExportZeile {
+  if (!z || typeof z !== 'object') return false
+  const r = z as Record<string, unknown>
+  const text = (v: unknown) => v === null || (typeof v === 'string' && v.length <= 300)
+  return typeof r.schluessel === 'string' && r.schluessel.length > 0 && r.schluessel.length <= 300 &&
+    typeof r.ts === 'number' && Number.isFinite(r.ts) && text(r.modell) && text(r.projekt) && text(r.sitzung)
+}
+
+/**
+ * Antworten eines anderen Cockpits uebernehmen. `umdeuten` macht aus dessen
+ * Quelle die eigene ("haupt" dort ist "roblox" hier). Tag und Stunde
+ * rechnet dieses Cockpit selbst, damit die Tagesgrenze ueberall gleich liegt.
+ */
+export function zeilenUebernehmen(dbPfad: string, zeilen: unknown[], umdeuten: (q: string) => Quelle): number {
+  const h = handle(dbPfad)
+  const einfuegen = einfuegenVorbereiten(h)
+  let neu = 0
+  h.exec('BEGIN')
+  try {
+    for (const z of zeilen) {
+      if (!exportZeileGueltig(z)) continue
+      const r = einfuegen.run(
+        z.schluessel, tagVon(z.ts), z.ts, stundeVon(z.ts), z.modell, z.projekt, z.sitzung,
+        zahl(z.ein), zahl(z.aus), zahl(z.cacheSchreiben), zahl(z.cacheLesen), umdeuten(String(z.quelle)),
+      )
+      if (Number(r.changes) > 0) neu++
+    }
+    h.exec('COMMIT')
+  } catch (e) {
+    h.exec('ROLLBACK')
+    throw e
+  }
+  return neu
+}
+
+/** Bis wohin (ts) die Antworten eines anderen Cockpits schon abgeholt sind; 0 = noch nie. */
+export function fremdStand(dbPfad: string, name: string): number {
+  const r = handle(dbPfad).prepare('SELECT stand FROM nutzung_fremd WHERE name = ?').get(name) as { stand: number } | undefined
+  return r ? Number(r.stand) : 0
+}
+
+export function fremdStandSetzen(dbPfad: string, name: string, stand: number): void {
+  handle(dbPfad).prepare(
+    'INSERT INTO nutzung_fremd (name, stand) VALUES (?, ?) ON CONFLICT (name) DO UPDATE SET stand = excluded.stand',
+  ).run(name, stand)
+}
+
+/**
+ * Sitzungen, die ein Loop gestartet hat (Chat-Ids aus dem Loop-Treiber),
+ * als Loop zaehlen. Dauerhaft: der Treiber vergisst alte Chats, die
+ * Zuordnung bleibt.
+ */
+export function loopSitzungenMarkieren(dbPfad: string, ids: string[]): number {
+  if (!ids.length) return 0
+  const h = handle(dbPfad)
+  const aendern = h.prepare(
+    "UPDATE nutzung SET quelle = 'loop' WHERE sitzung = ? AND COALESCE(quelle, 'haupt') IN ('haupt', 'roblox')",
+  )
+  let n = 0
+  h.exec('BEGIN')
+  try {
+    for (const id of ids) n += Number(aendern.run(id).changes)
+    h.exec('COMMIT')
+  } catch (e) {
+    h.exec('ROLLBACK')
+    throw e
+  }
+  return n
 }
