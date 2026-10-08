@@ -23,10 +23,10 @@ import { einstellungenBauen } from './ui/einstellungen.js'
 import { nutzungBauen } from './ui/nutzung.js'
 import { aufgabenBauen } from './ui/aufgaben.js'
 import { serverBauen } from './ui/server.js'
-import { notizenBauen } from './ui/notizen.js'
 import { terminalBauen } from './ui/terminal.js'
 import { pcBauen } from './ui/pc.js'
 import { modelleBauen } from './ui/modelle.js'
+import { stileBauen } from './ui/stile.js'
 import { wallpaperSetzen } from './wallpaper.js'
 import { variante } from './variante.js'
 
@@ -60,11 +60,12 @@ const BEREICHE = [
   { id: 'aufgaben', titel: 'Aufgaben', symbol: 'aufgaben', bauen: aufgabenBauen },
   { id: 'nutzung', titel: 'Nutzung', symbol: 'nutzung', bauen: nutzungBauen },
   { id: 'server', titel: 'Server', symbol: 'server', bauen: serverBauen },
-  { id: 'notizen', titel: 'Notizen', symbol: 'notizen', bauen: notizenBauen },
   { id: 'terminal', titel: 'Terminal', symbol: 'terminal', bauen: terminalBauen },
   // Nur, wenn der Daemon einen PC kennt (src/pc.ts).
   ...(variante.pc ? [{ id: 'pc', titel: 'PC', symbol: 'pc', bauen: pcBauen }] : []),
   // Galerie der Blender-Modelle (Tankstellen-Tycoon), fuer Can und seinen Freund.
+  // Stilkatalog (Skill design-stile): 22 Designstile als Live-Muster.
+  { id: 'stile', titel: 'Stile', symbol: 'stile', bauen: stileBauen },
   { id: 'modelle', titel: 'Modelle', symbol: 'modelle', bauen: modelleBauen },
   { id: 'einstellungen', titel: 'Einstellungen', symbol: 'einstellungen', bauen: einstellungenBauen },
 ].filter((b) => !variante.bereicheAus?.includes(b.id))
@@ -101,7 +102,7 @@ document.getElementById('neuerChat').append(symbol('plus', 16), h('span', {}, 'N
 document.getElementById('handyNeu').append(symbol('plus', 20))
 document.getElementById('seiteAuf').append(symbol('menue', 20))
 document.getElementById('seiteZu').append(symbol('kreuz', 18))
-// Workspaces wie in der Waybar: 1 Chat, 2 Aufgaben ... 7 Einstellungen (Strg+Zahl).
+// Workspaces wie in der Waybar: 1 Chat, 2 Aufgaben ... 8 Einstellungen (Strg+Zahl).
 // Der Chat-Workspace fuehrt zurueck in den zuletzt offenen Chat.
 const WORKSPACES = [{ id: 'chat', titel: 'Chat', symbol: 'chat' }, ...BEREICHE]
 const nav = document.getElementById('bereiche')
