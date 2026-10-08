@@ -1,6 +1,6 @@
 /**
  * Vorschlag fuer Cans naechste Nachricht: Nach jeder fertigen Antwort rät
- * Sonnet, was er am wahrscheinlichsten als Naechstes schreibt. Die
+ * Haiku 5.5, was er am wahrscheinlichsten als Naechstes schreibt. Die
  * Oberflaeche legt den Text ins Eingabefeld -- ein Klick ans Ende zum
  * Ergaenzen oder Rechtsklick zum Senden. Wie die Modellwahl ein eigener
  * kleiner Aufruf ohne Werkzeuge und ohne Sitzung; faellt er aus, gibt es
@@ -10,7 +10,11 @@ import { query } from '@anthropic-ai/claude-agent-sdk'
 import { homedir } from 'node:os'
 import { MODELL_JE_STUFE } from './modellwahl.js'
 
-const MODELL = MODELL_JE_STUFE.sonnet
+// Haiku 5.5 seit 08.10.2026 (vorher Sonnet 5.5 mit low): ein kleiner
+// Rateaufruf je Antwort, der so kaum noch Limit kostet. Mit low schrieb
+// Haiku gelegentlich aus Sicht des Assistenten, mit medium nicht mehr.
+const MODELL = MODELL_JE_STUFE.haiku
+const AUFWAND = 'medium'
 const TIMEOUT_MS = 20_000
 const FRAGE_MAX = 1500
 const ANTWORT_MAX = 3500
@@ -46,7 +50,7 @@ export async function vorschlagErzeugen(
       options: {
         model: MODELL,
         systemPrompt: SYSTEM,
-        effort: 'low',
+        effort: AUFWAND,
         tools: [],
         settingSources: [],
         persistSession: false,

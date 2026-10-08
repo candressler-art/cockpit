@@ -16,7 +16,7 @@ import {
 
 export interface ChatOptionen {
   model: string
-  /** Fehlt bei Modellen ohne Denkaufwand-Stufen (Haiku). */
+  /** Fehlt bei Modellen ohne Denkaufwand-Stufen (Haiku 4.5 und aelter). */
   effort?: Aufwand
   permissionMode: Berechtigung
   /** [] = isoliert, sonst wie die CLI (CLAUDE.md, Skills, settings.json). */
@@ -28,11 +28,11 @@ export interface ChatOptionen {
 }
 
 /**
- * Haiku 4.5 kennt keine effort-Stufen; die CLI lehnt den Parameter dort je
- * nach Version ab. Deshalb nur fuer Modelle schicken, die ihn sicher kennen.
+ * Haiku 4.5 und aeltere Haikus kennen keine effort-Stufen; die CLI lehnt den
+ * Parameter dort je nach Version ab. Haiku 5.5 kennt sie (low bis max).
  */
 export function kenntAufwand(modell: string): boolean {
-  return !/haiku/i.test(modell)
+  return !/haiku-[1-4]|3-5-haiku|3-haiku/i.test(modell)
 }
 
 /**

@@ -275,13 +275,12 @@ export function eingabeBauen(opt) {
     ordnerZeigen()
     optionenKurz()
   }
-  // Haiku kennt keine Denkstufen (siehe chatOptionen.ts), und "Automatisch"
-  // waehlt den Denkaufwand selbst -- dann ausgrauen statt still zu ignorieren.
+  // "Automatisch" waehlt den Denkaufwand selbst -- dann ausgrauen statt
+  // still zu ignorieren. (Haiku 5.5 kennt Denkstufen wie die anderen.)
   function aufwandPruefen() {
-    const haiku = /haiku/.test(modellWahl.value)
     const auto = modellWahl.value === 'auto'
-    aufwandWahl.disabled = haiku || auto
-    aufwandWahl.title = haiku ? 'Haiku hat keine Denkstufen' : auto ? 'Die Automatik wählt auch den Denkaufwand' : 'Denkaufwand'
+    aufwandWahl.disabled = auto
+    aufwandWahl.title = auto ? 'Die Automatik wählt auch den Denkaufwand' : 'Denkaufwand'
   }
   modellWahl.addEventListener('change', () => { wahl.modell = modellWahl.value; aufwandPruefen(); optionenKurz() })
   aufwandWahl.addEventListener('change', () => { wahl.aufwand = aufwandWahl.value })

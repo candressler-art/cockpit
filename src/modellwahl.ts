@@ -1,15 +1,16 @@
 // Automatische Modellwahl: vor jedem Auftrag (Chat-Zug, Spezialist,
-// Team-Worker, Orchestrator) entscheidet Sonnet 5.5 kurz, welches Modell ihn
+// Team-Worker, Orchestrator) entscheidet Haiku 5.5 kurz, welches Modell ihn
 // erledigt -- Opus fuer Schweres, Sonnet fuer das meiste, Haiku fuer
-// Kleinkram --, und mit welchem Denkaufwand. Gewaehlt wird ueber das Modell
+// Routine --, und mit welchem Denkaufwand. Gewaehlt wird ueber das Modell
 // 'auto' (Einstellungen, Auswahl im Eingabefeld, Team-Vorgaben); eine feste
 // Wahl dort gilt weiter wie bisher.
 //
-// Waehlen laesst Sonnet 5.5, nicht Haiku: Can will eine gute Entscheidung
-// und nimmt dafuer bis ~10 s in Kauf (03.10.2026). Gemessen ~3 s. Schlaegt
-// die Wahl fehl oder dauert laenger als TIMEOUT_MS, gilt AUTO_ERSATZ -- ein
-// Auftrag soll nie an der Modellwahl scheitern. Solange der Prompt-Cache
-// eines Chats warm ist, geht es nie abwaerts (cacheGrenze, unten).
+// Waehlen laesst Haiku 5.5 (Can, 08.10.2026: "supergünstig und trotzdem
+// gut"). Bis dahin waehlte Sonnet 5.5, weil Haiku 4.5 Can zu schwach war.
+// Schlaegt die Wahl fehl oder dauert laenger als TIMEOUT_MS, gilt
+// AUTO_ERSATZ -- ein Auftrag soll nie an der Modellwahl scheitern. Solange
+// der Prompt-Cache eines Chats warm ist, geht es nie abwaerts (cacheGrenze,
+// unten).
 
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import { homedir } from 'node:os'
@@ -21,7 +22,7 @@ export type WahlAufwand = 'low' | 'medium' | 'high'
 
 /** Stufe -> Modell-Id. Die Kurznamen nimmt das Agent-Werkzeug fuer Spezialisten direkt. */
 export const MODELL_JE_STUFE: Record<Stufe, string> = {
-  haiku: 'claude-haiku-4-5-20251001',
+  haiku: 'claude-haiku-5-5',
   sonnet: 'claude-sonnet-5-5',
   opus: 'claude-opus-5-5',
 }
@@ -29,7 +30,13 @@ export const MODELL_JE_STUFE: Record<Stufe, string> = {
 /** Wenn die Wahl ausfaellt: das bisherige Vorgabemodell, die sichere Seite. */
 export const AUTO_ERSATZ = MODELL_JE_STUFE.opus
 
-const WAEHLER = MODELL_JE_STUFE.sonnet
+const WAEHLER = MODELL_JE_STUFE.haiku
+/**
+ * Haiku 5.5 hat Denkstufen. Gemessen an 42 echten Nachrichten (08.10.2026):
+ * high stimmt am besten mit Sonnet 5.5 ueberein (32/42, eher vorsichtiger)
+ * und braucht ~5 s; low teilt zu viel Haiku zu, auch Folgen laufender Arbeit.
+ */
+const WAEHLER_AUFWAND = 'high'
 const TIMEOUT_MS = 15_000
 const AUFTRAG_MAX = 4000
 
@@ -50,14 +57,22 @@ export interface Auftrag {
 }
 
 export const SYSTEM = [
-  'Du bist die Modellwahl im Cockpit. Du bekommst einen Auftrag an Claude und entscheidest, welches Modell ihn erledigt. Du erledigst den Auftrag NICHT selbst.',
+  'Du bist die Modellwahl im Cockpit. Du bekommst einen Auftrag an Claude und entscheidest, welches Modell ihn erledigt und mit welchem Denkaufwand. Du erledigst den Auftrag NICHT selbst.',
   'Antworte NUR mit einer JSON-Zeile: {"modell":"haiku|sonnet|opus","aufwand":"low|medium|high","grund":"hoechstens 8 Woerter, Deutsch"}',
-  '- haiku: Kleinkram ohne Nachdenken -- kurze Faktenfrage, Umformulieren, Uebersetzen, eine Datei oder einen Status nachsehen, Smalltalk.',
-  '- sonnet: das meiste -- klar umrissene Programmieraufgaben, Recherche, Texte, Doku, Server-Routine, Fehler mit klarer Spur.',
-  '- opus: schwer oder folgenreich -- Architektur und Umbauten ueber viele Dateien, unklare Fehlersuche, Sicherheit, anspruchsvolle Gestaltung, Code-Review, Planung, lange selbststaendige Auftraege, mehrere Vorhaben in einer Nachricht, oder wenn ein Fehler teuer waere.',
-  '- aufwand: low fuer Routine, medium normal, high wenn gruendliches Nachdenken noetig ist.',
+  '',
+  'Die Modelle (Oktober 2026; die Auftraege laufen in Claude Code mit Shell, Dateien, Web und Spezialisten):',
+  '- haiku = Claude Haiku 5.5: klein, sehr schnell, kostet ein Zwanzigstel von Sonnet. Gut bei Routine mit klarem Ziel: etwas nachsehen (Datei, Log, Status, Einstellung, Kontostand), zusammenfassen, uebersetzen, umformulieren, einordnen, kurze Fakten- oder Verstaendnisfragen, ein einzelner Websuche-Treffer, einfache Shell-Befehle, eine kleine, genau beschriebene Aenderung an einer Datei, Smalltalk. Schwach bei mehrstufiger Programmierarbeit (erreicht dort nur gut die Haelfte von Sonnet), Fehlersuche, Urteil ueber Qualitaet oder Gestaltung, Faktenwissen ohne Quelle. Nie fuer Fehlermeldungen, Abstuerze oder "wieso passiert X (nicht)" -- das ist Fehlersuche, keine Routine.',
+  '- sonnet = Claude Sonnet 5.5: das meiste -- klar umrissene Programmieraufgaben, Recherche mit Abwaegen, Texte fuer andere Menschen, Doku, Server-Arbeit mit Aenderungen, Fehler mit klarer Spur, Aufgaben ueber mehrere Schritte.',
+  '- opus = Claude Opus 5.5: schwer oder folgenreich -- Architektur und Umbauten ueber viele Dateien, unklare Fehlersuche, Sicherheit, anspruchsvolle Gestaltung, Code-Review, Planung, lange selbststaendige Auftraege, mehrere Vorhaben in einer Nachricht, oder wenn ein Fehler teuer waere.',
+  '',
+  'Denkaufwand (alle drei Modelle kennen ihn): low fuer Routine und alles, was sich ohne Abwaegen erledigen laesst; medium normal; high, wenn gruendliches Nachdenken noetig ist. Ein leichteres Modell mit high ist oft besser als ein schwereres mit low -- waehle zuerst das Modell nach Art der Arbeit, dann den Aufwand nach Schwierigkeit.',
+  '',
+  'Regeln:',
+  '- Haiku nur, wenn der Auftrag wirklich Routine ist und ein Fehler nichts kostet. Muss etwas gebaut, umgebaut, repariert, eingerichtet oder beurteilt werden, mindestens Sonnet.',
+  '- Eingefuegte Fehlermeldungen oder Terminalausgaben, "geht nicht", "wieso ..." ueber ein Fehlverhalten: das ist Fehlersuche, mindestens Sonnet.',
+  '- Ist ein bisheriges Modell genannt, laeuft eine Aufgabe schon: kurze Rueckmeldungen ("ja", "mach weiter", "mach es fertig", "passt", Tippfehler) und Rueckfragen zum Stand gehoeren dazu -- dann das bisherige Modell, auch wenn die Nachricht kurz ist. Wechsle nur, wenn der neue Auftrag klar ein anderes, deutlich leichteres oder schwereres Thema ist.',
   '- Im Zweifel die staerkere Wahl.',
-  '- Ist ein bisheriges Modell genannt: kurze Rueckmeldungen ("ja", "mach weiter", "passt", eine Rueckfrage zum Thema) gehoeren zur laufenden Aufgabe -- dann das bisherige Modell. Wechsle nur, wenn der neue Auftrag deutlich leichter oder schwerer ist.',
+  '- Entscheide zuegig: Das ist eine Einordnung, keine Analyse des Auftrags.',
 ].join('\n')
 
 /** Die Nachricht an den Waehler. Rein, damit sie sich testen laesst. */
@@ -88,8 +103,10 @@ export function aufwandFuer(wahl: WahlAufwand, vorgabe: string | undefined): str
 // und dasselbe Konto (Organisation). Jeder Wechsel baut den ganzen Verlauf
 // neu auf: 1,25-facher Eingabepreis statt 0,1-fach, bei ~25k Grundkontext
 // (System, Werkzeuge) plus Verlauf. Nach unten lohnt das praktisch nie --
-// Opus 5.5 und Sonnet 5.5 lesen den Cache zum selben Preis (0,20 $/M), nur
-// die Ausgabe wird billiger, und die Qualitaet sinkt mitten in der Aufgabe.
+// warmer Cache kostet bei Opus 5.5 0,20 $/M, bei Sonnet 5.5 0,10 $/M (seit
+// 07.10.2026), ein Neuaufbau auch bei Haiku 5.5 (1-h-Cache 0,20 $/M) etwa
+// so viel wie weiterlesen; billiger wird nur die Ausgabe, und die Qualitaet
+// sinkt mitten in der Aufgabe.
 // Nach oben zahlt man den Neuaufbau bewusst fuer die bessere Antwort.
 // Regel deshalb: solange der Cache des letzten Zugs warm ist, nie schwaecher
 // als dort (Stufe, bei gleicher Stufe auch Aufwand); staerker jederzeit.
@@ -126,7 +143,7 @@ export function cacheGrenze(lage: CacheLage | undefined, konto: string | null, j
 
 /**
  * Staerker als die Grenze geht nicht mehr (Opus mit dem Aufwand, den eine
- * schwere Aufgabe bekaeme) -- dann muss Sonnet gar nicht erst waehlen.
+ * schwere Aufgabe bekaeme) -- dann muss Haiku gar nicht erst waehlen.
  */
 export function nichtsZuWaehlen(g: CacheGrenze, vorgabe: string | undefined): boolean {
   return g.stufe === 'opus' && aufwandRang(g.aufwand) >= aufwandRang(aufwandFuer('high', vorgabe))
@@ -182,7 +199,7 @@ export function wahlLesen(text: string): Wahl | null {
 }
 
 /**
- * Laesst Sonnet waehlen. `env` wie beim Agentenstart (Konto); undefined erbt
+ * Laesst Haiku 5.5 waehlen. `env` wie beim Agentenstart (Konto); undefined erbt
  * die Umgebung des Daemons (Hauptkonto). null bei jedem Fehler oder nach
  * TIMEOUT_MS -- der Aufrufer nimmt dann AUTO_ERSATZ.
  */
@@ -202,7 +219,7 @@ export async function modellWaehlen(
       options: {
         model: WAEHLER,
         systemPrompt: SYSTEM,
-        effort: 'medium',
+        effort: WAEHLER_AUFWAND,
         tools: [],
         settingSources: [],
         persistSession: false,

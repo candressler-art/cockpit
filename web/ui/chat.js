@@ -547,7 +547,7 @@ export function chatBereich({ beiNeuemChat, beiTitel } = {}) {
     if (vorgaben.status === 'fulfilled') {
       const { werte: w, modelle = [], aufwaende = [], berechtigungen = [] } = vorgaben.value
       const name = (liste, wert) => liste.find((x) => x.id === wert)?.name ?? wert
-      zeile('Modell', name(modelle, w.modell), w.modell.includes('haiku') || w.modell === 'auto' ? null : h('span.leise', {}, ` · ${name(aufwaende, w.aufwand)}`))
+      zeile('Modell', name(modelle, w.modell), w.modell === 'auto' ? null : h('span.leise', {}, ` · ${name(aufwaende, w.aufwand)}`))
       zeile('Modus', name(berechtigungen, w.berechtigung))
     }
     if (aufgaben.status === 'fulfilled') {

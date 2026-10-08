@@ -30,11 +30,13 @@ export interface Auswahl<T extends string> {
  * merken.
  */
 export const MODELLE: Auswahl<string>[] = [
-  // modellwahl.ts: Sonnet 5.5 waehlt je Auftrag Opus, Sonnet oder Haiku.
+  // modellwahl.ts: Haiku 5.5 waehlt je Auftrag Opus, Sonnet oder Haiku.
   { id: 'auto', name: 'Automatisch', hinweis: 'Wählt je Aufgabe Opus, Sonnet oder Haiku und den Denkaufwand' },
   { id: 'claude-opus-5-5', name: 'Opus 5.5', hinweis: 'Stärkstes Modell -- für anspruchsvolle Arbeit' },
   { id: 'claude-sonnet-5-5', name: 'Sonnet 5.5', hinweis: 'Schnell und stark für die meisten Aufgaben' },
-  { id: 'claude-haiku-4-5-20251001', name: 'Haiku 4.5', hinweis: 'Am schnellsten, für einfache Aufgaben' },
+  // Haiku 5.5 (07.10.2026) ersetzt Haiku 4.5: ein Zehntel des Preises, Denkstufen,
+  // 1M Kontext. Gemerkte Chats mit Haiku 4.5 fallen auf die Vorgabe zurueck.
+  { id: 'claude-haiku-5-5', name: 'Haiku 5.5', hinweis: 'Sehr günstig und schnell -- für Routine, Nachsehen, Zusammenfassen' },
 ]
 
 export const AUFWAENDE: Auswahl<Aufwand>[] = [

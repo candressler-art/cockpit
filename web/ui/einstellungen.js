@@ -71,8 +71,7 @@ export function einstellungenBauen() {
       gruppe('Neue Chats', 'Vorgaben für jeden neuen Chat. Im Chat selbst lässt sich alles je Chat umstellen.',
         zeile('Modell', hinweisVon(daten.modelle, w.modell),
           auswahl(daten.modelle, w.modell, (v) => speichern({ modell: v }), 'Modell')),
-        zeile('Denkaufwand', w.modell.includes('haiku') ? 'Haiku denkt nicht in Stufen -- gilt für die anderen Modelle.'
-          : w.modell === 'auto' ? 'Bei „Automatisch“ wählt die Modellwahl den Denkaufwand je Aufgabe -- dieser Wert gilt, wenn sie ausfällt.'
+        zeile('Denkaufwand', w.modell === 'auto' ? 'Bei „Automatisch“ wählt die Modellwahl den Denkaufwand je Aufgabe -- dieser Wert gilt, wenn sie ausfällt.'
           : hinweisVon(daten.aufwaende, w.aufwand),
           auswahl(daten.aufwaende, w.aufwand, (v) => speichern({ aufwand: v }), 'Denkaufwand')),
         zeile('Berechtigungen', hinweisVon(daten.berechtigungen, w.berechtigung),

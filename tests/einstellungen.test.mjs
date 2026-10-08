@@ -75,9 +75,9 @@ const dbPfad = join(verzeichnis, 'test.db')
   let sp = new EinstellungsSpeicher(db, '/home/x')
   pruefe('frisch: Vorgaben', sp.lesen().modell === 'claude-opus-5-5' && sp.lesen().arbeitsordner === '/home/x')
 
-  const r = sp.aendern({ modell: 'claude-haiku-4-5-20251001', favoriten: ['/p'] })
-  pruefe('Aenderung gemeldet', r.geaendert && r.fehler.length === 0 && r.werte.modell === 'claude-haiku-4-5-20251001')
-  const gleich = sp.aendern({ modell: 'claude-haiku-4-5-20251001' })
+  const r = sp.aendern({ modell: 'claude-haiku-5-5', favoriten: ['/p'] })
+  pruefe('Aenderung gemeldet', r.geaendert && r.fehler.length === 0 && r.werte.modell === 'claude-haiku-5-5')
+  const gleich = sp.aendern({ modell: 'claude-haiku-5-5' })
   pruefe('gleicher Wert: nicht geaendert', !gleich.geaendert)
   const falsch = sp.aendern({ aufwand: 'riesig' })
   pruefe('nur Fehler: nicht geaendert, Fehler gemeldet', !falsch.geaendert && falsch.fehler.length === 1)
@@ -89,7 +89,7 @@ const dbPfad = join(verzeichnis, 'test.db')
   db.close()
   db = new CockpitDb(dbPfad)
   sp = new EinstellungsSpeicher(db, '/home/x')
-  pruefe('nach Neustart erhalten', sp.lesen().modell === 'claude-haiku-4-5-20251001' && sp.lesen().favoriten[0] === '/p')
+  pruefe('nach Neustart erhalten', sp.lesen().modell === 'claude-haiku-5-5' && sp.lesen().favoriten[0] === '/p')
   db.close()
 }
 {
@@ -105,9 +105,9 @@ rmSync(verzeichnis, { recursive: true, force: true })
   const leer = teamAuftragWerte({}, team)
   pruefe('Team: ohne Angaben gelten die Vorgaben', leer.maxRunden === 8 && leer.parallelitaet === 2 &&
     leer.orchestratorModell === 'claude-opus-5-5' && leer.workerModell === 'claude-sonnet-5-5')
-  const eigen = teamAuftragWerte({ maxRunden: 3, parallelitaet: 1, workerModell: 'claude-haiku-4-5-20251001' }, team)
+  const eigen = teamAuftragWerte({ maxRunden: 3, parallelitaet: 1, workerModell: 'claude-haiku-5-5' }, team)
   pruefe('Team: Angaben der Anfrage gehen vor', eigen.maxRunden === 3 && eigen.parallelitaet === 1 &&
-    eigen.workerModell === 'claude-haiku-4-5-20251001' && eigen.orchestratorModell === 'claude-opus-5-5')
+    eigen.workerModell === 'claude-haiku-5-5' && eigen.orchestratorModell === 'claude-opus-5-5')
   pruefe('Titel: erste Zeile, gekuerzt', auftragTitel('  Baue X\nDetails') === 'Baue X' &&
     auftragTitel('a'.repeat(100)).length <= 60 && auftragTitel('a'.repeat(100)).endsWith('…'))
   pruefe('Titel: Leerzeilen am Anfang zaehlen nicht', auftragTitel('\n\n  Zweite Zeile') === 'Zweite Zeile')
