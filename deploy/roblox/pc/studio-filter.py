@@ -181,6 +181,9 @@ class Filter:
             self.bruecke.stdin.flush()
 
     def an_cockpit(self, msg):
+        # Protokoll 2026-07-28: jedes Ergebnis braucht resultType, die Studio-Bruecke schickt es nicht mit.
+        if isinstance(msg.get("result"), dict):
+            msg["result"].setdefault("resultType", "complete")
         with self.aus_lock:
             sys.stdout.write(json.dumps(msg) + "\n")
             sys.stdout.flush()
