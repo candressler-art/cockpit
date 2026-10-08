@@ -254,6 +254,11 @@ class Filter:
             self.offen[mid] = "studios"
             return self.an_bruecke(msg)
         sid = args.get("studio_id")
+        # Nach dem Verbindungsaufbau meldet sich Studio erst nach einigen Sekunden bei der Bruecke.
+        for _ in range(6):
+            if sid is None or str(sid) in self.erlaubte_ids():
+                break
+            time.sleep(3)
         if sid is None or str(sid) not in self.erlaubte_ids():
             return self.antworten(mid, ergebnis(
                 "Diese studio_id gehoert zu keinem freigegebenen Spiel. Erst list_roblox_studios aufrufen; "
