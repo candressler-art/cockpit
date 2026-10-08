@@ -173,6 +173,8 @@ class Filter:
         # Anfragen des Cockpits, deren Antwort gefiltert werden muss: id -> Art
         self.offen = {}
         self.zaehler = itertools.count(1)
+        # studio_ids aus der letzten (nach placeId gefilterten) Liste, die das Cockpit bekommen hat
+        self.zuletzt_erlaubt = set()
 
     # --- Schreiben ---
     def an_bruecke(self, msg):
@@ -204,7 +206,8 @@ class Filter:
 
     def erlaubte_ids(self):
         plaetze = {o["placeId"] for o in orte_lesen()}
-        return {studio_id_von(s) for s in self.studios_roh() if place_von(s) in plaetze} - {None}
+        frisch = {studio_id_von(s) for s in self.studios_roh() if place_von(s) in plaetze} - {None}
+        return frisch | self.zuletzt_erlaubt
 
     # --- Bruecke -> Cockpit ---
     def von_bruecke(self):
@@ -229,6 +232,7 @@ class Filter:
                 try:
                     roh = json.loads(text_von(msg["result"]))
                     roh["studios"] = [s for s in roh.get("studios", []) if place_von(s) in plaetze]
+                    self.zuletzt_erlaubt = {studio_id_von(s) for s in roh["studios"]} - {None}
                     msg["result"] = ergebnis(json.dumps(roh))
                 except (ValueError, AttributeError):
                     msg["result"] = ergebnis('{"studios":[]}')
