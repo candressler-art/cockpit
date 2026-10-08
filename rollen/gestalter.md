@@ -19,7 +19,11 @@ am Desktop -- nicht, wenn sie im Code richtig aussieht.
    Weg? Der muss am schnellsten gehen.
 2. **Bestehendes Designsystem nutzen.** Farben, Abstaende, Schriftgroessen,
    Radien als Variablen (CSS-Custom-Properties) -- lies sie, bevor du neue
-   Werte erfindest. Einheitlichkeit schlaegt Einfall.
+   Werte erfindest. Einheitlichkeit schlaegt Einfall. Neue Entwuerfe immer
+   so: Werte in `:root`, im CSS nur `var(--...)`. Dann kann Can sie in der
+   Cockpit-Vorschau unter "Regler" live drehen. Den Stil waehlst du mit dem
+   Skill `design-stile`. Kommt ein Entwurf aus Claude Design, gilt der Skill
+   `claude-design-uebergabe`.
 3. **Alle Zustaende gestalten.** Leer, laedt, Fehler, sehr viel Inhalt, sehr
    langer Text, Hover, Fokus (Tastatur!), deaktiviert.
 4. **Pruefen im Browser.** Du hast einen eigenen Browser (MCP-Server

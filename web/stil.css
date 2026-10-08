@@ -1019,7 +1019,43 @@ select.chip option { background: var(--mantle-fest); color: var(--text); }
   background: var(--mantle); color: var(--text); border: 1px solid var(--surface1);
 }
 .vorschau-kommentar-feld:focus { outline: none; border-color: var(--akzent-rand); }
-.vorschau-kommentar-knoepfe { display: flex; justify-content: flex-end; gap: 8px; }
+.vorschau-kommentar-knoepfe { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+
+/* "Text direkt aendern" links im Kommentar, die Knoepfe rechts. */
+.vorschau-text-knopf { display: inline-flex; align-items: center; gap: 6px; }
+.vorschau-text-knopf[hidden], .vorschau-regler[hidden] { display: none; }
+
+/* Regler: CSS-Variablen der Seite live verstellen. */
+.vorschau-regler-box {
+  display: flex; flex-direction: column; gap: 10px; max-height: 46%; min-height: 0;
+  padding: 12px 14px; padding-bottom: max(12px, env(safe-area-inset-bottom));
+  border-top: 1px solid var(--surface0); background: var(--base);
+}
+.vorschau-regler-box[hidden] { display: none; }
+.vorschau-regler-kopf { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: 13px; }
+.vorschau-regler-kopf .leise { font-size: 12px; }
+.vorschau-regler-liste {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 4px 18px;
+  overflow-y: auto; min-height: 0; overscroll-behavior: contain;
+}
+.regler-zeile {
+  display: grid; grid-template-columns: minmax(64px, 8.5em) minmax(0, 1fr) minmax(48px, max-content);
+  align-items: center; gap: 10px; min-height: 34px;
+}
+.regler-name, .regler-wert { font: 11.5px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.regler-name { color: var(--subtext); }
+.regler-wert { color: var(--text); text-align: right; max-width: 10em; }
+.regler-schieber { width: 100%; margin: 0; accent-color: var(--akzent); }
+.regler-farbe {
+  width: 100%; height: 26px; padding: 2px; border-radius: 7px; cursor: pointer;
+  border: 1px solid var(--surface1); background: var(--mantle);
+}
+.regler-farbe::-webkit-color-swatch-wrapper { padding: 0; }
+.regler-farbe::-webkit-color-swatch { border: 0; border-radius: 5px; }
+.regler-farbe::-moz-color-swatch { border: 0; border-radius: 5px; }
+@media (max-width: 760px) { .vorschau-regler-box { max-height: 50%; } }
+@media (max-width: 480px) { .vorschau-text-knopf { flex-basis: 100%; } }
+@media (max-width: 430px) { .vorschau-kopf .vorschau-regler span { display: none; } }
 
 .werkzeug-mit-vorschau { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
 .werkzeug-mit-vorschau > :first-child { align-self: stretch; }
